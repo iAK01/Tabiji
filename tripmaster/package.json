@@ -9,6 +9,8 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@emotion/react": "^11.14.0",
+    "@emotion/styled": "^11.14.1",
     "@google-cloud/storage": "^7.19.0",
     "@mapbox/search-js-react": "^1.5.1",
     "@mui/icons-material": "^7.3.8",
