@@ -11,6 +11,7 @@
   "dependencies": {
     "@google-cloud/storage": "^7.19.0",
     "@mapbox/search-js-react": "^1.5.1",
+    "@mui/icons-material": "^7.3.8",
     "@mui/x-date-pickers": "^8.27.2",
     "dayjs": "^1.11.19",
     "mongoose": "^9.2.1",
