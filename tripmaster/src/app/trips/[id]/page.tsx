@@ -24,6 +24,7 @@ import ItineraryTab from '@/components/itinerary/ItineraryTab';
 import PackingTab from '@/components/packing/PackingTab';
 import IntelligenceTab from '@/components/intelligence/IntelligenceTab';
 import WeatherTab from '@/components/weather/WeatherTab';
+import TripOverview from '@/components/overview/TripOverview';
 
 interface Trip {
   _id: string;
@@ -243,77 +244,8 @@ export default function TripPage() {
       {/* ── Content ── */}
       <Container maxWidth="lg" sx={{ py: { xs: 3, sm: 4 }, px: { xs: 2, sm: 3 } }}>
 
-        {/* Overview */}
         {activeTab === 0 && (
-          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
-
-            <Paper sx={{ p: { xs: 2.5, sm: 3 }, backgroundColor: 'background.paper' }}>
-              <Typography variant="h6" fontWeight={700} sx={{ mb: 2.5, fontSize: { xs: '1.1rem', sm: '1.25rem' } }}>
-                Trip Details
-              </Typography>
-              <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: { xs: 3, sm: 3 } }}>
-                {[
-                  { label: 'From',     value: trip.origin?.city,      sub: trip.origin?.country },
-                  { label: 'To',       value: trip.destination?.city, sub: trip.destination?.country, accent: true },
-                  { label: 'Departs',  value: new Date(trip.startDate).toLocaleDateString('en-IE', { day: 'numeric', month: 'long' }), sub: String(new Date(trip.startDate).getFullYear()) },
-                  { label: 'Duration', value: `${trip.nights} nights`, sub: trip.tripType, capitalize: true },
-                ].map(({ label, value, sub, accent, capitalize }) => (
-                  <Box key={label}>
-                    <Typography sx={{ fontSize: '0.72rem', fontWeight: 700, letterSpacing: 0.8, color: 'text.secondary', textTransform: 'uppercase', mb: 0.4 }}>
-                      {label}
-                    </Typography>
-                    <Typography
-                      fontWeight={700}
-                      color={accent ? 'secondary.main' : 'text.primary'}
-                      sx={{ fontSize: { xs: '1.05rem', sm: '1.1rem' }, textTransform: capitalize ? 'capitalize' : 'none' }}
-                    >
-                      {value}
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary" sx={{ textTransform: capitalize ? 'capitalize' : 'none', fontSize: { xs: '0.9rem', sm: '0.875rem' } }}>
-                      {sub}
-                    </Typography>
-                  </Box>
-                ))}
-              </Box>
-              {trip.purpose && (
-                <Box sx={{ mt: 3, pt: 2.5, borderTop: '1px solid', borderColor: 'divider' }}>
-                  <Typography sx={{ fontSize: '0.72rem', fontWeight: 700, letterSpacing: 0.8, color: 'text.secondary', textTransform: 'uppercase', mb: 0.5 }}>
-                    Purpose
-                  </Typography>
-                  <Typography sx={{ fontSize: { xs: '1rem', sm: '1rem' } }}>{trip.purpose}</Typography>
-                </Box>
-              )}
-            </Paper>
-
-            <Paper sx={{ p: { xs: 2.5, sm: 3 }, backgroundColor: 'background.paper' }}>
-              <Typography variant="h6" fontWeight={700} sx={{ mb: 2, fontSize: { xs: '1.1rem', sm: '1.25rem' } }}>
-                Quick Actions
-              </Typography>
-              <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr 1fr', sm: '1fr 1fr 1fr' }, gap: 1.5 }}>
-                {QUICK_ACTIONS.map(({ label, tab, Icon }) => (
-                  <Button
-                    key={tab}
-                    variant="outlined"
-                    fullWidth
-                    onClick={() => setActiveTab(tab)}
-                    startIcon={<Icon />}
-                    sx={{
-                      justifyContent: 'flex-start',
-                      py: { xs: 1.5, sm: 1.25 },
-                      fontWeight: 600,
-                      fontSize: { xs: '0.875rem', sm: '0.875rem' },
-                      borderColor: 'divider',
-                      color: 'text.primary',
-                      '&:hover': { borderColor: 'primary.main', color: 'primary.main', backgroundColor: 'transparent' },
-                    }}
-                  >
-                    {label}
-                  </Button>
-                ))}
-              </Box>
-            </Paper>
-
-          </Box>
+          <TripOverview trip={trip} onNavigate={setActiveTab} />
         )}
 
         {activeTab === 1 && <LogisticsTab tripId={trip._id} />}
