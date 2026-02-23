@@ -6,7 +6,8 @@ import {
   Box, Container, Typography, AppBar, Toolbar, IconButton,
   Tabs, Tab, Chip, Button, Paper,
   Dialog, DialogTitle, DialogContent, DialogActions,
-  TextField, Select, MenuItem, FormControl, InputLabel, useMediaQuery, useTheme,
+  TextField, Select, MenuItem, FormControl, InputLabel,
+  useMediaQuery, useTheme,
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import FlightTakeoffIcon from '@mui/icons-material/FlightTakeoff';
@@ -45,14 +46,21 @@ const STATUS_COLOURS: Record<string, 'default' | 'primary' | 'secondary' | 'erro
   active: 'success', completed: 'default', cancelled: 'error',
 };
 
-// Tab config — icon used on mobile, label on desktop
 const TAB_CONFIG = [
-  { label: 'Overview',     icon: <GridViewIcon fontSize="small" /> },
-  { label: 'Logistics',    icon: <FlightIcon fontSize="small" /> },
-  { label: 'Itinerary',    icon: <MapIcon fontSize="small" /> },
-  { label: 'Packing',      icon: <BackpackIcon fontSize="small" /> },
-  { label: 'Intelligence', icon: <LightbulbIcon fontSize="small" /> },
-  { label: 'Weather',      icon: <WbSunnyIcon fontSize="small" /> },
+  { label: 'Overview',     Icon: GridViewIcon },
+  { label: 'Logistics',    Icon: FlightIcon },
+  { label: 'Itinerary',    Icon: MapIcon },
+  { label: 'Packing',      Icon: BackpackIcon },
+  { label: 'Intelligence', Icon: LightbulbIcon },
+  { label: 'Weather',      Icon: WbSunnyIcon },
+];
+
+const QUICK_ACTIONS = [
+  { label: 'Flights & Hotels', tab: 1, Icon: FlightIcon },
+  { label: 'Itinerary',        tab: 2, Icon: MapIcon },
+  { label: 'Packing List',     tab: 3, Icon: BackpackIcon },
+  { label: 'Intelligence',     tab: 4, Icon: LightbulbIcon },
+  { label: 'Weather',          tab: 5, Icon: WbSunnyIcon },
 ];
 
 export default function TripPage() {
@@ -121,21 +129,21 @@ export default function TripPage() {
     : null;
 
   return (
-    <Box sx={{ minHeight: '100vh', backgroundColor: 'background.default', pb: { xs: 4, sm: 0 } }}>
+    <Box sx={{ minHeight: '100vh', backgroundColor: 'background.default', pb: { xs: 6, sm: 0 } }}>
 
       {/* ── AppBar ── */}
       <AppBar position="static" sx={{ backgroundColor: 'text.primary' }} elevation={0}>
-        <Toolbar sx={{ minHeight: { xs: 56, sm: 64 } }}>
-          <IconButton color="inherit" onClick={() => router.push('/dashboard')} sx={{ mr: 0.5 }}>
+        <Toolbar sx={{ minHeight: { xs: 60, sm: 64 }, gap: 1 }}>
+          <IconButton color="inherit" onClick={() => router.push('/dashboard')}>
             <ArrowBackIcon />
           </IconButton>
-          <FlightTakeoffIcon sx={{ mr: 1, flexShrink: 0, fontSize: { xs: 18, sm: 24 } }} />
+          <FlightTakeoffIcon sx={{ flexShrink: 0 }} />
           <Typography
             variant="h6"
             fontWeight={700}
             sx={{
               flexGrow: 1,
-              fontSize: { xs: '0.95rem', sm: '1.15rem' },
+              fontSize: { xs: '1rem', sm: '1.2rem' },
               overflow: 'hidden',
               textOverflow: 'ellipsis',
               whiteSpace: 'nowrap',
@@ -147,44 +155,41 @@ export default function TripPage() {
             label={trip.status}
             color={STATUS_COLOURS[trip.status]}
             size="small"
-            sx={{ mr: 1, fontWeight: 700, fontSize: '0.7rem' }}
+            sx={{ fontWeight: 700, textTransform: 'capitalize' }}
           />
-          <IconButton color="inherit" onClick={openEdit} size="small">
-            <EditIcon fontSize="small" />
+          <IconButton color="inherit" onClick={openEdit}>
+            <EditIcon />
           </IconButton>
         </Toolbar>
       </AppBar>
 
-      {/* ── Tabs — scrollable on mobile, full on desktop ── */}
-      <Box sx={{ backgroundColor: 'text.primary' }}>
-        <Container maxWidth="lg" disableGutters={isMobile}>
+      {/* ── Tabs ── icon on top + label, full width, tall on mobile ── */}
+      <Box sx={{ backgroundColor: 'text.primary', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
+        <Container maxWidth="lg" disableGutters>
           <Tabs
             value={activeTab}
             onChange={(_, val) => setActiveTab(val)}
             textColor="inherit"
-            variant={isMobile ? 'scrollable' : 'fullWidth'}
-            scrollButtons={false}
+            variant="fullWidth"
             TabIndicatorProps={{ style: { backgroundColor: '#C9521B', height: 3 } }}
             sx={{
-              minHeight: { xs: 48, sm: 52 },
               '& .MuiTab-root': {
-                minHeight: { xs: 48, sm: 52 },
-                minWidth: { xs: 'auto', sm: 'auto' },
-                px: { xs: 1.5, sm: 2 },
-                fontSize: { xs: '0.7rem', sm: '0.8rem' },
-                color: 'rgba(255,255,255,0.6)',
+                minHeight: { xs: 68, sm: 56 },
+                flexDirection: 'column',
+                gap: 0.5,
+                px: 0.5,
+                fontSize: { xs: '0.68rem', sm: '0.75rem' },
+                fontWeight: 600,
+                letterSpacing: 0.2,
+                textTransform: 'uppercase',
+                color: 'rgba(255,255,255,0.5)',
                 '&.Mui-selected': { color: 'white' },
+                '& svg': { fontSize: { xs: '1.5rem', sm: '1.3rem' } },
               },
             }}
           >
-            {TAB_CONFIG.map(({ label, icon }) => (
-              <Tab
-                key={label}
-                label={isMobile ? undefined : label}
-                icon={isMobile ? icon : undefined}
-                iconPosition="start"
-                aria-label={label}
-              />
+            {TAB_CONFIG.map(({ label, Icon }) => (
+              <Tab key={label} label={label} icon={<Icon />} iconPosition="top" />
             ))}
           </Tabs>
         </Container>
@@ -193,7 +198,7 @@ export default function TripPage() {
       {/* ── Cover photo ── */}
       {trip.coverPhotoUrl && (
         <Box sx={{
-          height: { xs: 160, sm: 220 },
+          height: { xs: 190, sm: 240 },
           backgroundImage: `url(${trip.coverPhotoUrl})`,
           backgroundSize: 'cover',
           backgroundPosition: 'center',
@@ -201,116 +206,113 @@ export default function TripPage() {
         }}>
           <Box sx={{
             position: 'absolute', inset: 0,
-            background: 'linear-gradient(to bottom, rgba(0,0,0,0.05), rgba(0,0,0,0.55))',
+            background: 'linear-gradient(to bottom, rgba(0,0,0,0.05), rgba(0,0,0,0.62))',
           }} />
-          {/* Trip headline overlay — only on mobile to save space */}
-          {isMobile && (
-            <Box sx={{ position: 'absolute', bottom: 10, left: 14, right: 50 }}>
-              <Typography sx={{ color: 'white', fontWeight: 700, fontSize: '0.85rem', lineHeight: 1.2 }}>
-                {trip.destination?.city}, {trip.destination?.country}
-              </Typography>
-              {daysUntil !== null && daysUntil > 0 && (
-                <Typography sx={{ color: 'rgba(255,255,255,0.8)', fontSize: '0.75rem' }}>
-                  {daysUntil} days away · {trip.nights} nights
-                </Typography>
-              )}
-            </Box>
-          )}
-          <Box sx={{ position: 'absolute', bottom: 8, right: 12, display: 'flex', alignItems: 'center', gap: 1 }}>
-            <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.6)', display: { xs: 'none', sm: 'block' } }}>
-              📷 {trip.coverPhotoCredit}
+          <Box sx={{ position: 'absolute', bottom: 14, left: 16, right: 56 }}>
+            <Typography sx={{
+              color: 'white', fontWeight: 800, lineHeight: 1.2,
+              fontSize: { xs: '1.2rem', sm: '1.4rem' },
+            }}>
+              {trip.destination?.city}, {trip.destination?.country}
             </Typography>
-            <IconButton
-              onClick={refreshPhoto}
-              sx={{ color: 'white', backgroundColor: 'rgba(0,0,0,0.3)', '&:hover': { backgroundColor: 'rgba(0,0,0,0.5)' }, p: 0.75 }}
-              size="small"
-            >
-              <RefreshIcon sx={{ fontSize: 16 }} />
-            </IconButton>
+            {daysUntil !== null && daysUntil > 0 && (
+              <Typography sx={{ color: 'rgba(255,255,255,0.85)', fontSize: { xs: '0.9rem', sm: '0.95rem' }, mt: 0.3 }}>
+                {daysUntil} days away · {trip.nights} nights
+              </Typography>
+            )}
+            {daysUntil === 0 && (
+              <Typography sx={{ color: 'white', fontWeight: 700, fontSize: '0.9rem', mt: 0.3 }}>
+                Today
+              </Typography>
+            )}
           </Box>
+          <IconButton
+            onClick={refreshPhoto}
+            sx={{
+              position: 'absolute', bottom: 10, right: 12,
+              color: 'white', backgroundColor: 'rgba(0,0,0,0.35)',
+              '&:hover': { backgroundColor: 'rgba(0,0,0,0.55)' }, p: 1,
+            }}
+            size="small"
+          >
+            <RefreshIcon fontSize="small" />
+          </IconButton>
         </Box>
       )}
 
-      {/* ── Tab content ── */}
-      <Container maxWidth="lg" sx={{ py: { xs: 2.5, sm: 4 }, px: { xs: 2, sm: 3 } }}>
+      {/* ── Content ── */}
+      <Container maxWidth="lg" sx={{ py: { xs: 3, sm: 4 }, px: { xs: 2, sm: 3 } }}>
 
         {/* Overview */}
         {activeTab === 0 && (
-          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
 
-            {/* Trip summary card */}
-            <Paper sx={{ p: { xs: 2, sm: 3 }, backgroundColor: 'background.paper' }}>
-              <Typography variant="subtitle1" fontWeight={700} gutterBottom>Trip Details</Typography>
-              <Box sx={{
-                display: 'grid',
-                gridTemplateColumns: { xs: '1fr 1fr', sm: 'repeat(4, 1fr)' },
-                gap: { xs: 2, sm: 2 },
-              }}>
-                <Box>
-                  <Typography variant="caption" color="text.secondary" display="block" fontWeight={600}>FROM</Typography>
-                  <Typography variant="body2" fontWeight={600}>{trip.origin?.city}</Typography>
-                  <Typography variant="caption" color="text.secondary">{trip.origin?.country}</Typography>
-                </Box>
-                <Box>
-                  <Typography variant="caption" color="text.secondary" display="block" fontWeight={600}>TO</Typography>
-                  <Typography variant="body2" fontWeight={600} color="secondary.main">{trip.destination?.city}</Typography>
-                  <Typography variant="caption" color="text.secondary">{trip.destination?.country}</Typography>
-                </Box>
-                <Box>
-                  <Typography variant="caption" color="text.secondary" display="block" fontWeight={600}>DEPARTS</Typography>
-                  <Typography variant="body2" fontWeight={600}>
-                    {new Date(trip.startDate).toLocaleDateString('en-IE', { day: 'numeric', month: 'short' })}
-                  </Typography>
-                  <Typography variant="caption" color="text.secondary">
-                    {new Date(trip.startDate).toLocaleDateString('en-IE', { year: 'numeric' })}
-                  </Typography>
-                </Box>
-                <Box>
-                  <Typography variant="caption" color="text.secondary" display="block" fontWeight={600}>DURATION</Typography>
-                  <Typography variant="body2" fontWeight={600}>{trip.nights} nights</Typography>
-                  <Typography variant="caption" color="text.secondary" sx={{ textTransform: 'capitalize' }}>{trip.tripType}</Typography>
-                </Box>
+            <Paper sx={{ p: { xs: 2.5, sm: 3 }, backgroundColor: 'background.paper' }}>
+              <Typography variant="h6" fontWeight={700} sx={{ mb: 2.5, fontSize: { xs: '1.1rem', sm: '1.25rem' } }}>
+                Trip Details
+              </Typography>
+              <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: { xs: 3, sm: 3 } }}>
+                {[
+                  { label: 'From',     value: trip.origin?.city,      sub: trip.origin?.country },
+                  { label: 'To',       value: trip.destination?.city, sub: trip.destination?.country, accent: true },
+                  { label: 'Departs',  value: new Date(trip.startDate).toLocaleDateString('en-IE', { day: 'numeric', month: 'long' }), sub: String(new Date(trip.startDate).getFullYear()) },
+                  { label: 'Duration', value: `${trip.nights} nights`, sub: trip.tripType, capitalize: true },
+                ].map(({ label, value, sub, accent, capitalize }) => (
+                  <Box key={label}>
+                    <Typography sx={{ fontSize: '0.72rem', fontWeight: 700, letterSpacing: 0.8, color: 'text.secondary', textTransform: 'uppercase', mb: 0.4 }}>
+                      {label}
+                    </Typography>
+                    <Typography
+                      fontWeight={700}
+                      color={accent ? 'secondary.main' : 'text.primary'}
+                      sx={{ fontSize: { xs: '1.05rem', sm: '1.1rem' }, textTransform: capitalize ? 'capitalize' : 'none' }}
+                    >
+                      {value}
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary" sx={{ textTransform: capitalize ? 'capitalize' : 'none', fontSize: { xs: '0.9rem', sm: '0.875rem' } }}>
+                      {sub}
+                    </Typography>
+                  </Box>
+                ))}
               </Box>
               {trip.purpose && (
-                <Box sx={{ mt: 2, pt: 2, borderTop: '1px solid', borderColor: 'divider' }}>
-                  <Typography variant="caption" color="text.secondary" fontWeight={600}>PURPOSE</Typography>
-                  <Typography variant="body2" sx={{ mt: 0.25 }}>{trip.purpose}</Typography>
+                <Box sx={{ mt: 3, pt: 2.5, borderTop: '1px solid', borderColor: 'divider' }}>
+                  <Typography sx={{ fontSize: '0.72rem', fontWeight: 700, letterSpacing: 0.8, color: 'text.secondary', textTransform: 'uppercase', mb: 0.5 }}>
+                    Purpose
+                  </Typography>
+                  <Typography sx={{ fontSize: { xs: '1rem', sm: '1rem' } }}>{trip.purpose}</Typography>
                 </Box>
               )}
             </Paper>
 
-            {/* Quick actions — 2 column grid on mobile */}
-            <Paper sx={{ p: { xs: 2, sm: 3 }, backgroundColor: 'background.paper' }}>
-              <Typography variant="subtitle1" fontWeight={700} gutterBottom>Quick Actions</Typography>
-              <Box sx={{
-                display: 'grid',
-                gridTemplateColumns: { xs: '1fr 1fr', sm: '1fr' },
-                gap: 1.5,
-              }}>
-                {[
-                  { label: 'Flights & Hotels', tab: 1, icon: '✈️' },
-                  { label: 'Itinerary',         tab: 2, icon: '🗺️' },
-                  { label: 'Packing List',      tab: 3, icon: '🎒' },
-                  { label: 'Intelligence',      tab: 4, icon: '💡' },
-                  { label: 'Weather',           tab: 5, icon: '🌤️' },
-                ].map(({ label, tab, icon }) => (
+            <Paper sx={{ p: { xs: 2.5, sm: 3 }, backgroundColor: 'background.paper' }}>
+              <Typography variant="h6" fontWeight={700} sx={{ mb: 2, fontSize: { xs: '1.1rem', sm: '1.25rem' } }}>
+                Quick Actions
+              </Typography>
+              <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr 1fr', sm: '1fr 1fr 1fr' }, gap: 1.5 }}>
+                {QUICK_ACTIONS.map(({ label, tab, Icon }) => (
                   <Button
                     key={tab}
                     variant="outlined"
                     fullWidth
                     onClick={() => setActiveTab(tab)}
+                    startIcon={<Icon />}
                     sx={{
                       justifyContent: 'flex-start',
-                      py: { xs: 1.25, sm: 1 },
+                      py: { xs: 1.5, sm: 1.25 },
                       fontWeight: 600,
-                      fontSize: { xs: '0.8rem', sm: '0.875rem' },
+                      fontSize: { xs: '0.875rem', sm: '0.875rem' },
+                      borderColor: 'divider',
+                      color: 'text.primary',
+                      '&:hover': { borderColor: 'primary.main', color: 'primary.main', backgroundColor: 'transparent' },
                     }}
                   >
-                    {icon}&nbsp;&nbsp;{label}
+                    {label}
                   </Button>
                 ))}
               </Box>
             </Paper>
+
           </Box>
         )}
 
@@ -324,7 +326,9 @@ export default function TripPage() {
 
       {/* ── Edit dialog ── */}
       <Dialog open={editOpen} onClose={() => setEditOpen(false)} maxWidth="sm" fullWidth fullScreen={isMobile}>
-        <DialogTitle fontWeight={700}>Edit Trip</DialogTitle>
+        <DialogTitle fontWeight={700} sx={{ fontSize: { xs: '1.2rem', sm: '1.25rem' } }}>
+          Edit Trip
+        </DialogTitle>
         <DialogContent>
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, pt: 1 }}>
             <TextField label="Trip name" value={editForm.name} onChange={e => setEditForm(p => ({ ...p, name: e.target.value }))} fullWidth />
@@ -332,16 +336,16 @@ export default function TripPage() {
               <InputLabel>Status</InputLabel>
               <Select value={editForm.status} label="Status" onChange={e => setEditForm(p => ({ ...p, status: e.target.value }))}>
                 {['idea', 'planning', 'confirmed', 'active', 'completed', 'cancelled'].map(s => (
-                  <MenuItem key={s} value={s}>{s}</MenuItem>
+                  <MenuItem key={s} value={s} sx={{ textTransform: 'capitalize' }}>{s}</MenuItem>
                 ))}
               </Select>
             </FormControl>
             <FormControl fullWidth>
               <InputLabel>Trip type</InputLabel>
               <Select value={editForm.tripType} label="Trip type" onChange={e => setEditForm(p => ({ ...p, tripType: e.target.value }))}>
-                <MenuItem value="leisure">🏖️ Leisure</MenuItem>
-                <MenuItem value="work">💼 Work</MenuItem>
-                <MenuItem value="mixed">✈️ Mixed</MenuItem>
+                <MenuItem value="leisure">Leisure</MenuItem>
+                <MenuItem value="work">Work</MenuItem>
+                <MenuItem value="mixed">Mixed</MenuItem>
               </Select>
             </FormControl>
             <Box sx={{ display: 'flex', gap: 2, flexDirection: { xs: 'column', sm: 'row' } }}>
@@ -351,9 +355,9 @@ export default function TripPage() {
             <TextField label="Purpose / notes" value={editForm.purpose} onChange={e => setEditForm(p => ({ ...p, purpose: e.target.value }))} fullWidth multiline rows={2} />
           </Box>
         </DialogContent>
-        <DialogActions sx={{ px: 3, pb: 3, gap: 1 }}>
-          <Button onClick={() => setEditOpen(false)} fullWidth={isMobile}>Cancel</Button>
-          <Button variant="contained" onClick={saveEdit} disabled={!editForm.name} fullWidth={isMobile}>Save Changes</Button>
+        <DialogActions sx={{ px: 3, pb: 3, gap: 1, flexDirection: { xs: 'column-reverse', sm: 'row' } }}>
+          <Button onClick={() => setEditOpen(false)} fullWidth={isMobile} size="large">Cancel</Button>
+          <Button variant="contained" onClick={saveEdit} disabled={!editForm.name} fullWidth={isMobile} size="large">Save Changes</Button>
         </DialogActions>
       </Dialog>
 
