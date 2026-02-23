@@ -37,6 +37,9 @@ interface PackingItem {
   source: 'auto' | 'manual';
 }
 
+// Internal type with original index attached
+type IndexedItem = PackingItem & { _idx: number };
+
 interface PackingList {
   _id: string;
   tripId: string;
@@ -66,6 +69,7 @@ export default function PackingTab({ tripId, tripType, nights }: PackingTabProps
   const [packing,    setPacking]    = useState<PackingList | null>(null);
   const [loading,    setLoading]    = useState(true);
   const [generating, setGenerating] = useState(false);
+  const [toggling,   setToggling]   = useState<number | null>(null);
   const [addOpen,    setAddOpen]    = useState(false);
   const [preTravel,  setPreTravel]  = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
@@ -87,15 +91,38 @@ export default function PackingTab({ tripId, tripType, nights }: PackingTabProps
     setGenerating(false);
   };
 
-  const toggleItem = async (index: number) => {
-    if (!packing) return;
-    const res  = await fetch(`/api/trips/${tripId}/packing`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ itemIndex: index, packed: !packing.items[index].packed }),
-    });
-    const data = await res.json();
-    setPacking(data.packing);
+  // Uses the original array index — always correct regardless of sort order
+const toggleItem = async (originalIndex: number) => {
+  console.log('toggleItem called', originalIndex, 'toggling:', toggling, 'packing:', !!packing);
+  if (!packing || toggling !== null) return;
+  setToggling(originalIndex);
+
+  const updated = packing.items.map((item, i) =>
+    i === originalIndex ? { ...item, packed: !item.packed } : item
+  );
+  const packedCount = updated.filter(i => i.packed).length;
+  setPacking(p => p ? {
+    ...p,
+    items: updated,
+    packedItems: packedCount,
+    packingProgress: Math.round((packedCount / updated.length) * 100),
+  } : p);
+
+  console.log('about to fetch PATCH', `/api/trips/${tripId}/packing`);
+  try {
+    const res = await fetch(`/api/trips/${tripId}/packing`, { 
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ itemIndex: originalIndex, packed: !packing.items[originalIndex].packed }),
+      });
+      const data = await res.json();
+      if (data.packing) setPacking(data.packing);
+    } catch {
+      // Revert on failure
+      setPacking(p => p ? { ...p, items: packing.items } : p);
+    } finally {
+      setToggling(null);
+    }
   };
 
   const addItem = async () => {
@@ -145,28 +172,30 @@ export default function PackingTab({ tripId, tripType, nights }: PackingTabProps
     </Paper>
   );
 
-  // ── Derived ───────────────────────────────────────────────────────────────
-  const items          = packing.items;
-  const preTravelItems = items.filter(i => i.preTravelAction && !i.packed);
-  const allDone        = packing.packingProgress === 100;
+  // ── Tag every item with its original index BEFORE any filtering or sorting ─
+  const indexedItems: IndexedItem[] = packing.items.map((item, i) => ({ ...item, _idx: i }));
+  const preTravelItems = indexedItems.filter(i => i.preTravelAction && !i.packed);
+  const allDone = packing.packingProgress === 100;
 
-  const filtered = items.filter(i => {
+  // Filter
+  const filtered = indexedItems.filter(i => {
     if (filter === 'unpacked') return !i.packed;
     if (filter === 'packed')   return  i.packed;
     return true;
   });
 
-  const sortItems = (arr: PackingItem[]) =>
+  // Group then sort each category — packed items sink to bottom
+  const sortGroup = (arr: IndexedItem[]) =>
     [...arr].sort((a, b) => Number(a.packed) - Number(b.packed));
 
   const grouped = CATEGORIES.reduce((acc, cat) => {
     const catItems = filtered.filter(i => i.category === cat);
-    if (catItems.length) acc[cat] = sortItems(catItems);
+    if (catItems.length) acc[cat] = sortGroup(catItems);
     return acc;
-  }, {} as Record<string, PackingItem[]>);
+  }, {} as Record<string, IndexedItem[]>);
 
   const extra = filtered.filter(i => !CATEGORIES.includes(i.category));
-  if (extra.length) grouped['Other'] = sortItems([...(grouped['Other'] ?? []), ...extra]);
+  if (extra.length) grouped['Other'] = sortGroup([...(grouped['Other'] ?? []), ...extra]);
 
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
@@ -195,7 +224,7 @@ export default function PackingTab({ tripId, tripType, nights }: PackingTabProps
           </Box>
         </Box>
 
-        {/* Filter chips — collapsible */}
+        {/* Filter chips */}
         <Collapse in={filterOpen}>
           <Box sx={{ display: 'flex', gap: 1, mb: 2, flexWrap: 'wrap' }}>
             {(['all', 'unpacked', 'packed'] as const).map(f => (
@@ -228,22 +257,20 @@ export default function PackingTab({ tripId, tripType, nights }: PackingTabProps
           </Typography>
         </Box>
 
-        {/* All packed */}
         {allDone && (
           <Box sx={{
             display: 'flex', alignItems: 'center', gap: 1.5, mt: 2,
             backgroundColor: 'success.light', borderRadius: 2, px: 2, py: 1.5,
           }}>
             <CheckCircleIcon color="success" />
-            <Typography fontWeight={700} color="success.dark" sx={{ fontSize: { xs: '1rem', sm: '1rem' } }}>
+            <Typography fontWeight={700} color="success.dark">
               All packed — you're ready to go!
             </Typography>
           </Box>
         )}
 
-        {/* Stats */}
         <Box sx={{ display: 'flex', gap: 1, mt: 2, flexWrap: 'wrap' }}>
-          <Chip label={`${items.filter(i => i.essential).length} essentials`} size="small" color="primary" />
+          <Chip label={`${indexedItems.filter(i => i.essential).length} essentials`} size="small" color="primary" />
           {preTravelItems.length > 0 && (
             <Chip
               icon={<WarningAmberIcon />}
@@ -253,9 +280,9 @@ export default function PackingTab({ tripId, tripType, nights }: PackingTabProps
               sx={{ cursor: 'pointer', fontWeight: 700 }}
             />
           )}
-          {items.filter(i => i.source === 'manual').length > 0 && (
+          {indexedItems.filter(i => i.source === 'manual').length > 0 && (
             <Chip
-              label={`${items.filter(i => i.source === 'manual').length} manual`}
+              label={`${indexedItems.filter(i => i.source === 'manual').length} manual`}
               size="small" variant="outlined"
             />
           )}
@@ -278,14 +305,11 @@ export default function PackingTab({ tripId, tripType, nights }: PackingTabProps
       {Object.entries(grouped).map(([category, catItems]) => {
         const packedCount  = catItems.filter(i => i.packed).length;
         const allCatPacked = packedCount === catItems.length;
-        const isOpen = expanded[category] !== undefined
-          ? expanded[category]
-          : !allCatPacked;
+        const isOpen = expanded[category] !== undefined ? expanded[category] : !allCatPacked;
 
         return (
           <Paper key={category} sx={{ mb: 1.5, backgroundColor: 'background.paper', overflow: 'hidden' }}>
 
-            {/* Category header — full row tappable */}
             <Box
               onClick={() => toggleCategory(category)}
               sx={{
@@ -310,81 +334,75 @@ export default function PackingTab({ tripId, tripType, nights }: PackingTabProps
 
             <Collapse in={isOpen}>
               <Divider />
-              {catItems.map((item, catIdx) => {
-                const globalIndex = items.findIndex(
-                  i => i.name === item.name && i.category === item.category
-                );
-                return (
-                  <Box key={`${item.name}-${catIdx}`}>
+              {catItems.map(item => (
+                <Box key={item._idx}>
                     <Box
-                      onClick={() => toggleItem(globalIndex)}
-                      sx={{
-                        display: 'flex', alignItems: 'center',
-                        px: { xs: 2, sm: 2.5 }, py: { xs: 1.5, sm: 1.25 },
-                        gap: 1.5, cursor: 'pointer',
-                        opacity: item.packed ? 0.45 : 1,
-                        transition: 'opacity 0.2s',
-                        '&:hover': { backgroundColor: 'action.hover' },
-                      }}
-                    >
-                      <Checkbox
-                        checked={item.packed}
-                        onChange={() => {}}
-                        onClick={e => e.stopPropagation()}
-                        sx={{ p: 0, flexShrink: 0 }}
-                      />
-                      <Box sx={{ flexGrow: 1, minWidth: 0 }}>
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-                          <Typography
-                            variant="body1"
-                            fontWeight={item.essential ? 700 : 400}
-                            sx={{
-                              textDecoration: item.packed ? 'line-through' : 'none',
-                              fontSize: { xs: '0.95rem', sm: '0.9rem' },
-                            }}
-                          >
-                            {item.name}
-                          </Typography>
-                          {item.quantity > 1 && (
-                            <Typography variant="caption" color="text.secondary">×{item.quantity}</Typography>
-                          )}
-                          {item.essential && (
-                            <Chip label="Essential" size="small" color="primary" sx={{ height: 18, fontSize: '0.65rem' }} />
-                          )}
-                          {item.preTravelAction && (
-                            <WarningAmberIcon color="warning" sx={{ fontSize: 16 }} />
-                          )}
-                        </Box>
-                        {item.advisoryNote && !item.packed && (
-                          <Typography variant="caption" color="text.secondary" sx={{ fontStyle: 'italic', display: 'block', mt: 0.25 }}>
-                            {item.advisoryNote}
-                          </Typography>
+                    sx={{
+                      display: 'flex', alignItems: 'center',
+                      px: { xs: 2, sm: 2.5 }, py: { xs: 1.5, sm: 1.25 },
+                      gap: 1.5,
+                      opacity: item.packed ? 0.45 : 1,
+                      transition: 'opacity 0.2s',
+                      '&:hover': { backgroundColor: 'action.hover' },
+                      pointerEvents: toggling === item._idx ? 'none' : 'auto',
+                    }}
+                  >
+                    <Checkbox
+                      checked={item.packed}
+                      onChange={() => toggleItem(item._idx)}
+                      sx={{ p: 0, flexShrink: 0 }}
+                    />
+                    <Box sx={{ flexGrow: 1, minWidth: 0 }}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+                        <Typography
+                          variant="body1"
+                          fontWeight={item.essential ? 700 : 400}
+                          sx={{
+                            textDecoration: item.packed ? 'line-through' : 'none',
+                            fontSize: { xs: '0.95rem', sm: '0.9rem' },
+                          }}
+                        >
+                          {item.name}
+                        </Typography>
+                        {item.quantity > 1 && (
+                          <Typography variant="caption" color="text.secondary">×{item.quantity}</Typography>
                         )}
-                        {item.preTravelAction && item.preTravelNote && !item.packed && (
-                          <Typography variant="caption" color="warning.dark" sx={{ display: 'block', mt: 0.25 }}>
-                            {item.preTravelNote}
-                          </Typography>
+                        {item.essential && (
+                          <Chip label="Essential" size="small" color="primary" sx={{ height: 18, fontSize: '0.65rem' }} />
+                        )}
+                        {item.preTravelAction && (
+                          <WarningAmberIcon color="warning" sx={{ fontSize: 16 }} />
                         )}
                       </Box>
+                      {item.advisoryNote && !item.packed && (
+                        <Typography variant="caption" color="text.secondary" sx={{ fontStyle: 'italic', display: 'block', mt: 0.25 }}>
+                          {item.advisoryNote}
+                        </Typography>
+                      )}
+                      {item.preTravelAction && item.preTravelNote && !item.packed && (
+                        <Typography variant="caption" color="warning.dark" sx={{ display: 'block', mt: 0.25 }}>
+                          {item.preTravelNote}
+                        </Typography>
+                      )}
                     </Box>
-                    <Divider />
                   </Box>
-                );
-              })}
+                  <Divider />
+                </Box>
+              ))}
             </Collapse>
           </Paper>
         );
       })}
 
-      {/* ── Pre-travel actions dialog ── */}
+      {/* ── Pre-travel dialog ── */}
       <Dialog open={preTravel} onClose={() => setPreTravel(false)} maxWidth="sm" fullWidth fullScreen={mobile}>
         <DialogTitle fontWeight={700}>Pre-travel actions</DialogTitle>
         <DialogContent>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
             These items need attention before you can pack them:
           </Typography>
-          {preTravelItems.map((item, i) => (
-            <Paper key={i} sx={{ p: 2, mb: 1.5, border: '1px solid', borderColor: 'warning.main' }}>
+          {preTravelItems.map(item => (
+            <Paper key={item._idx} sx={{ p: 2, mb: 1.5, border: '1px solid', borderColor: 'warning.main' }}>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
                 <WarningAmberIcon color="warning" fontSize="small" />
                 <Typography variant="body2" fontWeight={700}>{item.name}</Typography>

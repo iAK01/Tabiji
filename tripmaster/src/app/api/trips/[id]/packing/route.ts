@@ -37,7 +37,8 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   const packedCount = packing.items.filter((i: { packed: boolean }) => i.packed).length;
   packing.packedItems = packedCount;
   packing.packingProgress = Math.round((packedCount / packing.items.length) * 100);
-
+  
+  packing.markModified('items');  // ← add this line
   await packing.save();
   return NextResponse.json({ packing });
 }

@@ -151,6 +151,9 @@ async function syncLogisticsToItinerary(tripId: string, logistics: any, trip: an
     day.stops.sort((a: any, b: any) => (a.sortOrder ?? 9999) - (b.sortOrder ?? 9999));
   });
 
-  itinerary.markModified('days');
-  await itinerary.save();
+ await itinerary.constructor.findOneAndUpdate(
+  { _id: itinerary._id },
+  { $set: { days: itinerary.days } },
+  { returnDocument: 'after' }
+);
 }
