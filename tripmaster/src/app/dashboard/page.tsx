@@ -107,7 +107,7 @@ useEffect(() => {
         <Toolbar sx={{ minHeight: { xs: 56, sm: 64 } }}>
     <Box
       component="img"
-      src="/logo.jpeg"
+      src="/Logo.jpeg"
       alt="Logo"
       sx={{
         mr: 1,

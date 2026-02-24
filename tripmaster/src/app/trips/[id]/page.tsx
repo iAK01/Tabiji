@@ -193,7 +193,7 @@ const saveEdit = async () => {
 
     <Box
       component="img"
-      src="/logo.jpeg"
+      src="/Logo.jpeg"
       alt="Logo"
       sx={{
         flexShrink: 0,

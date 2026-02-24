@@ -45,32 +45,39 @@ self.addEventListener('sync', (event) => {
 });
 
 async function processQueue() {
-  const db = await self.indexedDB.open('tabiji-offline');
-  return new Promise((resolve) => {
-    db.onsuccess = async () => {
-      const database = db.result;
-      const tx = database.transaction('queue', 'readwrite');
-      const store = tx.objectStore('queue');
-      const getAll = store.getAll();
+  const db = await new Promise((resolve, reject) => {
+    const request = indexedDB.open('tabiji-offline', 1);
 
-      getAll.onsuccess = async () => {
-        const actions = getAll.result;
-
-        for (const action of actions) {
-          try {
-            await fetch(`/api/${action.type}`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(action.payload),
-            });
-          } catch {
-            return;
-          }
-        }
-
-        store.clear();
-        resolve();
-      };
+    request.onupgradeneeded = (event) => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains('queue')) {
+        db.createObjectStore('queue', { autoIncrement: true });
+      }
     };
+
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
   });
+
+  const tx = db.transaction('queue', 'readwrite');
+  const store = tx.objectStore('queue');
+  const getAllReq = store.getAll();
+
+  const actions = await new Promise((resolve) => {
+    getAllReq.onsuccess = () => resolve(getAllReq.result);
+  });
+
+  for (const action of actions) {
+    try {
+      await fetch(`/api/trips/${action.tripId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(action.payload),
+      });
+    } catch {
+      return;
+    }
+  }
+
+  store.clear();
 }
