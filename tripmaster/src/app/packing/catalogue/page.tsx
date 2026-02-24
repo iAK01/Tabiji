@@ -20,8 +20,9 @@ import GridViewIcon from '@mui/icons-material/GridView';
 import ListIcon from '@mui/icons-material/List';
 
 const CATEGORIES = [
-  'Documents', 'Electronics', 'Clothes', 'Toiletries',
-  'Medicines', 'Work Gear', 'Luggage', 'Accessories', 'Other'
+  'Documents', 'Electronics', 'Tech Accessories', 'Clothes', 'Sport / Outdoor', 'Footwear', 'Baby / Kids', 'Entertainment',
+  'Hobby / Creative', 'Health & Recovery', 'Food / Supplements', 'Toiletries',
+  'Medicines', 'Work Gear', 'Luggage', 'Accessories', 'Coffee', 'Other' 
 ];
 
 const TRIP_TYPES = ['always', 'work', 'leisure', 'mixed'];

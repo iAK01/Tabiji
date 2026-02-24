@@ -173,28 +173,30 @@ export default function TripPage() {
       {/* ── Tabs ── icon on top + label, full width, tall on mobile ── */}
       <Box sx={{ backgroundColor: 'text.primary', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
         <Container maxWidth="lg" disableGutters>
-          <Tabs
-            value={activeTab}
-            onChange={(_, val) => setActiveTab(val)}
-            textColor="inherit"
-            variant="fullWidth"
-            TabIndicatorProps={{ style: { backgroundColor: '#C9521B', height: 3 } }}
-            sx={{
-              '& .MuiTab-root': {
-                minHeight: { xs: 68, sm: 56 },
-                flexDirection: 'column',
-                gap: 0.5,
-                px: 0.5,
-                fontSize: { xs: '0.68rem', sm: '0.75rem' },
-                fontWeight: 600,
-                letterSpacing: 0.2,
-                textTransform: 'uppercase',
-                color: 'rgba(255,255,255,0.5)',
-                '&.Mui-selected': { color: 'white' },
-                '& svg': { fontSize: { xs: '1.5rem', sm: '1.3rem' } },
-              },
-            }}
-          >
+<Tabs
+  value={activeTab}
+  onChange={(_, val) => setActiveTab(val)}
+  textColor="inherit"
+  variant={isMobile ? "scrollable" : "fullWidth"}
+  scrollButtons={false}
+  TabIndicatorProps={{ style: { backgroundColor: '#C9521B', height: 3 } }}
+  sx={{
+    '& .MuiTab-root': {
+      minHeight: 64,                  // keeps touch target safe
+      minWidth: { xs: 80, sm: 120 },  // prevents crushing
+      flexDirection: 'column',
+      gap: 0.5,
+      fontSize: { xs: '0.7rem', sm: '0.75rem' },
+      fontWeight: 600,
+      textTransform: 'uppercase',
+      color: 'rgba(255,255,255,0.6)',
+      '&.Mui-selected': { color: 'white' },
+      '& svg': {
+        fontSize: { xs: '1.1rem', sm: '1.2rem' },
+      },
+    },
+  }}
+>
             {TAB_CONFIG.map(({ label, Icon }) => (
               <Tab key={label} label={label} icon={<Icon />} iconPosition="top" />
             ))}
