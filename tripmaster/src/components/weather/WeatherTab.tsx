@@ -378,7 +378,19 @@ export default function WeatherTab({ tripId, destinationCity }: Props) {
     }
   };
 
-  useEffect(() => { loadWeather(); }, [tripId]);
+ useEffect(() => {
+  let active = true;
+
+  const run = async () => {
+    await loadWeather();
+  };
+
+  run();
+
+  return () => {
+    active = false;
+  };
+}, [tripId]);
 
   if (loading) return (
     <Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}>

@@ -1,35 +1,50 @@
 import { openDB } from 'idb';
 
 const DB_NAME = 'tabiji-offline';
-const DB_VERSION = 1;
+const DB_VERSION = 3;
 
 export async function getDB() {
   return openDB(DB_NAME, DB_VERSION, {
-    upgrade(db) {
-      if (!db.objectStoreNames.contains('trips')) {
-        db.createObjectStore('trips', { keyPath: '_id' });
+    upgrade(db, oldVersion) {
+
+      if (oldVersion < 1) {
+        db.createObjectStore('tripList');
+        db.createObjectStore('queue', { autoIncrement: true });
       }
 
-      if (!db.objectStoreNames.contains('queue')) {
-        db.createObjectStore('queue', { autoIncrement: true });
+      if (oldVersion < 3) {
+        db.createObjectStore('tripCache', { keyPath: 'tripId' });
       }
     },
   });
 }
 
-export async function saveTrips(trips: any[]) {
+/* -------- Trip List -------- */
+
+export async function saveTripList(trips: any[]) {
   const db = await getDB();
-  const tx = db.transaction('trips', 'readwrite');
-  for (const trip of trips) {
-    await tx.store.put(trip);
-  }
-  await tx.done;
+  await db.put('tripList', trips, 'all');
 }
 
-export async function getTrips() {
+export async function getTripList() {
   const db = await getDB();
-  return db.getAll('trips');
+  return db.get('tripList', 'all');
 }
+
+/* -------- Trip Detail Cache -------- */
+
+export async function saveTripCache(tripId: string, data: any) {
+  const db = await getDB();
+  await db.put('tripCache', { tripId, data });
+}
+
+export async function getTripCache(tripId: string) {
+  const db = await getDB();
+  const entry = await db.get('tripCache', tripId);
+  return entry?.data;
+}
+
+/* -------- Queue -------- */
 
 export async function queueAction(action: any) {
   const db = await getDB();

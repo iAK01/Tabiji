@@ -93,14 +93,20 @@ export default function PackingTab({ tripId, tripType, nights }: PackingTabProps
 
   // Uses the original array index — always correct regardless of sort order
 const toggleItem = async (originalIndex: number) => {
-  console.log('toggleItem called', originalIndex, 'toggling:', toggling, 'packing:', !!packing);
   if (!packing || toggling !== null) return;
+
+  const currentItem = packing.items[originalIndex];
+  const newPackedValue = !currentItem.packed;
+
   setToggling(originalIndex);
 
+  // Optimistic update
   const updated = packing.items.map((item, i) =>
-    i === originalIndex ? { ...item, packed: !item.packed } : item
+    i === originalIndex ? { ...item, packed: newPackedValue } : item
   );
+
   const packedCount = updated.filter(i => i.packed).length;
+
   setPacking(p => p ? {
     ...p,
     items: updated,
@@ -108,22 +114,25 @@ const toggleItem = async (originalIndex: number) => {
     packingProgress: Math.round((packedCount / updated.length) * 100),
   } : p);
 
-  console.log('about to fetch PATCH', `/api/trips/${tripId}/packing`);
   try {
-    const res = await fetch(`/api/trips/${tripId}/packing`, { 
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ itemIndex: originalIndex, packed: !packing.items[originalIndex].packed }),
-      });
-      const data = await res.json();
-      if (data.packing) setPacking(data.packing);
-    } catch {
-      // Revert on failure
-      setPacking(p => p ? { ...p, items: packing.items } : p);
-    } finally {
-      setToggling(null);
-    }
-  };
+    const res = await fetch(`/api/trips/${tripId}/packing`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        itemIndex: originalIndex,
+        packed: newPackedValue,
+      }),
+    });
+
+    const data = await res.json();
+    if (data.packing) setPacking(data.packing);
+  } catch {
+    // Revert on failure
+    setPacking(p => p ? { ...p, items: packing.items } : p);
+  } finally {
+    setToggling(null);
+  }
+};
 
   const addItem = async () => {
     const res  = await fetch(`/api/trips/${tripId}/packing`, {

@@ -26,6 +26,7 @@ import IntelligenceTab from '@/components/intelligence/IntelligenceTab';
 import WeatherTab from '@/components/weather/WeatherTab';
 import TripOverview from '@/components/overview/TripOverview';
 import dynamic from 'next/dynamic';
+import { saveTripCache, getTripCache, queueAction } from '@/lib/offline/db';
 
 const MapTab = dynamic(() => import('@/components/map/MapTab'), { ssr: false });
 
@@ -83,18 +84,33 @@ export default function TripPage() {
     name: '', tripType: '', purpose: '', startDate: '', endDate: '', status: '',
   });
 
-  useEffect(() => {
-    fetch(`/api/trips/${id}`)
-      .then(r => r.json())
-      .then(data => {
-        setTrip(data.trip);
-        if (!data.trip?.coverPhotoUrl && data.trip?.destination?.city) {
-          fetch(`/api/trips/${data.trip._id}/cover-photo`, { method: 'POST' })
-            .then(r => r.json())
-            .then(d => { if (d.trip) setTrip(d.trip); });
+useEffect(() => {
+  async function loadTrip() {
+    try {
+      const res = await fetch(`/api/trips/${id}`);
+      const data = await res.json();
+
+      setTrip(data.trip);
+
+      await saveTripCache(String(id), data.trip);
+
+      if (!data.trip?.coverPhotoUrl && data.trip?.destination?.city) {
+        const photoRes = await fetch(`/api/trips/${data.trip._id}/cover-photo`, { method: 'POST' });
+        const photoData = await photoRes.json();
+        if (photoData.trip) {
+          setTrip(photoData.trip);
+          await saveTripCache(String(id), photoData.trip);
         }
-      });
-  }, [id]);
+      }
+
+    } catch {
+      const cached = await getTripCache(String(id));
+      if (cached) setTrip(cached);
+    }
+  }
+
+  loadTrip();
+}, [id]);
 
   const openEdit = () => {
     if (!trip) return;
@@ -107,20 +123,49 @@ export default function TripPage() {
     setEditOpen(true);
   };
 
-  const saveEdit = async () => {
-    if (!trip) return;
-    const nights = editForm.startDate && editForm.endDate
-      ? Math.round((new Date(editForm.endDate).getTime() - new Date(editForm.startDate).getTime()) / 86400000)
+const saveEdit = async () => {
+  if (!trip) return;
+
+  const nights =
+    editForm.startDate && editForm.endDate
+      ? Math.round(
+          (new Date(editForm.endDate).getTime() -
+            new Date(editForm.startDate).getTime()) /
+            86400000
+        )
       : trip.nights;
-    const res = await fetch(`/api/trips/${trip._id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...editForm, nights }),
+
+  const payload = { ...editForm, nights };
+
+  // ── OFFLINE ─────────────────────────────────────
+  if (!navigator.onLine) {
+    await queueAction({
+      type: 'UPDATE_TRIP',
+      tripId: trip._id,
+      payload,
     });
-    const data = await res.json();
-    setTrip(data.trip);
+
+    if ('serviceWorker' in navigator && 'SyncManager' in window) {
+      const reg = await navigator.serviceWorker.ready;
+      await (reg as any).sync.register('tabiji-sync');
+    }
+
+    setTrip({ ...trip, ...payload });
     setEditOpen(false);
-  };
+    return;
+  }
+
+  // ── ONLINE ──────────────────────────────────────
+  const res = await fetch(`/api/trips/${trip._id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+
+  const data = await res.json();
+  setTrip(data.trip);
+  setEditOpen(false);
+};
 
   const refreshPhoto = async () => {
     if (!trip) return;

@@ -22,6 +22,7 @@ import PedalBikeIcon    from '@mui/icons-material/PedalBike';
 import AirportShuttleIcon from '@mui/icons-material/AirportShuttle';
 import AirportSearch    from '@/components/ui/AirportSearch';
 import AirlineSearch    from '@/components/ui/AirlineSearch';
+import { saveTripCache, getTripCache, queueAction } from '@/lib/offline/db';
 
 interface LogisticsTabProps { tripId: string; }
 
@@ -161,51 +162,162 @@ export default function LogisticsTab({ tripId }: LogisticsTabProps) {
   const [menuAnchor,    setMenuAnchor]    = useState<null | HTMLElement>(null);
   const [menuTarget,    setMenuTarget]    = useState<{ kind: 'transport' | 'accom'; index: number } | null>(null);
 
-  useEffect(() => {
-    fetch(`/api/trips/${tripId}/logistics`)
-      .then(r => r.json())
-      .then(d => setLogistics(d.logistics));
-  }, [tripId]);
+useEffect(() => {
+  async function loadLogistics() {
+    try {
+      const res = await fetch(`/api/trips/${tripId}/logistics`);
+      const data = await res.json();
+
+      setLogistics(data.logistics);
+
+      const cached = await getTripCache(tripId);
+      await saveTripCache(tripId, {
+        ...(cached ?? {}),
+        logistics: data.logistics,
+      });
+
+    } catch {
+      const cached = await getTripCache(tripId);
+      if (cached?.logistics) {
+        setLogistics(cached.logistics);
+      }
+    }
+  }
+
+  loadLogistics();
+}, [tripId]);
 
   // ── Saves ──────────────────────────────────────────────────────────────────
-  const saveTransport = async () => {
-    setSaving(true);
-    const res  = await fetch(`/api/trips/${tripId}/logistics/transport`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(transport),
+const saveTransport = async () => {
+  setSaving(true);
+
+  const updated = {
+    ...(logistics ?? {}),
+    transportation: [
+      ...(logistics?.transportation ?? []),
+      transport,
+    ],
+  };
+
+  setLogistics(updated);
+
+  await saveTripCache(tripId, {
+    ...(await getTripCache(tripId)),
+    logistics: updated,
+  });
+
+  if (!navigator.onLine) {
+    await queueAction({
+      type: 'ADD_TRANSPORT',
+      tripId,
+      payload: transport,
     });
-    const data = await res.json();
-    setLogistics(data.logistics);
     setTransportOpen(false);
     setTransport({ ...BLANK_TRANSPORT, details: { ...BLANK_TRANSPORT.details } });
     setSaving(false);
+    return;
+  }
+
+  const res = await fetch(`/api/trips/${tripId}/logistics/transport`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(transport),
+  });
+
+  const data = await res.json();
+  setLogistics(data.logistics);
+
+  setTransportOpen(false);
+  setTransport({ ...BLANK_TRANSPORT, details: { ...BLANK_TRANSPORT.details } });
+  setSaving(false);
+};
+
+const saveAccom = async () => {
+  setSaving(true);
+
+  const updated = {
+    ...(logistics ?? {}),
+    accommodation: [
+      ...(logistics?.accommodation ?? []),
+      accom,
+    ],
   };
 
-  const saveAccom = async () => {
-    setSaving(true);
-    const res  = await fetch(`/api/trips/${tripId}/logistics/accommodation`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(accom),
+  setLogistics(updated);
+
+  await saveTripCache(tripId, {
+    ...(await getTripCache(tripId)),
+    logistics: updated,
+  });
+
+  if (!navigator.onLine) {
+    await queueAction({
+      type: 'ADD_ACCOM',
+      tripId,
+      payload: accom,
     });
-    const data = await res.json();
-    setLogistics(data.logistics);
     setAccomOpen(false);
     setAccom({ ...BLANK_ACCOM });
     setSaving(false);
-  };
+    return;
+  }
+
+  const res = await fetch(`/api/trips/${tripId}/logistics/accommodation`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(accom),
+  });
+
+  const data = await res.json();
+  setLogistics(data.logistics);
+
+  setAccomOpen(false);
+  setAccom({ ...BLANK_ACCOM });
+  setSaving(false);
+};
 
   // ── Deletes ────────────────────────────────────────────────────────────────
-  const confirmDelete = async () => {
-    if (!deleteTarget) return;
-    const { kind, index } = deleteTarget;
-    const url = kind === 'transport'
-      ? `/api/trips/${tripId}/logistics/transport/${index}`
-      : `/api/trips/${tripId}/logistics/accommodation/${index}`;
-    const res  = await fetch(url, { method: 'DELETE' });
-    const data = await res.json();
-    setLogistics(data.logistics);
-    setDeleteTarget(null);
+const confirmDelete = async () => {
+  if (!deleteTarget) return;
+
+  const { kind, index } = deleteTarget;
+
+  const updated = {
+    ...(logistics ?? {}),
+    transportation: kind === 'transport'
+      ? logistics.transportation.filter((_: any, i: number) => i !== index)
+      : logistics.transportation,
+    accommodation: kind === 'accom'
+      ? logistics.accommodation.filter((_: any, i: number) => i !== index)
+      : logistics.accommodation,
   };
+
+  setLogistics(updated);
+
+  await saveTripCache(tripId, {
+    ...(await getTripCache(tripId)),
+    logistics: updated,
+  });
+
+  if (!navigator.onLine) {
+    await queueAction({
+      type: 'DELETE_LOGISTICS_ITEM',
+      tripId,
+      payload: { kind, index },
+    });
+    setDeleteTarget(null);
+    return;
+  }
+
+  const url = kind === 'transport'
+    ? `/api/trips/${tripId}/logistics/transport/${index}`
+    : `/api/trips/${tripId}/logistics/accommodation/${index}`;
+
+  const res = await fetch(url, { method: 'DELETE' });
+  const data = await res.json();
+  setLogistics(data.logistics);
+  setDeleteTarget(null);
+};
 
   const openMenu = (e: React.MouseEvent<HTMLElement>, kind: 'transport' | 'accom', index: number) => {
     e.stopPropagation();

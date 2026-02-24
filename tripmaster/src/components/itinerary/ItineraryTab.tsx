@@ -21,6 +21,7 @@ import HotelIcon from '@mui/icons-material/Hotel';
 import DirectionsBusIcon from '@mui/icons-material/DirectionsBus';
 import EventIcon from '@mui/icons-material/Event';
 import FreeBreakfastIcon from '@mui/icons-material/FreeBreakfast';
+import { saveTripCache, getTripCache, queueAction } from '@/lib/offline/db';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const DAY_START_HOUR = 7;     // 7am
@@ -482,46 +483,139 @@ export default function ItineraryTab({ tripId, startDate, endDate }: Props) {
     open: false, time: '09:00', type: 'activity',
   });
 
-  useEffect(() => {
-    fetch(`/api/trips/${tripId}/itinerary`)
-      .then(r => r.json())
-      .then(d => { setDays(d.days ?? []); setLoading(false); });
-  }, [tripId]);
+useEffect(() => {
+  async function loadItinerary() {
+    try {
+      const res = await fetch(`/api/trips/${tripId}/itinerary`);
+      const data = await res.json();
+
+      setDays(data.days ?? []);
+
+      const cached = await getTripCache(tripId);
+      await saveTripCache(tripId, {
+        ...(cached ?? {}),
+        itinerary: data.days ?? [],
+      });
+
+    } catch {
+      const cached = await getTripCache(tripId);
+      if (cached?.itinerary) {
+        setDays(cached.itinerary);
+      }
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  loadItinerary();
+}, [tripId]);
 
   const activeDay = days[activeDayIdx];
 
   const openDrawer = (time: string, type = 'activity') => setDrawer({ open: true, time, type });
 
-  const addStop = async (stop: Partial<Stop>) => {
-    const day = days[activeDayIdx];
-    const res = await fetch(`/api/trips/${tripId}/itinerary/stops`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
+const addStop = async (stop: Partial<Stop>) => {
+  const day = days[activeDayIdx];
+
+  const updatedDays = [...days];
+  updatedDays[activeDayIdx] = {
+    ...day,
+    stops: [
+      ...day.stops,
+      {
+        ...stop,
+        scheduledStart: `${day.date.split('T')[0]}T${stop.scheduledStart}:00`,
+        duration: stop.duration ?? 60,
+      } as Stop,
+    ],
+  };
+
+  setDays(updatedDays);
+
+  await saveTripCache(tripId, {
+    ...(await getTripCache(tripId)),
+    itinerary: updatedDays,
+  });
+
+  if (!navigator.onLine) {
+    await queueAction({
+      type: 'ADD_STOP',
+      tripId,
+      payload: {
         dayDate: day.date,
-        stop: {
-          ...stop,
-          scheduledStart: `${day.date.split('T')[0]}T${stop.scheduledStart}:00`,
-        },
-      }),
+        stop,
+      },
     });
-    const data = await res.json();
-    setDays(data.days);
-  };
+    return;
+  }
 
-  const deleteStop = async (stopId: string) => {
-    const res = await fetch(`/api/trips/${tripId}/itinerary/stops/${stopId}`, { method: 'DELETE' });
-    const data = await res.json();
-    setDays(data.days);
-  };
+  const res = await fetch(`/api/trips/${tripId}/itinerary/stops`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      dayDate: day.date,
+      stop: {
+        ...stop,
+        scheduledStart: `${day.date.split('T')[0]}T${stop.scheduledStart}:00`,
+      },
+    }),
+  });
 
-  const calculateTravel = async () => {
-    setCalculating(true);
-    const res = await fetch(`/api/trips/${tripId}/itinerary/calculate-travel`, { method: 'POST' });
-    const data = await res.json();
-    setDays(data.days);
+  const data = await res.json();
+  setDays(data.days);
+};
+
+const deleteStop = async (stopId: string) => {
+  const updatedDays = days.map(day => ({
+    ...day,
+    stops: day.stops.filter(s => s._id !== stopId),
+  }));
+
+  setDays(updatedDays);
+
+  await saveTripCache(tripId, {
+    ...(await getTripCache(tripId)),
+    itinerary: updatedDays,
+  });
+
+  if (!navigator.onLine) {
+    await queueAction({
+      type: 'DELETE_STOP',
+      tripId,
+      stopId,
+    });
+    return;
+  }
+
+  const res = await fetch(`/api/trips/${tripId}/itinerary/stops/${stopId}`, { method: 'DELETE' });
+  const data = await res.json();
+  setDays(data.days);
+};
+
+const calculateTravel = async () => {
+  setCalculating(true);
+
+  if (!navigator.onLine) {
+    await queueAction({
+      type: 'CALCULATE_TRAVEL',
+      tripId,
+    });
     setCalculating(false);
-  };
+    return;
+  }
+
+  const res = await fetch(`/api/trips/${tripId}/itinerary/calculate-travel`, { method: 'POST' });
+  const data = await res.json();
+
+  setDays(data.days);
+
+  await saveTripCache(tripId, {
+    ...(await getTripCache(tripId)),
+    itinerary: data.days,
+  });
+
+  setCalculating(false);
+};
 
   if (loading) return <Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}><CircularProgress /></Box>;
   if (!days.length) return <Typography color="text.secondary" sx={{ py: 4, textAlign: 'center' }}>No itinerary days found.</Typography>;

@@ -16,7 +16,7 @@ import CalendarMonthIcon  from '@mui/icons-material/CalendarMonth';
 import { useRouter }      from 'next/navigation';
 import { useEffect, useState } from 'react';
 import TripCalendar from '@/components/calendar/TripCalendar';
-import { saveTrips, getTrips } from '@/lib/offline/db';
+import { saveTripList, getTripList } from '@/lib/offline/db';
 import { getQueue, clearQueue } from '@/lib/offline/db';
 
 
@@ -53,10 +53,10 @@ useEffect(() => {
     try {
       const res = await fetch('/api/trips');
       const data = await res.json();
-      await saveTrips(data.trips ?? []);
+      await saveTripList(data.trips ?? []);
       setTrips(data.trips ?? []);
     } catch {
-      const offlineTrips = await getTrips();
+      const offlineTrips = await getTripList();
       setTrips(offlineTrips ?? []);
     } finally {
       setLoading(false);
