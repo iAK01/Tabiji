@@ -1,0 +1,27 @@
+/*
+ * mapbox-popup-overrides.css
+ * Import this in your global CSS or layout.tsx so MapTab popups
+ * inherit the app's look and feel.
+ *
+ * Usage:  import '@/styles/mapbox-popup-overrides.css'
+ */
+
+/* Remove default tip/arrow */
+.tabiji-popup .mapboxgl-popup-tip {
+  display: none;
+}
+
+/* Popup wrapper */
+.tabiji-popup .mapboxgl-popup-content {
+  padding: 10px 14px;
+  border-radius: 10px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.18);
+  font-family: system-ui, -apple-system, sans-serif;
+  min-width: 140px;
+  border: 1px solid rgba(29, 38, 66, 0.08);
+}
+
+/* Hide default close button — we use closeButton: false in code */
+.tabiji-popup .mapboxgl-popup-close-button {
+  display: none;
+}

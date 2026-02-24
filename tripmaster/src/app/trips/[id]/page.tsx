@@ -25,6 +25,10 @@ import PackingTab from '@/components/packing/PackingTab';
 import IntelligenceTab from '@/components/intelligence/IntelligenceTab';
 import WeatherTab from '@/components/weather/WeatherTab';
 import TripOverview from '@/components/overview/TripOverview';
+import dynamic from 'next/dynamic';
+
+const MapTab = dynamic(() => import('@/components/map/MapTab'), { ssr: false });
+
 
 interface Trip {
   _id: string;
@@ -52,16 +56,18 @@ const TAB_CONFIG = [
   { label: 'Logistics',    Icon: FlightIcon },
   { label: 'Itinerary',    Icon: MapIcon },
   { label: 'Packing',      Icon: BackpackIcon },
-  { label: 'Intelligence', Icon: LightbulbIcon },
+  { label: 'Context', Icon: LightbulbIcon },
   { label: 'Weather',      Icon: WbSunnyIcon },
+  { label: 'Map',          Icon: MapIcon },
 ];
 
 const QUICK_ACTIONS = [
   { label: 'Flights & Hotels', tab: 1, Icon: FlightIcon },
   { label: 'Itinerary',        tab: 2, Icon: MapIcon },
   { label: 'Packing List',     tab: 3, Icon: BackpackIcon },
-  { label: 'Intelligence',     tab: 4, Icon: LightbulbIcon },
+  { label: 'Context',     tab: 4, Icon: LightbulbIcon },
   { label: 'Weather',          tab: 5, Icon: WbSunnyIcon },
+  { label: 'Map',              tab: 6, Icon: MapIcon },
 ];
 
 export default function TripPage() {
@@ -140,7 +146,7 @@ export default function TripPage() {
           </IconButton>
           <FlightTakeoffIcon sx={{ flexShrink: 0 }} />
           <Typography
-            variant="h6"
+            variant="h4"
             fontWeight={700}
             sx={{
               flexGrow: 1,
@@ -211,7 +217,7 @@ export default function TripPage() {
           }} />
           <Box sx={{ position: 'absolute', bottom: 14, left: 16, right: 56 }}>
             <Typography sx={{
-              color: 'white', fontWeight: 800, lineHeight: 1.2,
+              color: 'white', fontWeight: 900, lineHeight: 1.2,
               fontSize: { xs: '1.2rem', sm: '1.4rem' },
             }}>
               {trip.destination?.city}, {trip.destination?.country}
@@ -253,6 +259,7 @@ export default function TripPage() {
         {activeTab === 3 && <PackingTab tripId={trip._id} tripType={trip.tripType} nights={trip.nights} />}
         {activeTab === 4 && <IntelligenceTab tripId={trip._id} />}
         {activeTab === 5 && <WeatherTab tripId={trip._id} destinationCity={trip.destination?.city} />}
+        {activeTab === 6 && <MapTab tripId={trip._id} trip={trip} />}
 
       </Container>
 

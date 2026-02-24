@@ -144,7 +144,7 @@ export default function IntelligenceTab({ tripId }: Props) {
         else setIntel(data.intelligence);
         setLoading(false);
       })
-      .catch(() => { setError('Failed to load intelligence'); setLoading(false); });
+      .catch(() => { setError('Failed to load travel context'); setLoading(false); });
   }, [tripId]);
 
   if (loading) return <Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}><CircularProgress /></Box>;
@@ -152,7 +152,7 @@ export default function IntelligenceTab({ tripId }: Props) {
   if (error) return (
     <Alert severity="warning" sx={{ mt: 2 }}>
       {error === 'No destination country on trip'
-        ? 'Add a destination country to your trip to see travel intelligence.'
+        ? 'Add a destination country to your trip to see travel context.'
         : error.includes('homeLocation') || !intel
         ? 'Set your home country in your profile to see personalised comparisons.'
         : error}
@@ -187,7 +187,7 @@ export default function IntelligenceTab({ tripId }: Props) {
       {/* Header */}
       <Box sx={{ mb: 1 }}>
         <Typography variant="h6" fontWeight={700}>
-          Travel Intelligence
+          Travel Context
         </Typography>
         <Typography variant="body2" color="text.secondary">
           {intel.destination.city ? `${intel.destination.city}, ` : ''}{intel.destination.country}

@@ -5,21 +5,112 @@ import {
   Box, Typography, Button, Paper, Tabs, Tab, TextField,
   Select, MenuItem, FormControl, InputLabel, Chip, IconButton,
   Dialog, DialogTitle, DialogContent, DialogActions,
-  Menu, useMediaQuery, useTheme, Divider, Alert,
+  Menu, useMediaQuery, useTheme, Alert, ToggleButton, ToggleButtonGroup,
 } from '@mui/material';
-import AddIcon from '@mui/icons-material/Add';
-import FlightIcon from '@mui/icons-material/Flight';
-import HotelIcon from '@mui/icons-material/Hotel';
-import DescriptionIcon from '@mui/icons-material/Description';
-import MoreVertIcon from '@mui/icons-material/MoreVert';
-import DeleteIcon from '@mui/icons-material/Delete';
-import AirportSearch from '@/components/ui/AirportSearch';
-import AirlineSearch from '@/components/ui/AirlineSearch';
+import AddIcon          from '@mui/icons-material/Add';
+import FlightIcon       from '@mui/icons-material/Flight';
+import HotelIcon        from '@mui/icons-material/Hotel';
+import DescriptionIcon  from '@mui/icons-material/Description';
+import MoreVertIcon     from '@mui/icons-material/MoreVert';
+import DeleteIcon       from '@mui/icons-material/Delete';
+import TrainIcon        from '@mui/icons-material/Train';
+import DirectionsBusIcon from '@mui/icons-material/DirectionsBus';
+import DirectionsCarIcon from '@mui/icons-material/DirectionsCar';
+import DirectionsBoatIcon from '@mui/icons-material/DirectionsBoat';
+import LocalTaxiIcon    from '@mui/icons-material/LocalTaxi';
+import PedalBikeIcon    from '@mui/icons-material/PedalBike';
+import AirportShuttleIcon from '@mui/icons-material/AirportShuttle';
+import AirportSearch    from '@/components/ui/AirportSearch';
+import AirlineSearch    from '@/components/ui/AirlineSearch';
 
 interface LogisticsTabProps { tripId: string; }
 
+// ─── Transport types ──────────────────────────────────────────────────────────
+const TRANSPORT_TYPES = [
+  { value: 'flight',           label: 'Flight',           Icon: FlightIcon },
+  { value: 'train',            label: 'Train',            Icon: TrainIcon },
+  { value: 'bus',              label: 'Bus',              Icon: DirectionsBusIcon },
+  { value: 'ferry',            label: 'Ferry',            Icon: DirectionsBoatIcon },
+  { value: 'car',              label: 'Car',              Icon: DirectionsCarIcon },
+  { value: 'car_hire',         label: 'Car hire',         Icon: DirectionsCarIcon },
+  { value: 'taxi',             label: 'Taxi',             Icon: LocalTaxiIcon },
+  { value: 'private_transfer', label: 'Transfer',         Icon: AirportShuttleIcon },
+  { value: 'bicycle',          label: 'Bicycle',          Icon: PedalBikeIcon },
+] as const;
+
+type TransportType = typeof TRANSPORT_TYPES[number]['value'];
+
+function transportIcon(type: string, props?: object) {
+  const match = TRANSPORT_TYPES.find(t => t.value === type);
+  if (!match) return <FlightIcon {...props} />;
+  const { Icon } = match;
+  return <Icon {...props} />;
+}
+
+// Generate the card headline based on mode and record fields
+function getTransportLabel(t: any): string {
+  switch (t.type) {
+    case 'flight': {
+      const flight = t.details?.flightNumber ?? t.flightNumber ?? '';
+      const from   = t.departureLocation ?? t.departureAirport ?? '';
+      const to     = t.arrivalLocation   ?? t.arrivalAirport   ?? '';
+      return [flight, from && to ? `${from} → ${to}` : (from || to)].filter(Boolean).join(' · ');
+    }
+    case 'train':
+    case 'bus':
+    case 'ferry': {
+      const op   = t.details?.operator ?? '';
+      const from = t.departureLocation ?? '';
+      const to   = t.arrivalLocation   ?? '';
+      const route = from && to ? `${from} → ${to}` : (from || to);
+      return [route, op].filter(Boolean).join(' · ');
+    }
+    case 'car_hire': {
+      const co = t.details?.rentalCompany ?? '';
+      const pu = t.details?.pickupLocation ?? t.departureLocation ?? '';
+      return [co, pu ? `Pickup: ${pu}` : ''].filter(Boolean).join(' · ');
+    }
+    case 'car':
+    case 'bicycle': {
+      const from = t.departureLocation ?? '';
+      const to   = t.arrivalLocation   ?? '';
+      return from && to ? `${from} → ${to}` : (from || to || t.type);
+    }
+    case 'taxi':
+    case 'private_transfer': {
+      const from = t.departureLocation ?? '';
+      const to   = t.arrivalLocation   ?? '';
+      const label = TRANSPORT_TYPES.find(x => x.value === t.type)?.label ?? 'Transfer';
+      const route = from && to ? `${from} → ${to}` : (from || to);
+      return [label, route].filter(Boolean).join(': ');
+    }
+    default:
+      return t.departureLocation ?? t.type ?? 'Transport';
+  }
+}
+
+function getTransportSubtitle(t: any): string {
+  switch (t.type) {
+    case 'flight':
+      return t.details?.airline ?? t.airline ?? '';
+    case 'train':
+    case 'bus':
+    case 'ferry':
+      return t.details?.operator ?? '';
+    case 'car_hire':
+      return t.details?.vehicle ?? '';
+    case 'taxi':
+    case 'private_transfer':
+      return t.details?.operator ?? '';
+    default:
+      return '';
+  }
+}
+
+// ─── Constants ────────────────────────────────────────────────────────────────
 const TRANSPORT_STATUSES = ['not_booked', 'pending', 'booked', 'confirmed', 'cancelled'];
 const ACCOM_TYPES        = ['hotel', 'airbnb', 'hostel', 'friends_family', 'camping', 'other'];
+const RAIL_SUBTYPES      = ['intercity', 'commuter', 'metro', 'tram'];
 
 const STATUS_COLOUR: Record<string, 'default' | 'warning' | 'success' | 'error' | 'primary'> = {
   not_booked: 'default', pending: 'warning', booked: 'primary',
@@ -27,9 +118,23 @@ const STATUS_COLOUR: Record<string, 'default' | 'warning' | 'success' | 'error' 
 };
 
 const BLANK_TRANSPORT = {
-  type: 'flight', status: 'not_booked', airline: '', airlineIata: '', flightNumber: '',
-  departureAirport: '', departureAirportDisplay: '', arrivalAirport: '', arrivalAirportDisplay: '',
-  departureTime: '', arrivalTime: '', seat: '', confirmationNumber: '', cost: '', notes: '',
+  type:               'flight' as TransportType,
+  status:             'not_booked',
+  departureLocation:  '',
+  arrivalLocation:    '',
+  departureTime:      '',
+  arrivalTime:        '',
+  confirmationNumber: '',
+  cost:               '',
+  notes:              '',
+  details: {
+    // flight
+    airline: '', airlineIata: '', flightNumber: '', seat: '', cabin: '',
+    // train / bus / ferry
+    operator: '', railSubtype: '',
+    // car hire
+    rentalCompany: '', pickupLocation: '', dropoffLocation: '', vehicle: '',
+  },
 };
 
 const BLANK_ACCOM = {
@@ -37,28 +142,24 @@ const BLANK_ACCOM = {
   checkIn: '', checkOut: '', confirmationNumber: '', cost: '', notes: '',
 };
 
+// ─── Main component ───────────────────────────────────────────────────────────
 export default function LogisticsTab({ tripId }: LogisticsTabProps) {
-  const theme   = useTheme();
-  const mobile  = useMediaQuery(theme.breakpoints.down('sm'));
+  const theme  = useTheme();
+  const mobile = useMediaQuery(theme.breakpoints.down('sm'));
 
-  const [section,        setSection]        = useState(0);
-  const [logistics,      setLogistics]      = useState<any>(null);
-  const [saving,         setSaving]         = useState(false);
+  const [section,       setSection]       = useState(0);
+  const [logistics,     setLogistics]     = useState<any>(null);
+  const [saving,        setSaving]        = useState(false);
 
-  // Transport dialog
-  const [transportOpen,  setTransportOpen]  = useState(false);
-  const [transport,      setTransport]      = useState({ ...BLANK_TRANSPORT });
+  const [transportOpen, setTransportOpen] = useState(false);
+  const [transport,     setTransport]     = useState({ ...BLANK_TRANSPORT, details: { ...BLANK_TRANSPORT.details } });
 
-  // Accom dialog
-  const [accomOpen,      setAccomOpen]      = useState(false);
-  const [accom,          setAccom]          = useState({ ...BLANK_ACCOM });
+  const [accomOpen,     setAccomOpen]     = useState(false);
+  const [accom,         setAccom]         = useState({ ...BLANK_ACCOM });
 
-  // Delete confirm
-  const [deleteTarget,   setDeleteTarget]   = useState<{ kind: 'transport' | 'accom'; index: number } | null>(null);
-
-  // Card context menus
-  const [menuAnchor,     setMenuAnchor]     = useState<null | HTMLElement>(null);
-  const [menuTarget,     setMenuTarget]     = useState<{ kind: 'transport' | 'accom'; index: number } | null>(null);
+  const [deleteTarget,  setDeleteTarget]  = useState<{ kind: 'transport' | 'accom'; index: number } | null>(null);
+  const [menuAnchor,    setMenuAnchor]    = useState<null | HTMLElement>(null);
+  const [menuTarget,    setMenuTarget]    = useState<{ kind: 'transport' | 'accom'; index: number } | null>(null);
 
   useEffect(() => {
     fetch(`/api/trips/${tripId}/logistics`)
@@ -76,7 +177,7 @@ export default function LogisticsTab({ tripId }: LogisticsTabProps) {
     const data = await res.json();
     setLogistics(data.logistics);
     setTransportOpen(false);
-    setTransport({ ...BLANK_TRANSPORT });
+    setTransport({ ...BLANK_TRANSPORT, details: { ...BLANK_TRANSPORT.details } });
     setSaving(false);
   };
 
@@ -111,7 +212,6 @@ export default function LogisticsTab({ tripId }: LogisticsTabProps) {
     setMenuAnchor(e.currentTarget);
     setMenuTarget({ kind, index });
   };
-
   const closeMenu = () => { setMenuAnchor(null); setMenuTarget(null); };
 
   // ── Helpers ────────────────────────────────────────────────────────────────
@@ -120,53 +220,360 @@ export default function LogisticsTab({ tripId }: LogisticsTabProps) {
   const fmtDate = (d: string) =>
     d ? new Date(d).toLocaleDateString('en-IE', { dateStyle: 'medium' }) : '';
 
+  const setDetail = (key: string, val: string) =>
+    setTransport(p => ({ ...p, details: { ...p.details, [key]: val } }));
+
+  const changeType = (newType: TransportType) =>
+    setTransport(p => ({ ...BLANK_TRANSPORT, details: { ...BLANK_TRANSPORT.details }, type: newType, status: p.status }));
+
+  // ── Dynamic form fields per transport type ─────────────────────────────────
+  const TransportFields = () => {
+    const type = transport.type;
+
+    return (
+      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
+
+        {/* ── FLIGHT ── */}
+        {type === 'flight' && (<>
+          <AirlineSearch
+            label="Airline"
+            value={transport.details.airline}
+            onChange={a => {
+              setDetail('airline', a.name);
+              setDetail('airlineIata', a.iata);
+            }}
+          />
+          <TextField
+            label="Flight number" fullWidth placeholder="FR 328"
+            value={transport.details.flightNumber}
+            onChange={e => setDetail('flightNumber', e.target.value)}
+          />
+          <AirportSearch
+            label="From (airport)"
+            value={transport.departureLocation}
+            onChange={a => setTransport(p => ({
+              ...p,
+              departureLocation: `${a.iata} — ${a.city}`,
+            }))}
+          />
+          <AirportSearch
+            label="To (airport)"
+            value={transport.arrivalLocation}
+            onChange={a => setTransport(p => ({
+              ...p,
+              arrivalLocation: `${a.iata} — ${a.city}`,
+            }))}
+          />
+          <TextField
+            label="Seat" fullWidth placeholder="14A"
+            value={transport.details.seat}
+            onChange={e => setDetail('seat', e.target.value)}
+          />
+          <FormControl fullWidth>
+            <InputLabel>Cabin class</InputLabel>
+            <Select value={transport.details.cabin} label="Cabin class"
+              onChange={e => setDetail('cabin', e.target.value)}>
+              {['Economy', 'Premium economy', 'Business', 'First'].map(c => (
+                <MenuItem key={c} value={c}>{c}</MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+        </>)}
+
+        {/* ── TRAIN ── */}
+        {type === 'train' && (<>
+          <TextField
+            label="Operator" fullWidth placeholder="Irish Rail, Eurostar, DB…"
+            value={transport.details.operator}
+            onChange={e => setDetail('operator', e.target.value)}
+          />
+          <FormControl fullWidth>
+            <InputLabel>Rail type</InputLabel>
+            <Select value={transport.details.railSubtype} label="Rail type"
+              onChange={e => setDetail('railSubtype', e.target.value)}>
+              {RAIL_SUBTYPES.map(r => (
+                <MenuItem key={r} value={r} sx={{ textTransform: 'capitalize' }}>{r}</MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+          <TextField
+            label="From (station)" fullWidth placeholder="Dublin Heuston"
+            value={transport.departureLocation}
+            onChange={e => setTransport(p => ({ ...p, departureLocation: e.target.value }))}
+          />
+          <TextField
+            label="To (station)" fullWidth placeholder="Belfast Great Victoria St"
+            value={transport.arrivalLocation}
+            onChange={e => setTransport(p => ({ ...p, arrivalLocation: e.target.value }))}
+          />
+          <TextField
+            label="Seat / coach" fullWidth placeholder="Coach B, Seat 42"
+            value={transport.details.seat}
+            onChange={e => setDetail('seat', e.target.value)}
+          />
+        </>)}
+
+        {/* ── BUS ── */}
+        {type === 'bus' && (<>
+          <TextField
+            label="Operator" fullWidth placeholder="Bus Éireann, Aircoach…"
+            value={transport.details.operator}
+            onChange={e => setDetail('operator', e.target.value)}
+          />
+          <TextField
+            label="From (stop / station)" fullWidth
+            value={transport.departureLocation}
+            onChange={e => setTransport(p => ({ ...p, departureLocation: e.target.value }))}
+          />
+          <TextField
+            label="To (stop / station)" fullWidth
+            value={transport.arrivalLocation}
+            onChange={e => setTransport(p => ({ ...p, arrivalLocation: e.target.value }))}
+          />
+          <TextField
+            label="Seat" fullWidth
+            value={transport.details.seat}
+            onChange={e => setDetail('seat', e.target.value)}
+          />
+        </>)}
+
+        {/* ── FERRY ── */}
+        {type === 'ferry' && (<>
+          <TextField
+            label="Operator" fullWidth placeholder="Stena Line, Irish Ferries…"
+            value={transport.details.operator}
+            onChange={e => setDetail('operator', e.target.value)}
+          />
+          <TextField
+            label="From (port)" fullWidth placeholder="Dublin Port"
+            value={transport.departureLocation}
+            onChange={e => setTransport(p => ({ ...p, departureLocation: e.target.value }))}
+          />
+          <TextField
+            label="To (port)" fullWidth placeholder="Holyhead"
+            value={transport.arrivalLocation}
+            onChange={e => setTransport(p => ({ ...p, arrivalLocation: e.target.value }))}
+          />
+          <FormControl fullWidth>
+            <InputLabel>Cabin</InputLabel>
+            <Select value={transport.details.cabin} label="Cabin"
+              onChange={e => setDetail('cabin', e.target.value)}>
+              {['No cabin (seat only)', 'Inside cabin', 'Outside cabin', 'Premium cabin'].map(c => (
+                <MenuItem key={c} value={c}>{c}</MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+        </>)}
+
+        {/* ── CAR (own) ── */}
+        {type === 'car' && (<>
+          <TextField
+            label="From" fullWidth placeholder="Home / Dublin"
+            value={transport.departureLocation}
+            onChange={e => setTransport(p => ({ ...p, departureLocation: e.target.value }))}
+          />
+          <TextField
+            label="To" fullWidth placeholder="Dublin Airport"
+            value={transport.arrivalLocation}
+            onChange={e => setTransport(p => ({ ...p, arrivalLocation: e.target.value }))}
+          />
+          <TextField
+            label="Vehicle (optional)" fullWidth placeholder="Tesla Model 3"
+            value={transport.details.vehicle}
+            onChange={e => setDetail('vehicle', e.target.value)}
+          />
+        </>)}
+
+        {/* ── CAR HIRE ── */}
+        {type === 'car_hire' && (<>
+          <TextField
+            label="Rental company" fullWidth placeholder="Hertz, Avis, Enterprise…"
+            value={transport.details.rentalCompany}
+            onChange={e => setDetail('rentalCompany', e.target.value)}
+          />
+          <TextField
+            label="Pickup location" fullWidth placeholder="OTP Airport Terminal 1"
+            value={transport.details.pickupLocation}
+            onChange={e => {
+              setDetail('pickupLocation', e.target.value);
+              setTransport(p => ({ ...p, departureLocation: e.target.value }));
+            }}
+          />
+          <TextField
+            label="Drop-off location" fullWidth placeholder="Same / City centre"
+            value={transport.details.dropoffLocation}
+            onChange={e => {
+              setDetail('dropoffLocation', e.target.value);
+              setTransport(p => ({ ...p, arrivalLocation: e.target.value }));
+            }}
+          />
+          <TextField
+            label="Vehicle class (optional)" fullWidth placeholder="Economy, SUV…"
+            value={transport.details.vehicle}
+            onChange={e => setDetail('vehicle', e.target.value)}
+          />
+        </>)}
+
+        {/* ── TAXI ── */}
+        {type === 'taxi' && (<>
+          <TextField
+            label="From" fullWidth placeholder="OTP Airport"
+            value={transport.departureLocation}
+            onChange={e => setTransport(p => ({ ...p, departureLocation: e.target.value }))}
+          />
+          <TextField
+            label="To" fullWidth placeholder="Hotel / City centre"
+            value={transport.arrivalLocation}
+            onChange={e => setTransport(p => ({ ...p, arrivalLocation: e.target.value }))}
+          />
+          <TextField
+            label="Operator (optional)" fullWidth placeholder="Bolt, Free Now…"
+            value={transport.details.operator}
+            onChange={e => setDetail('operator', e.target.value)}
+          />
+        </>)}
+
+        {/* ── PRIVATE TRANSFER ── */}
+        {type === 'private_transfer' && (<>
+          <TextField
+            label="From" fullWidth placeholder="OTP Airport"
+            value={transport.departureLocation}
+            onChange={e => setTransport(p => ({ ...p, departureLocation: e.target.value }))}
+          />
+          <TextField
+            label="To" fullWidth placeholder="Hotel"
+            value={transport.arrivalLocation}
+            onChange={e => setTransport(p => ({ ...p, arrivalLocation: e.target.value }))}
+          />
+          <TextField
+            label="Operator / provider" fullWidth placeholder="Company or driver name"
+            value={transport.details.operator}
+            onChange={e => setDetail('operator', e.target.value)}
+          />
+          <TextField
+            label="Vehicle (optional)" fullWidth placeholder="Mercedes E-Class"
+            value={transport.details.vehicle}
+            onChange={e => setDetail('vehicle', e.target.value)}
+          />
+        </>)}
+
+        {/* ── BICYCLE ── */}
+        {type === 'bicycle' && (<>
+          <TextField
+            label="From" fullWidth
+            value={transport.departureLocation}
+            onChange={e => setTransport(p => ({ ...p, departureLocation: e.target.value }))}
+          />
+          <TextField
+            label="To" fullWidth
+            value={transport.arrivalLocation}
+            onChange={e => setTransport(p => ({ ...p, arrivalLocation: e.target.value }))}
+          />
+        </>)}
+
+        {/* ── COMMON FIELDS (all modes) ── */}
+        <TextField
+          label="Departure date & time" type="datetime-local"
+          value={transport.departureTime}
+          onChange={e => setTransport(p => ({ ...p, departureTime: e.target.value }))}
+          fullWidth InputLabelProps={{ shrink: true }}
+        />
+        <TextField
+          label="Arrival date & time" type="datetime-local"
+          value={transport.arrivalTime}
+          onChange={e => setTransport(p => ({ ...p, arrivalTime: e.target.value }))}
+          fullWidth InputLabelProps={{ shrink: true }}
+        />
+        {/* Only show confirmation ref for modes where it's meaningful */}
+        {!['car', 'bicycle', 'taxi'].includes(type) && (
+          <TextField
+            label="Confirmation ref" fullWidth
+            value={transport.confirmationNumber}
+            onChange={e => setTransport(p => ({ ...p, confirmationNumber: e.target.value }))}
+          />
+        )}
+        <TextField
+          label="Cost (€)" type="number" fullWidth
+          value={transport.cost}
+          onChange={e => setTransport(p => ({ ...p, cost: e.target.value }))}
+        />
+        <FormControl fullWidth>
+          <InputLabel>Status</InputLabel>
+          <Select value={transport.status} label="Status"
+            onChange={e => setTransport(p => ({ ...p, status: e.target.value }))}>
+            {TRANSPORT_STATUSES.map(s => (
+              <MenuItem key={s} value={s} sx={{ textTransform: 'capitalize' }}>
+                {s.replace('_', ' ')}
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+        <TextField
+          label="Notes" fullWidth multiline rows={2}
+          value={transport.notes}
+          onChange={e => setTransport(p => ({ ...p, notes: e.target.value }))}
+        />
+      </Box>
+    );
+  };
+
   // ── Transport card ─────────────────────────────────────────────────────────
-  const TransportCard = ({ t, i }: { t: any; i: number }) => (
-    <Paper sx={{ p: { xs: 2, sm: 2.5 }, mb: 2, backgroundColor: 'background.paper' }}>
-      <Box sx={{ display: 'flex', gap: 1.5 }}>
-        <FlightIcon color="primary" sx={{ mt: 0.25, flexShrink: 0 }} />
-        <Box sx={{ flexGrow: 1, minWidth: 0 }}>
-          {/* Route headline */}
-          <Typography fontWeight={700} sx={{ fontSize: { xs: '1rem', sm: '1rem' } }}>
-            {t.flightNumber} &nbsp;·&nbsp; {t.departureAirport} → {t.arrivalAirport}
-          </Typography>
-          {t.airline && (
-            <Typography variant="body2" color="text.secondary">{t.airline}</Typography>
-          )}
-          {t.departureTime && (
-            <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-              {fmtDateTime(t.departureTime)}
-              {t.arrivalTime ? ` → ${fmtDateTime(t.arrivalTime)}` : ''}
+  const TransportCard = ({ t, i }: { t: any; i: number }) => {
+    const headline  = getTransportLabel(t);
+    const subtitle  = getTransportSubtitle(t);
+    const depTime   = t.departureTime;
+    const arrTime   = t.arrivalTime;
+
+    return (
+      <Paper sx={{ p: { xs: 2, sm: 2.5 }, mb: 2, backgroundColor: 'background.paper' }}>
+        <Box sx={{ display: 'flex', gap: 1.5 }}>
+          <Box sx={{ color: 'primary.main', mt: 0.25, flexShrink: 0 }}>
+            {transportIcon(t.type, { fontSize: 'medium' })}
+          </Box>
+          <Box sx={{ flexGrow: 1, minWidth: 0 }}>
+            <Typography fontWeight={700} sx={{ fontSize: '1rem' }}>
+              {headline}
             </Typography>
-          )}
-          {/* Details row */}
-          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1.5, mt: 1 }}>
-            {t.seat && (
-              <Typography variant="caption" color="text.secondary">Seat {t.seat}</Typography>
+            {subtitle && (
+              <Typography variant="body2" color="text.secondary">{subtitle}</Typography>
             )}
-            {t.confirmationNumber && (
-              <Typography variant="caption" color="text.secondary">Ref: {t.confirmationNumber}</Typography>
+            {(depTime || arrTime) && (
+              <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                {depTime ? fmtDateTime(depTime) : ''}
+                {arrTime ? ` → ${fmtDateTime(arrTime)}` : ''}
+              </Typography>
             )}
-            {t.cost && (
-              <Typography variant="caption" color="text.secondary">€{t.cost}</Typography>
-            )}
+            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1.5, mt: 1 }}>
+              {(t.details?.seat ?? t.seat) && (
+                <Typography variant="caption" color="text.secondary">
+                  Seat {t.details?.seat ?? t.seat}
+                </Typography>
+              )}
+              {(t.confirmationNumber) && (
+                <Typography variant="caption" color="text.secondary">
+                  Ref: {t.confirmationNumber}
+                </Typography>
+              )}
+              {t.cost && (
+                <Typography variant="caption" color="text.secondary">€{t.cost}</Typography>
+              )}
+            </Box>
+          </Box>
+          <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 0.5, flexShrink: 0 }}>
+            <Chip
+              label={t.status.replace('_', ' ')}
+              color={STATUS_COLOUR[t.status]}
+              size="small"
+              sx={{ fontWeight: 700, fontSize: '0.7rem', textTransform: 'capitalize' }}
+            />
+            <IconButton size="small" onClick={e => openMenu(e, 'transport', i)}>
+              <MoreVertIcon fontSize="small" />
+            </IconButton>
           </Box>
         </Box>
-        {/* Status + menu */}
-        <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 0.5, flexShrink: 0 }}>
-          <Chip
-            label={t.status.replace('_', ' ')}
-            color={STATUS_COLOUR[t.status]}
-            size="small"
-            sx={{ fontWeight: 700, fontSize: '0.7rem', textTransform: 'capitalize' }}
-          />
-          <IconButton size="small" onClick={e => openMenu(e, 'transport', i)}>
-            <MoreVertIcon fontSize="small" />
-          </IconButton>
-        </Box>
-      </Box>
-    </Paper>
-  );
+      </Paper>
+    );
+  };
 
   // ── Accommodation card ────────────────────────────────────────────────────
   const AccomCard = ({ a, i }: { a: any; i: number }) => (
@@ -174,7 +581,7 @@ export default function LogisticsTab({ tripId }: LogisticsTabProps) {
       <Box sx={{ display: 'flex', gap: 1.5 }}>
         <HotelIcon color="primary" sx={{ mt: 0.25, flexShrink: 0 }} />
         <Box sx={{ flexGrow: 1, minWidth: 0 }}>
-          <Typography fontWeight={700} sx={{ fontSize: { xs: '1rem', sm: '1rem' } }}>{a.name}</Typography>
+          <Typography fontWeight={700} sx={{ fontSize: '1rem' }}>{a.name}</Typography>
           {a.address && (
             <Typography variant="body2" color="text.secondary">{a.address}</Typography>
           )}
@@ -239,17 +646,15 @@ export default function LogisticsTab({ tripId }: LogisticsTabProps) {
             <TransportCard key={i} t={t} i={i} />
           ))}
           {(!logistics?.transportation || logistics.transportation.length === 0) && (
-            <Alert severity="info" sx={{ mb: 2 }}>No flights added yet.</Alert>
+            <Alert severity="info" sx={{ mb: 2 }}>No transport added yet.</Alert>
           )}
           <Button
-            variant="outlined"
-            startIcon={<AddIcon />}
+            variant="outlined" startIcon={<AddIcon />}
             onClick={() => setTransportOpen(true)}
-            fullWidth={mobile}
-            size={mobile ? 'large' : 'medium'}
+            fullWidth={mobile} size={mobile ? 'large' : 'medium'}
             sx={{ py: mobile ? 1.5 : 1 }}
           >
-            Add flight
+            Add transport
           </Button>
         </Box>
       )}
@@ -264,11 +669,9 @@ export default function LogisticsTab({ tripId }: LogisticsTabProps) {
             <Alert severity="info" sx={{ mb: 2 }}>No accommodation added yet.</Alert>
           )}
           <Button
-            variant="outlined"
-            startIcon={<AddIcon />}
+            variant="outlined" startIcon={<AddIcon />}
             onClick={() => setAccomOpen(true)}
-            fullWidth={mobile}
-            size={mobile ? 'large' : 'medium'}
+            fullWidth={mobile} size={mobile ? 'large' : 'medium'}
             sx={{ py: mobile ? 1.5 : 1 }}
           >
             Add accommodation
@@ -276,7 +679,7 @@ export default function LogisticsTab({ tripId }: LogisticsTabProps) {
         </Box>
       )}
 
-      {/* ── Documents placeholder ── */}
+      {/* ── Documents ── */}
       {section === 2 && (
         <Paper sx={{ p: 3, backgroundColor: 'background.paper' }}>
           <Typography variant="h6" fontWeight={700} gutterBottom>Documents</Typography>
@@ -286,27 +689,21 @@ export default function LogisticsTab({ tripId }: LogisticsTabProps) {
         </Paper>
       )}
 
-      {/* ── Context menu (three-dot) ── */}
+      {/* ── Context menu ── */}
       <Menu anchorEl={menuAnchor} open={Boolean(menuAnchor)} onClose={closeMenu}>
         <MenuItem
-          onClick={() => {
-            setDeleteTarget(menuTarget);
-            closeMenu();
-          }}
+          onClick={() => { setDeleteTarget(menuTarget); closeMenu(); }}
           sx={{ color: 'error.main', gap: 1 }}
         >
-          <DeleteIcon fontSize="small" />
-          Delete
+          <DeleteIcon fontSize="small" /> Delete
         </MenuItem>
       </Menu>
 
-      {/* ── Delete confirmation dialog ── */}
+      {/* ── Delete confirmation ── */}
       <Dialog open={Boolean(deleteTarget)} onClose={() => setDeleteTarget(null)}>
         <DialogTitle fontWeight={700}>Delete this item?</DialogTitle>
         <DialogContent>
-          <Typography variant="body2" color="text.secondary">
-            This cannot be undone.
-          </Typography>
+          <Typography variant="body2" color="text.secondary">This cannot be undone.</Typography>
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 3, gap: 1 }}>
           <Button onClick={() => setDeleteTarget(null)}>Cancel</Button>
@@ -314,100 +711,44 @@ export default function LogisticsTab({ tripId }: LogisticsTabProps) {
         </DialogActions>
       </Dialog>
 
-      {/* ── Add flight dialog ── */}
+      {/* ── Add transport dialog ── */}
       <Dialog
         open={transportOpen}
         onClose={() => setTransportOpen(false)}
-        maxWidth="sm"
-        fullWidth
-        fullScreen={mobile}
+        maxWidth="sm" fullWidth fullScreen={mobile}
       >
-        <DialogTitle fontWeight={700}>Add Flight</DialogTitle>
+        <DialogTitle fontWeight={700}>Add Transport</DialogTitle>
         <DialogContent>
-          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, pt: 1 }}>
-            <AirlineSearch
-              label="Airline"
-              value={transport.airline}
-              onChange={a => setTransport(p => ({ ...p, airline: a.name, airlineIata: a.iata }))}
-            />
-            <TextField
-              label="Flight number"
-              value={transport.flightNumber}
-              onChange={e => setTransport(p => ({ ...p, flightNumber: e.target.value }))}
-              fullWidth
-              placeholder="FR 328"
-            />
-            <AirportSearch
-              label="From (airport)"
-              value={transport.departureAirportDisplay || transport.departureAirport}
-              onChange={a => setTransport(p => ({
-                ...p, departureAirport: a.iata,
-                departureAirportDisplay: `${a.iata} — ${a.city}`,
-              }))}
-            />
-            <AirportSearch
-              label="To (airport)"
-              value={transport.arrivalAirportDisplay || transport.arrivalAirport}
-              onChange={a => setTransport(p => ({
-                ...p, arrivalAirport: a.iata,
-                arrivalAirportDisplay: `${a.iata} — ${a.city}`,
-              }))}
-            />
-            <TextField
-              label="Departure date & time"
-              type="datetime-local"
-              value={transport.departureTime}
-              onChange={e => setTransport(p => ({ ...p, departureTime: e.target.value }))}
-              fullWidth InputLabelProps={{ shrink: true }}
-            />
-            <TextField
-              label="Arrival date & time"
-              type="datetime-local"
-              value={transport.arrivalTime}
-              onChange={e => setTransport(p => ({ ...p, arrivalTime: e.target.value }))}
-              fullWidth InputLabelProps={{ shrink: true }}
-            />
-            <TextField
-              label="Seat"
-              value={transport.seat}
-              onChange={e => setTransport(p => ({ ...p, seat: e.target.value }))}
-              fullWidth placeholder="14A"
-            />
-            <TextField
-              label="Confirmation ref"
-              value={transport.confirmationNumber}
-              onChange={e => setTransport(p => ({ ...p, confirmationNumber: e.target.value }))}
-              fullWidth
-            />
-            <TextField
-              label="Cost (€)"
-              type="number"
-              value={transport.cost}
-              onChange={e => setTransport(p => ({ ...p, cost: e.target.value }))}
-              fullWidth
-            />
-            <FormControl fullWidth>
-              <InputLabel>Status</InputLabel>
-              <Select value={transport.status} label="Status" onChange={e => setTransport(p => ({ ...p, status: e.target.value }))}>
-                {TRANSPORT_STATUSES.map(s => (
-                  <MenuItem key={s} value={s} sx={{ textTransform: 'capitalize' }}>
-                    {s.replace('_', ' ')}
-                  </MenuItem>
+          <Box sx={{ pt: 1, display: 'flex', flexDirection: 'column', gap: 2.5 }}>
+
+            {/* Type picker */}
+            <Box>
+              <Typography variant="caption" color="text.secondary" fontWeight={600}
+                sx={{ display: 'block', mb: 1, textTransform: 'uppercase', fontSize: '0.65rem', letterSpacing: '0.05em' }}>
+                Type
+              </Typography>
+              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                {TRANSPORT_TYPES.map(({ value, label, Icon }) => (
+                  <Chip
+                    key={value}
+                    icon={<Icon sx={{ fontSize: '1rem !important' }} />}
+                    label={label}
+                    onClick={() => changeType(value)}
+                    variant={transport.type === value ? 'filled' : 'outlined'}
+                    color={transport.type === value ? 'primary' : 'default'}
+                    sx={{ fontWeight: transport.type === value ? 700 : 400 }}
+                  />
                 ))}
-              </Select>
-            </FormControl>
-            <TextField
-              label="Notes"
-              value={transport.notes}
-              onChange={e => setTransport(p => ({ ...p, notes: e.target.value }))}
-              fullWidth multiline rows={2}
-            />
+              </Box>
+            </Box>
+
+            <TransportFields />
           </Box>
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 3, gap: 1, flexDirection: { xs: 'column-reverse', sm: 'row' } }}>
           <Button onClick={() => setTransportOpen(false)} fullWidth={mobile} size="large">Cancel</Button>
           <Button variant="contained" onClick={saveTransport} disabled={saving} fullWidth={mobile} size="large">
-            Save flight
+            Save
           </Button>
         </DialogActions>
       </Dialog>
@@ -416,16 +757,15 @@ export default function LogisticsTab({ tripId }: LogisticsTabProps) {
       <Dialog
         open={accomOpen}
         onClose={() => setAccomOpen(false)}
-        maxWidth="sm"
-        fullWidth
-        fullScreen={mobile}
+        maxWidth="sm" fullWidth fullScreen={mobile}
       >
         <DialogTitle fontWeight={700}>Add Accommodation</DialogTitle>
         <DialogContent>
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, pt: 1 }}>
             <FormControl fullWidth>
               <InputLabel>Type</InputLabel>
-              <Select value={accom.type} label="Type" onChange={e => setAccom(p => ({ ...p, type: e.target.value }))}>
+              <Select value={accom.type} label="Type"
+                onChange={e => setAccom(p => ({ ...p, type: e.target.value }))}>
                 {ACCOM_TYPES.map(t => (
                   <MenuItem key={t} value={t} sx={{ textTransform: 'capitalize' }}>
                     {t.replace('_', '/')}
@@ -434,47 +774,39 @@ export default function LogisticsTab({ tripId }: LogisticsTabProps) {
               </Select>
             </FormControl>
             <TextField
-              label="Name"
+              label="Name" fullWidth placeholder="Hotel Intercontinental"
               value={accom.name}
               onChange={e => setAccom(p => ({ ...p, name: e.target.value }))}
-              fullWidth placeholder="Hotel Intercontinental"
             />
             <TextField
-              label="Address"
+              label="Address" fullWidth
               value={accom.address}
               onChange={e => setAccom(p => ({ ...p, address: e.target.value }))}
-              fullWidth
             />
             <TextField
-              label="Check in"
-              type="date"
+              label="Check in" type="date" fullWidth InputLabelProps={{ shrink: true }}
               value={accom.checkIn}
               onChange={e => setAccom(p => ({ ...p, checkIn: e.target.value }))}
-              fullWidth InputLabelProps={{ shrink: true }}
             />
             <TextField
-              label="Check out"
-              type="date"
+              label="Check out" type="date" fullWidth InputLabelProps={{ shrink: true }}
               value={accom.checkOut}
               onChange={e => setAccom(p => ({ ...p, checkOut: e.target.value }))}
-              fullWidth InputLabelProps={{ shrink: true }}
             />
             <TextField
-              label="Confirmation ref"
+              label="Confirmation ref" fullWidth
               value={accom.confirmationNumber}
               onChange={e => setAccom(p => ({ ...p, confirmationNumber: e.target.value }))}
-              fullWidth
             />
             <TextField
-              label="Cost (€)"
-              type="number"
+              label="Cost (€)" type="number" fullWidth
               value={accom.cost}
               onChange={e => setAccom(p => ({ ...p, cost: e.target.value }))}
-              fullWidth
             />
             <FormControl fullWidth>
               <InputLabel>Status</InputLabel>
-              <Select value={accom.status} label="Status" onChange={e => setAccom(p => ({ ...p, status: e.target.value }))}>
+              <Select value={accom.status} label="Status"
+                onChange={e => setAccom(p => ({ ...p, status: e.target.value }))}>
                 {TRANSPORT_STATUSES.map(s => (
                   <MenuItem key={s} value={s} sx={{ textTransform: 'capitalize' }}>
                     {s.replace('_', ' ')}
@@ -483,10 +815,9 @@ export default function LogisticsTab({ tripId }: LogisticsTabProps) {
               </Select>
             </FormControl>
             <TextField
-              label="Notes"
+              label="Notes" fullWidth multiline rows={2}
               value={accom.notes}
               onChange={e => setAccom(p => ({ ...p, notes: e.target.value }))}
-              fullWidth multiline rows={2}
             />
           </Box>
         </DialogContent>
