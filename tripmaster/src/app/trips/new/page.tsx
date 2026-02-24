@@ -10,6 +10,8 @@ import {
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import FlightTakeoffIcon from '@mui/icons-material/FlightTakeoff';
 import { COUNTRY_LIST } from '@/lib/data/countries';
+import { queueAction } from '@/lib/offline/db';
+
 
 const steps = ['Basic Details', 'Origin & Destination', 'Dates'];
 const REGIONS = Array.from(new Set(COUNTRY_LIST.map(c => c.region)));
@@ -81,35 +83,55 @@ export default function NewTripPage() {
         )
       : 0;
 
-  const handleSubmit = async () => {
-    setSaving(true);
-    const res = await fetch('/api/trips', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name: form.name,
-        tripType: form.tripType,
-        purpose: form.purpose,
-        origin: {
-          city: form.originCity,
-          country: form.originCountry,
-          countryCode: form.originCountryCode,
-        },
-        destination: {
-          city: form.destinationCity,
-          country: form.destinationCountry,
-          countryCode: form.destinationCountryCode,
-        },
-        startDate: form.startDate,
-        endDate: form.endDate,
-        nights,
-        status: 'planning',
-      }),
-    });
-    const data = await res.json();
-    if (data.trip?._id) router.push(`/trips/${data.trip._id}`);
-    setSaving(false);
+const handleSubmit = async () => {
+  setSaving(true);
+
+  const payload = {
+    name: form.name,
+    tripType: form.tripType,
+    purpose: form.purpose,
+    origin: {
+      city: form.originCity,
+      country: form.originCountry,
+      countryCode: form.originCountryCode,
+    },
+    destination: {
+      city: form.destinationCity,
+      country: form.destinationCountry,
+      countryCode: form.destinationCountryCode,
+    },
+    startDate: form.startDate,
+    endDate: form.endDate,
+    nights,
+    status: 'planning',
   };
+
+  if (!navigator.onLine) {
+    await queueAction({
+      type: 'CREATE_TRIP',
+      body: payload,
+      timestamp: Date.now(),
+    });
+
+    setSaving(false);
+    router.push('/dashboard');
+    return;
+  }
+
+  const res = await fetch('/api/trips', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+
+  const data = await res.json();
+
+  if (data.trip?._id) {
+    router.push(`/trips/${data.trip._id}`);
+  }
+
+  setSaving(false);
+};
 
   const canProceed = [
     !!(form.name && form.tripType),

@@ -16,7 +16,7 @@ export default function Home() {
       }}
     >
       <Typography variant="h3" color="text.primary" fontWeight={700}>
-        TripMaster
+        Tabiji
       </Typography>
       <Typography variant="subtitle1" color="text.secondary">
         Your personal travel orchestration platform

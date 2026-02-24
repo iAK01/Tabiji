@@ -16,6 +16,9 @@ import CalendarMonthIcon  from '@mui/icons-material/CalendarMonth';
 import { useRouter }      from 'next/navigation';
 import { useEffect, useState } from 'react';
 import TripCalendar from '@/components/calendar/TripCalendar';
+import { saveTrips, getTrips } from '@/lib/offline/db';
+import { getQueue, clearQueue } from '@/lib/offline/db';
+
 
 interface Trip {
   _id: string;
@@ -45,12 +48,54 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [view,    setView]    = useState<'list' | 'calendar'>('list');
 
-  useEffect(() => {
-    fetch('/api/trips')
-      .then(r => r.json())
-      .then(d => { setTrips(d.trips ?? []); setLoading(false); })
-      .catch(() => setLoading(false));
-  }, []);
+useEffect(() => {
+  async function loadTrips() {
+    try {
+      const res = await fetch('/api/trips');
+      const data = await res.json();
+      await saveTrips(data.trips ?? []);
+      setTrips(data.trips ?? []);
+    } catch {
+      const offlineTrips = await getTrips();
+      setTrips(offlineTrips ?? []);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  loadTrips();
+}, []);
+
+useEffect(() => {
+  async function syncQueue() {
+    if (!navigator.onLine) return;
+
+    const queued = await getQueue();
+
+    for (const item of queued) {
+      if (item.type === 'CREATE_TRIP') {
+        await fetch('/api/trips', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(item.body),
+        });
+      }
+    }
+
+    if (queued.length > 0) {
+      await clearQueue();
+    }
+  }
+
+  window.addEventListener('online', syncQueue);
+
+  // Attempt immediate sync on mount
+  syncQueue();
+
+  return () => {
+    window.removeEventListener('online', syncQueue);
+  };
+}, []);
 
   const firstName = session?.user?.name?.split(' ')[0] ?? '';
 
@@ -60,24 +105,49 @@ export default function Dashboard() {
       {/* ── AppBar ── */}
       <AppBar position="static" sx={{ backgroundColor: 'text.primary' }} elevation={0}>
         <Toolbar sx={{ minHeight: { xs: 56, sm: 64 } }}>
-          <FlightTakeoffIcon sx={{ mr: 1, fontSize: { xs: 20, sm: 24 } }} />
-          <Typography variant="h6" fontWeight={700} sx={{ flexGrow: 1, fontSize: { xs: '1rem', sm: '1.25rem' } }}>
-            Tabiji
-          </Typography>
-          <Typography variant="body2" sx={{ mr: 1.5, opacity: 0.8, display: { xs: 'none', sm: 'block' } }}>
-            {session?.user?.name}
-          </Typography>
-          <IconButton color="inherit" size="small" onClick={() => router.push('/profile')} sx={{ mr: 0.5 }}>
-            <Avatar
-              src={session?.user?.image ?? undefined}
-              sx={{ width: 30, height: 30, fontSize: '0.8rem', backgroundColor: 'primary.main' }}
-            >
-              {firstName[0]}
-            </Avatar>
+    <Box
+      component="img"
+      src="/logo.jpeg"
+      alt="Logo"
+      sx={{
+        mr: 1,
+        width: { xs: 64, sm: 144 },
+        height: { xs: 64, sm: 144 },
+        objectFit: 'contain'
+      }}
+    />
+
+    <Box sx={{ ml: 'auto', display: 'flex', alignItems: 'center' }}>
+      <Typography
+        variant="body2"
+        sx={{ mr: 1.5, opacity: 0.8, display: { xs: 'none', sm: 'block' } }}
+      >
+        {session?.user?.name}
+      </Typography>
+
+      <IconButton
+        color="inherit"
+        size="small"
+        onClick={() => router.push('/profile')}
+        sx={{ mr: 0.5 }}
+      >
+        <Avatar
+          src={session?.user?.image ?? undefined}
+          sx={{
+            width: 30,
+            height: 30,
+            fontSize: '0.8rem',
+            backgroundColor: 'primary.main'
+          }}
+        >
+          {firstName[0]}
+        </Avatar>
           </IconButton>
           <IconButton color="inherit" size="small" onClick={() => signOut({ callbackUrl: '/signin' })}>
             <LogoutIcon fontSize="small" />
           </IconButton>
+       </Box>
+
         </Toolbar>
       </AppBar>
 

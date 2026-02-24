@@ -139,25 +139,39 @@ export default function TripPage() {
     <Box sx={{ minHeight: '100vh', backgroundColor: 'background.default', pb: { xs: 6, sm: 0 } }}>
 
       {/* ── AppBar ── */}
-      <AppBar position="static" sx={{ backgroundColor: 'text.primary' }} elevation={0}>
-        <Toolbar sx={{ minHeight: { xs: 60, sm: 64 }, gap: 1 }}>
-          <IconButton color="inherit" onClick={() => router.push('/dashboard')}>
-            <ArrowBackIcon />
-          </IconButton>
-          <FlightTakeoffIcon sx={{ flexShrink: 0 }} />
-          <Typography
-            variant="h4"
-            fontWeight={700}
-            sx={{
-              flexGrow: 1,
-              fontSize: { xs: '1.2rem', sm: '2rem' },
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            {trip.name}
-          </Typography>
+  <AppBar position="static" sx={{ backgroundColor: 'text.primary' }} elevation={0}>
+  <Toolbar sx={{ minHeight: { xs: 60, sm: 64 }, gap: 1 }}>
+
+    <IconButton color="inherit" onClick={() => router.push('/dashboard')}>
+      <ArrowBackIcon />
+    </IconButton>
+
+    <Box
+      component="img"
+      src="/logo.jpeg"
+      alt="Logo"
+      sx={{
+        flexShrink: 0,
+        width: { xs: 48, sm: 112 },
+        height: { xs: 48, sm: 112 },
+        objectFit: 'contain'
+      }}
+    />
+
+    <Typography
+      variant="h4"
+      fontWeight={700}
+      sx={{
+        flexGrow: 1,
+        fontSize: { xs: '1.2rem', sm: '2rem' },
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
+      }}
+    >
+      {trip.name}
+    </Typography>
+
           <Chip
             label={trip.status}
             color={STATUS_COLOURS[trip.status]}
