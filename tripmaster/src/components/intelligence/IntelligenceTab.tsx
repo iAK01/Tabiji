@@ -204,23 +204,55 @@ export default function IntelligenceTab({ tripId }: Props) {
         />
       )}
 
-      {/* Electrical */}
-      {electrical && (
-        <IntelCard
-          icon={<PowerIcon />}
-          title="Electrical adapter"
-          message={electrical.message}
-          status={electrical.needsAdapter ? 'warn' : 'ok'}
-        >
-          {electrical.needsAdapter && (
-            <Box sx={{ display: 'flex', gap: 1, mt: 1, alignItems: 'center' }}>
-              <Chip size="small" label={`Home: ${electrical.originPlug}`} variant="outlined" />
-              <Typography variant="caption">→</Typography>
-              <Chip size="small" label={`Dest: ${electrical.destinationPlug}`} color="warning" variant="outlined" />
+{/* Electrical */}
+{electrical && (
+  <IntelCard
+    icon={<PowerIcon />}
+    title="Electrical adapter"
+    message={electrical.message}
+    status={electrical.needsAdapter ? 'warn' : 'ok'}
+  >
+    {electrical.needsAdapter && (
+      <Box sx={{ mt: 1, display: 'flex', alignItems: 'center', gap: 2 }}>
+
+        {/* Home plugs */}
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          {electrical.originPlug.split('/').map((type) => (
+            <Box key={type} sx={{ textAlign: 'center' }}>
+              <img
+                src={`/plugs/${type}.svg`}
+                alt={`Plug type ${type}`}
+                width={72}
+                height={72}
+                style={{ display: 'block' }}
+              />
+              <Typography variant="caption">Home {type}</Typography>
             </Box>
-          )}
-        </IntelCard>
-      )}
+          ))}
+        </Box>
+
+        <Typography variant="body2">→</Typography>
+
+        {/* Destination plugs */}
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          {electrical.destinationPlug.split('/').map((type) => (
+            <Box key={type} sx={{ textAlign: 'center' }}>
+              <img
+                src={`/plugs/${type}.svg`}
+                alt={`Plug type ${type}`}
+                width={72}
+                height={72}
+                style={{ display: 'block' }}
+              />
+              <Typography variant="caption">Dest {type}</Typography>
+            </Box>
+          ))}
+        </Box>
+
+      </Box>
+    )}
+  </IntelCard>
+)}
 
       {/* Currency */}
       {currency && (

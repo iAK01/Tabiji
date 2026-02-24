@@ -150,7 +150,7 @@ export default function TripPage() {
             fontWeight={700}
             sx={{
               flexGrow: 1,
-              fontSize: { xs: '1rem', sm: '1.2rem' },
+              fontSize: { xs: '1.2rem', sm: '2rem' },
               overflow: 'hidden',
               textOverflow: 'ellipsis',
               whiteSpace: 'nowrap',
