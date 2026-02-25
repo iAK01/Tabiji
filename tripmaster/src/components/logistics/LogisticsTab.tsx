@@ -670,14 +670,14 @@ export default function LogisticsTab({ tripId, trip }: LogisticsTabProps) {
             </Box>
           </Box>
           <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 0.5, flexShrink: 0 }}>
-            <Chip label={t.status.replace('_', ' ')} color={STATUS_COLOUR[t.status]} size="small"
+            <Chip label={t.status.replace('_', ' ')} color={STATUS_COLOUR[t.status]} size="medium"
               sx={{ fontWeight: 700, fontSize: '0.7rem', textTransform: 'capitalize' }} />
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
               {navDest && (
-                <NavigateButton destination={navDest} suggestedMode="driving" size="small" />
+                <NavigateButton destination={navDest} suggestedMode="driving" size="medium" />
               )}
-              <IconButton size="small" onClick={e => openMenu(e, 'transport', i)}>
-                <MoreVertIcon fontSize="small" />
+              <IconButton size="medium" onClick={e => openMenu(e, 'transport', i)}>
+                <MoreVertIcon fontSize="medium" />
               </IconButton>
             </Box>
           </Box>
@@ -707,16 +707,16 @@ export default function LogisticsTab({ tripId, trip }: LogisticsTabProps) {
           </Box>
         </Box>
         <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 0.5, flexShrink: 0 }}>
-          <Chip label={a.status.replace('_', ' ')} color={STATUS_COLOUR[a.status]} size="small"
+          <Chip label={a.status.replace('_', ' ')} color={STATUS_COLOUR[a.status]} size="medium"
             sx={{ fontWeight: 700, fontSize: '0.7rem', textTransform: 'capitalize' }} />
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
             <NavigateButton
               destination={{ name: a.name, address: a.address, coordinates: a.coordinates ?? null }}
               suggestedMode="driving"
-              size="small"
+              size="medium"
             />
-            <IconButton size="small" onClick={e => openMenu(e, 'accom', i)}>
-              <MoreVertIcon fontSize="small" />
+            <IconButton size="medium" onClick={e => openMenu(e, 'accom', i)}>
+              <MoreVertIcon fontSize="medium" />
             </IconButton>
           </Box>
         </Box>
@@ -744,7 +744,7 @@ export default function LogisticsTab({ tripId, trip }: LogisticsTabProps) {
               </Typography>
             )}
             <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1.5, mt: 1 }}>
-              <Chip label={venueTypeLabel} size="small" variant="outlined"
+              <Chip label={venueTypeLabel} size="medium" variant="outlined"
                 sx={{ fontSize: '0.65rem', height: 20 }} />
               {v.confirmationNumber && (
                 <Typography variant="caption" color="text.secondary">Ref: {v.confirmationNumber}</Typography>
@@ -753,7 +753,7 @@ export default function LogisticsTab({ tripId, trip }: LogisticsTabProps) {
               {v.website && (
                 <Chip
                   label="Website"
-                  size="small"
+                  size="medium"
                   component="a"
                   href={v.website}
                   target="_blank"
@@ -766,16 +766,16 @@ export default function LogisticsTab({ tripId, trip }: LogisticsTabProps) {
             </Box>
           </Box>
           <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 0.5, flexShrink: 0 }}>
-            <Chip label={v.status.replace('_', ' ')} color={STATUS_COLOUR[v.status]} size="small"
+            <Chip label={v.status.replace('_', ' ')} color={STATUS_COLOUR[v.status]} size="medium"
               sx={{ fontWeight: 700, fontSize: '0.7rem', textTransform: 'capitalize' }} />
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
               <NavigateButton
                 destination={{ name: v.name, address: v.address, coordinates: v.coordinates ?? null }}
                 suggestedMode="walking"
-                size="small"
+                size="medium"
               />
-              <IconButton size="small" onClick={e => openMenu(e, 'venue', i)}>
-                <MoreVertIcon fontSize="small" />
+              <IconButton size="medium" onClick={e => openMenu(e, 'venue', i)}>
+                <MoreVertIcon fontSize="medium" />
               </IconButton>
             </Box>
           </Box>
@@ -879,7 +879,7 @@ export default function LogisticsTab({ tripId, trip }: LogisticsTabProps) {
       {/* ── Context menu ── */}
       <Menu anchorEl={menuAnchor} open={Boolean(menuAnchor)} onClose={closeMenu}>
         <MenuItem onClick={() => { setDeleteTarget(menuTarget); closeMenu(); }} sx={{ color: 'error.main', gap: 1 }}>
-          <DeleteIcon fontSize="small" /> Delete
+          <DeleteIcon fontSize="medium" /> Delete
         </MenuItem>
       </Menu>
 

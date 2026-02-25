@@ -253,8 +253,8 @@ export default function Dashboard() {
                     fontWeight={800}
                     color="text.secondary"
                     sx={{
-                      fontSize: { xs: '0.7rem', sm: '0.75rem' },
-                      letterSpacing: '0.1em',
+                      fontSize: { xs: '0.9rem', sm: '1.8rem' },
+                      letterSpacing: '0.3em',
                       whiteSpace: 'nowrap',
                     }}
                   >

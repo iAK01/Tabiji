@@ -82,7 +82,7 @@ export default function NavigateButton({
                 ...sx,
               }}
             >
-              <Icon sx={{ fontSize: size === 'small' ? 18 : 22 }} />
+              <Icon sx={{ fontSize: size === 'small' ? 24 : 32 }} />
             </IconButton>
           ) : (
             <Button
