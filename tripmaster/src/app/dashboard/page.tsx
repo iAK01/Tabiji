@@ -318,9 +318,29 @@ export default function Dashboard() {
                               backgroundColor: 'rgba(0,0,0,0.55)',
                               borderRadius: 2, px: 1.25, py: 0.4,
                             }}>
-                              <Typography sx={{ color: 'white', fontSize: '0.72rem', fontWeight: 700 }}>
-                                {daysUntil === 1 ? 'Tomorrow' : `${daysUntil} days away`}
-                              </Typography>
+                             <Typography
+  sx={{
+    color: 'white',
+    fontSize: { xs: '1.4rem', sm: '2rem' },
+    lineHeight: 1,
+    fontWeight: 800,
+    letterSpacing: '-0.02em',
+  }}
+>
+  {daysUntil === 1 ? 'Tomorrow' : daysUntil}
+</Typography>
+{daysUntil > 1 && (
+  <Typography
+    sx={{
+      color: 'white',
+      fontSize: '0.65rem',
+      fontWeight: 600,
+      opacity: 0.85,
+    }}
+  >
+    days away
+  </Typography>
+)}
                             </Box>
                           )}
                           {daysUntil === 0 && (
