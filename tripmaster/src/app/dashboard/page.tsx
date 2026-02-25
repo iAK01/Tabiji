@@ -359,7 +359,7 @@ export default function Dashboard() {
                         <CardContent sx={{ p: { xs: 2, sm: 2 }, '&:last-child': { pb: 2 } }}>
                           <Typography
                             variant="h6" fontWeight={700}
-                            sx={{ fontSize: { xs: '1rem', sm: '1.1rem' }, mb: 0.5 }}
+                            sx={{ fontSize: { xs: '1.2rem', sm: '1.8rem' }, mb: 0.5 }}
                           >
                             {trip.name}
                           </Typography>
