@@ -24,7 +24,8 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     logistics = await TripLogistics.create({ tripId: id, transportation: [], accommodation: [], venues: [] });
   }
 
-  await syncLogisticsToItinerary(id, logistics);
+  // ⚠️ sync removed from GET — syncing on read was overwriting manual itinerary changes
+  // Sync only fires on PUT (when logistics data is actually saved)
 
   return NextResponse.json({ logistics });
 }

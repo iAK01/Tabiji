@@ -358,8 +358,8 @@ export default function Dashboard() {
 
                         <CardContent sx={{ p: { xs: 2, sm: 2 }, '&:last-child': { pb: 2 } }}>
                           <Typography
-                            variant="h6" fontWeight={700}
-                            sx={{ fontSize: { xs: '1.2rem', sm: '1.8rem' }, mb: 0.5 }}
+                            variant="h6" fontWeight={800}
+                            sx={{ fontSize: { xs: '1.6rem', sm: '1.8rem' }, mb: 0.2 }}
                           >
                             {trip.name}
                           </Typography>
@@ -368,13 +368,25 @@ export default function Dashboard() {
                           </Typography>
                           <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mt: 1.5 }}>
                             <Box>
-                              <Typography variant="caption" color="text.secondary" display="block">
-                                {trip.startDate
-                                  ? new Date(trip.startDate).toLocaleDateString('en-IE', {
-                                      day: 'numeric', month: 'short', year: 'numeric',
-                                    })
-                                  : '—'}
-                              </Typography>
+                             <Typography
+  variant="subtitle2"
+  sx={{
+    display: 'block',
+    fontWeight: 600,
+    fontSize: { xs: '1rem', sm: '1.3rem' },
+    letterSpacing: 0.3,
+    color: 'text.primary',
+  }}
+>
+  {trip.startDate
+    ? new Date(trip.startDate).toLocaleDateString('en-IE', {
+        weekday: 'short',
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric',
+      })
+    : '—'}
+</Typography>
                               <Typography variant="caption" color="text.secondary">
                                 {trip.nights} nights · {TRIP_TYPE_LABEL[trip.tripType] ?? trip.tripType}
                               </Typography>

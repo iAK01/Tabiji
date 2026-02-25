@@ -1,13 +1,10 @@
 // src/lib/itinerary/syncLogistics.ts
-//
-// Shared utility — imported by the logistics route AND the venues sub-routes
-// so that any change to transport, accommodation, or venues triggers a full
-// itinerary rebuild.
 
+import mongoose from 'mongoose';
 import TripItinerary from '@/lib/mongodb/models/TripItinerary';
 import TripLogistics from '@/lib/mongodb/models/TripLogistics';
 
-function transportStopLabel(t: any): string {
+function transportStopName(t: any): string {
   const type = t.type ?? 'flight';
   switch (type) {
     case 'flight': {
@@ -40,7 +37,7 @@ function transportStopLabel(t: any): string {
     case 'car': {
       const from = t.departureLocation ?? '';
       const to   = t.arrivalLocation   ?? '';
-      return from && to ? `Drive: ${from} → ${to}` : 'Drive';
+      return from && to ? `${from} → ${to}` : 'Drive';
     }
     case 'car_hire': {
       const co = t.details?.rentalCompany ?? '';
@@ -81,6 +78,11 @@ function toDateString(dt: string | Date | undefined): string {
   return new Date(dt).toISOString().split('T')[0];
 }
 
+function toScheduledStart(date: string | Date | undefined, time: string): string | undefined {
+  if (!date) return undefined;
+  return `${toDateString(date)}T${time}:00`;
+}
+
 function stopColor(type: string): string {
   switch (type) {
     case 'flight':           return '#c9521b';
@@ -98,7 +100,6 @@ function stopColor(type: string): string {
 
 export async function syncLogisticsToItinerary(tripId: string, logistics?: any) {
   try {
-    // If logistics not passed in, fetch it
     const log = logistics ?? await TripLogistics.findOne({ tripId });
     if (!log) return;
 
@@ -112,58 +113,111 @@ export async function syncLogisticsToItinerary(tripId: string, logistics?: any) 
 
     const newStops: any[] = [];
 
-    // ── Transport ────────────────────────────────────────────────────────────
+    // ── Transport ─────────────────────────────────────────────────────────────
     for (const t of log.transportation ?? []) {
       const depTime = t.departureTime;
       const arrTime = t.arrivalTime;
-      const label   = transportStopLabel(t);
+      const name    = transportStopName(t);
       const color   = stopColor(t.type ?? 'flight');
       const type    = t.type === 'flight' ? 'flight' : 'transport';
 
+      // Duration from dep→arr if both present on same day
+      let duration = 60;
+      if (depTime && arrTime) {
+        const diff = Math.round(
+          (new Date(arrTime).getTime() - new Date(depTime).getTime()) / 60000
+        );
+        if (diff > 0) duration = diff;
+      }
+
       if (depTime) {
+        const time = toTimeString(depTime);
         newStops.push({
-          date: toDateString(depTime), time: toTimeString(depTime),
-          label, type, color, locked: true, source: 'logistics',
+          _id:            new mongoose.Types.ObjectId(),
+          date:           toDateString(depTime),
+          name,                          // ← was `label`
+          type,
+          color,
+          time,
+          scheduledStart: toScheduledStart(depTime, time),
+          scheduledEnd:   arrTime ? new Date(arrTime).toISOString() : undefined,
+          duration,
+          locked:         true,
+          source:         'logistics',
+          // Departure address/coords if available
+          address:     t.departureAddress ?? t.departureLocation ?? undefined,
+          coordinates: t.departureCoordinates ?? undefined,
           metadata: { transportType: t.type, phase: 'departure' },
         });
       }
 
+      // Only add arrival stop if it lands on a different date (long-haul)
       if (arrTime) {
-        const arrDate   = toDateString(arrTime);
-        const depDate   = depTime ? toDateString(depTime) : null;
+        const arrDate = toDateString(arrTime);
+        const depDate = depTime ? toDateString(depTime) : null;
         const shortMode = ['taxi', 'car', 'bicycle'].includes(t.type ?? '');
         if (!shortMode || arrDate !== depDate) {
+          const time = toTimeString(arrTime);
           newStops.push({
-            date: arrDate, time: toTimeString(arrTime),
-            label: `Arrive: ${t.arrivalLocation ?? t.arrivalAirport ?? label}`,
-            type, color, locked: true, source: 'logistics',
+            _id:            new mongoose.Types.ObjectId(),
+            date:           arrDate,
+            name:           `Arrive: ${t.arrivalLocation ?? t.arrivalAirport ?? name}`,
+            type,
+            color,
+            time,
+            scheduledStart: toScheduledStart(arrTime, time),
+            duration:       0,
+            locked:         true,
+            source:         'logistics',
+            address:     t.arrivalAddress ?? t.arrivalLocation ?? undefined,
+            coordinates: t.arrivalCoordinates ?? undefined,
             metadata: { transportType: t.type, phase: 'arrival' },
           });
         }
       }
     }
 
-    // ── Accommodation ────────────────────────────────────────────────────────
+    // ── Accommodation ─────────────────────────────────────────────────────────
     for (const a of log.accommodation ?? []) {
       if (a.checkIn) {
+        const time = '15:00';
         newStops.push({
-          date: toDateString(a.checkIn), time: '15:00',
-          label: `Check in: ${a.name ?? 'Accommodation'}`,
-          type: 'accommodation', color: '#1a3a5c', locked: true, source: 'logistics',
+          _id:            new mongoose.Types.ObjectId(),
+          date:           toDateString(a.checkIn),
+          name:           `Check in: ${a.name ?? 'Accommodation'}`,  // ← was `label`
+          type:           'hotel',
+          color:          '#5c35a0',
+          time,
+          scheduledStart: toScheduledStart(a.checkIn, time),
+          duration:       30,
+          locked:         true,
+          source:         'logistics',
+          address:        a.address ?? undefined,
+          coordinates:    a.coordinates ?? undefined,
           metadata: { accommodationType: a.type, phase: 'checkin' },
         });
       }
       if (a.checkOut) {
+        const time = '11:00';
         newStops.push({
-          date: toDateString(a.checkOut), time: '11:00',
-          label: `Check out: ${a.name ?? 'Accommodation'}`,
-          type: 'accommodation', color: '#1a3a5c', locked: true, source: 'logistics',
+          _id:            new mongoose.Types.ObjectId(),
+          date:           toDateString(a.checkOut),
+          name:           `Check out: ${a.name ?? 'Accommodation'}`, // ← was `label`
+          type:           'hotel',
+          color:          '#5c35a0',
+          time,
+          scheduledStart: toScheduledStart(a.checkOut, time),
+          duration:       30,
+          locked:         true,
+          source:         'logistics',
+          address:        a.address ?? undefined,
+          coordinates:    a.coordinates ?? undefined,
           metadata: { accommodationType: a.type, phase: 'checkout' },
         });
       }
     }
 
-    // ── Venues ───────────────────────────────────────────────────────────────
+    // ── Venues ────────────────────────────────────────────────────────────────
     const venueEmoji: Record<string, string> = {
       concert: '🎵', conference: '🏛️', restaurant: '🍽️',
       sports: '🏟️', attraction: '🏛️', business: '💼', other: '📍',
@@ -171,6 +225,8 @@ export async function syncLogisticsToItinerary(tripId: string, logistics?: any) 
 
     for (const v of log.venues ?? []) {
       if (!v.name || !v.date) continue;
+
+      const time = v.time ?? '20:00';
 
       let duration = 120;
       if (v.time && v.endTime) {
@@ -180,13 +236,23 @@ export async function syncLogisticsToItinerary(tripId: string, logistics?: any) 
         if (calc > 0) duration = calc;
       }
 
+      const emoji = venueEmoji[v.type] ?? '📍';
+
       newStops.push({
-        date: toDateString(v.date), time: v.time ?? '20:00',
-        label: `${venueEmoji[v.type] ?? '📍'} ${v.name}`,
-        type: 'activity', color: '#55702C', locked: true, source: 'logistics',
+        _id:            new mongoose.Types.ObjectId(),
+        date:           toDateString(v.date),
+        name:           `${emoji} ${v.name}`,            // ← was `label`
+        type:           'activity',
+        color:          '#55702C',
+        time,
+        scheduledStart: toScheduledStart(v.date, time),
         duration,
+        locked:         true,
+        source:         'logistics',
+        // Address and coordinates feed NavigateButton
+        address:        v.address ?? undefined,
+        coordinates:    v.coordinates ?? undefined,
         notes: [
-          v.address,
           v.confirmationNumber ? `Ref: ${v.confirmationNumber}` : null,
           v.website            ? `🔗 ${v.website}`              : null,
           v.status === 'confirmed' ? '✅ Confirmed' : '⏳ Not booked',
@@ -195,7 +261,7 @@ export async function syncLogisticsToItinerary(tripId: string, logistics?: any) 
       });
     }
 
-    // ── Assign to days ───────────────────────────────────────────────────────
+    // ── Assign stops to days ──────────────────────────────────────────────────
     for (const stop of newStops) {
       let day = itinerary.days.find((d: any) => d.date === stop.date);
       if (!day) {
@@ -206,9 +272,13 @@ export async function syncLogisticsToItinerary(tripId: string, logistics?: any) 
       day.stops.push(stopWithoutDate);
     }
 
-    itinerary.days.sort((a: any, b: any) => a.date.localeCompare(b.date));
+    itinerary.days = itinerary.days.filter((d: any) => !!d.date);
+    itinerary.days.sort((a: any, b: any) => (a.date ?? '').localeCompare(b.date ?? ''));
     for (const day of itinerary.days) {
-      day.stops.sort((a: any, b: any) => (a.time ?? '').localeCompare(b.time ?? ''));
+      day.stops = (day.stops ?? []).filter((s: any) => !!s);
+      day.stops.sort((a: any, b: any) =>
+        (a.scheduledStart ?? a.time ?? '').localeCompare(b.scheduledStart ?? b.time ?? '')
+      );
     }
 
     await TripItinerary.findOneAndUpdate(

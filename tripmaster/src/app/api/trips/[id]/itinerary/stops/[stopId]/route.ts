@@ -24,3 +24,34 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
   await itinerary.save();
   return NextResponse.json({ days: itinerary.days });
 }
+
+export async function PATCH(req: Request, { params }: { params: Promise<{ id: string; stopId: string }> }) {
+  const { id, stopId } = await params;
+  const session = await getServerSession();
+  if (!session?.user?.email) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
+  await connectDB();
+
+  const body = await req.json();
+  const { scheduledStart, duration } = body;
+  if (!scheduledStart) return NextResponse.json({ error: 'scheduledStart required' }, { status: 400 });
+
+  const itinerary = await TripItinerary.findOne({ tripId: id });
+  if (!itinerary) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+
+  let found = false;
+  for (const day of itinerary.days) {
+    const stop = day.stops.find((s: any) => s._id?.toString() === stopId);
+    if (stop) {
+      stop.scheduledStart = scheduledStart;
+      if (duration !== undefined) stop.duration = duration;
+      found = true;
+      break;
+    }
+  }
+
+  if (!found) return NextResponse.json({ error: 'Stop not found' }, { status: 404 });
+
+  itinerary.markModified('days');
+  await itinerary.save();
+  return NextResponse.json({ days: itinerary.days });
+}
