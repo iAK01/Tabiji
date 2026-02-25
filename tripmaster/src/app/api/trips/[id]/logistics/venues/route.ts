@@ -1,8 +1,10 @@
-// app/api/trips/[id]/venues/route.ts
+// src/app/api/trips/[id]/logistics/venues/route.ts
+
 import { NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import connectDB from '@/lib/mongodb/connection';
 import TripLogistics from '@/lib/mongodb/models/TripLogistics';
+import { syncLogisticsToItinerary } from '@/lib/itinerary/syncLogistics';
 
 export async function POST(
   req: Request,
@@ -31,8 +33,9 @@ export async function POST(
 
   if (!Array.isArray(logistics.venues)) logistics.venues = [];
   logistics.venues.push(body);
-
   await logistics.save();
+
+  await syncLogisticsToItinerary(id, logistics);
 
   return NextResponse.json({ logistics });
 }

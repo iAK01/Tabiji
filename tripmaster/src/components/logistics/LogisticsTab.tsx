@@ -25,6 +25,7 @@ import MusicNoteIcon        from '@mui/icons-material/MusicNote';
 import BusinessIcon         from '@mui/icons-material/Business';
 import RestaurantIcon       from '@mui/icons-material/Restaurant';
 import SportsSoccerIcon     from '@mui/icons-material/SportsSoccer';
+import LaunchIcon           from '@mui/icons-material/Launch';
 import AttractionIcon       from '@mui/icons-material/AccountBalance';  // museum/attraction stand-in
 import EventIcon            from '@mui/icons-material/Event';
 import AirportSearch        from '@/components/ui/AirportSearch';
@@ -626,6 +627,19 @@ export default function LogisticsTab({ tripId, trip }: LogisticsTabProps) {
                 <Typography variant="caption" color="text.secondary">Ref: {v.confirmationNumber}</Typography>
               )}
               {v.cost && <Typography variant="caption" color="text.secondary">€{v.cost}</Typography>}
+{v.website && (
+  <Chip
+    label="Website"
+    size="small"
+    component="a"
+    href={v.website}
+    target="_blank"
+    rel="noopener noreferrer"
+    clickable
+    icon={<LaunchIcon sx={{ fontSize: '0.75rem !important' }} />}
+    sx={{ fontSize: '0.65rem', height: 24 }}
+  />
+)}
             </Box>
           </Box>
           <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 0.5, flexShrink: 0 }}>
@@ -772,7 +786,7 @@ export default function LogisticsTab({ tripId, trip }: LogisticsTabProps) {
                 ))}
               </Box>
             </Box>
-            <TransportFields />
+           {TransportFields()}
           </Box>
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 3, gap: 1, flexDirection: { xs: 'column-reverse', sm: 'row' } }}>

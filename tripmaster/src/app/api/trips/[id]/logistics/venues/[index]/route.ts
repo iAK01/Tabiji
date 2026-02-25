@@ -1,8 +1,10 @@
-// app/api/trips/[id]/venues/[index]/route.ts
+// src/app/api/trips/[id]/logistics/venues/[index]/route.ts
+
 import { NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import connectDB from '@/lib/mongodb/connection';
 import TripLogistics from '@/lib/mongodb/models/TripLogistics';
+import { syncLogisticsToItinerary } from '@/lib/itinerary/syncLogistics';
 
 export async function DELETE(
   _req: Request,
@@ -23,10 +25,10 @@ export async function DELETE(
   }
 
   if (!Array.isArray(logistics.venues)) logistics.venues = [];
-
   logistics.venues.splice(Number(index), 1);
-
   await logistics.save();
+
+  await syncLogisticsToItinerary(id, logistics);
 
   return NextResponse.json({ logistics });
 }

@@ -2,9 +2,9 @@
 
 import { useState, useEffect, useRef } from 'react';
 import {
-  Box, Typography, Paper, Button, TextField, Select, MenuItem,
-  FormControl, InputLabel, IconButton, Chip, CircularProgress,
-  Tooltip, Drawer, Divider, alpha,
+  Box, Typography, Paper, Button, TextField,
+  IconButton, Chip, CircularProgress,
+  Drawer, alpha, useTheme, useMediaQuery, Tooltip,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
@@ -21,19 +21,20 @@ import HotelIcon from '@mui/icons-material/Hotel';
 import DirectionsBusIcon from '@mui/icons-material/DirectionsBus';
 import EventIcon from '@mui/icons-material/Event';
 import FreeBreakfastIcon from '@mui/icons-material/FreeBreakfast';
+import RouteIcon from '@mui/icons-material/Route';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import { saveTripCache, getTripCache, queueAction } from '@/lib/offline/db';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
-const DAY_START_HOUR = 6;     // 6am
-const DAY_END_HOUR   = 24;    // midnight
-const PX_PER_MIN     = 1.2;   // pixels per minute — controls timeline density
-const TOTAL_MINS     = (DAY_END_HOUR - DAY_START_HOUR) * 60;
-const TIMELINE_H     = TOTAL_MINS * PX_PER_MIN;
-const HOUR_H         = 60 * PX_PER_MIN;
+const DAY_START_HOUR    = 6;
+const DAY_END_HOUR      = 24;
+const PX_PER_MIN_MOBILE  = 1.0;   // slightly more compact on small screens
+const PX_PER_MIN_DESKTOP = 1.2;   // original desktop density
+const TOTAL_MINS        = (DAY_END_HOUR - DAY_START_HOUR) * 60;
 
 // ─── Colour & icon map per stop type ─────────────────────────────────────────
 const STOP_CONFIG: Record<string, { label: string; color: string; bg: string; Icon: any }> = {
-  flight:      { label: '✈️ Flight',       color: '#C9521B', bg: '#FFF0EB', Icon: FlightIcon },
+  flight:      { label: '✈️ Flight',        color: '#C9521B', bg: '#FFF0EB', Icon: FlightIcon },
   hotel:       { label: '🏨 Accommodation', color: '#5c35a0', bg: '#F3EEFF', Icon: HotelIcon },
   meeting:     { label: '💼 Meeting',       color: '#1D2642', bg: '#E8EAF0', Icon: WorkIcon },
   meal:        { label: '🍽️ Meal',          color: '#b45309', bg: '#FFFBEB', Icon: RestaurantIcon },
@@ -47,7 +48,7 @@ const STOP_CONFIG: Record<string, { label: string; color: string; bg: string; Ic
 };
 
 const QUICK_ADD_TYPES = [
-  'meeting', 'meal', 'breakfast', 'activity', 'sightseeing', 'transport', 'work', 'other', 'gig'
+  'meeting', 'meal', 'breakfast', 'activity', 'sightseeing', 'transport', 'work', 'other', 'gig',
 ];
 
 const DEFAULT_DURATIONS: Record<string, number> = {
@@ -63,11 +64,11 @@ interface Stop {
   address?: string;
   coordinates?: { lat: number; lng: number };
   scheduledStart?: string;
-  time?: string;          // HH:MM — used by logistics-synced stops
+  time?: string;
   duration: number;
   notes?: string;
   completed?: boolean;
-  source?: string;        // 'logistics' = locked
+  source?: string;
   icon?: string;
   travelToNext?: {
     duration: number;
@@ -92,7 +93,6 @@ interface Props {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function stopStartMinutes(stop: Stop): number | null {
-  // scheduledStart is ISO datetime, time is HH:MM
   const timeStr = stop.scheduledStart
     ? stop.scheduledStart.includes('T')
       ? stop.scheduledStart.split('T')[1]?.slice(0, 5)
@@ -103,8 +103,8 @@ function stopStartMinutes(stop: Stop): number | null {
   return h * 60 + m;
 }
 
-function minutesToPx(minutes: number): number {
-  return (minutes - DAY_START_HOUR * 60) * PX_PER_MIN;
+function minutesToPx(minutes: number, pxPerMin: number): number {
+  return (minutes - DAY_START_HOUR * 60) * pxPerMin;
 }
 
 function formatTime(totalMinutes: number): string {
@@ -140,13 +140,18 @@ function totalFreeMinutes(stops: Stop[]): number {
 }
 
 // ─── Hour ruler ───────────────────────────────────────────────────────────────
-function HourRuler() {
+function HourRuler({ pxPerMin }: { pxPerMin: number }) {
+  const hourH = 60 * pxPerMin;
   const hours = Array.from({ length: DAY_END_HOUR - DAY_START_HOUR + 1 }, (_, i) => DAY_START_HOUR + i);
   return (
-    <Box sx={{ position: 'relative', width: 52, flexShrink: 0, userSelect: 'none' }}>
+    <Box sx={{ position: 'relative', width: 44, flexShrink: 0, userSelect: 'none' }}>
       {hours.map(h => (
-        <Box key={h} sx={{ position: 'absolute', top: (h - DAY_START_HOUR) * HOUR_H - 9, right: 8 }}>
-          <Typography variant="caption" color="text.disabled" sx={{ fontSize: '0.68rem', fontVariantNumeric: 'tabular-nums' }}>
+        <Box key={h} sx={{ position: 'absolute', top: (h - DAY_START_HOUR) * hourH - 9, right: 6 }}>
+          <Typography
+            variant="caption"
+            color="text.disabled"
+            sx={{ fontSize: '0.65rem', fontVariantNumeric: 'tabular-nums', lineHeight: 1 }}
+          >
             {h === 24 ? '00:00' : `${String(h).padStart(2, '0')}:00`}
           </Typography>
         </Box>
@@ -156,20 +161,20 @@ function HourRuler() {
 }
 
 // ─── Hour grid lines ──────────────────────────────────────────────────────────
-function GridLines() {
+function GridLines({ pxPerMin }: { pxPerMin: number }) {
+  const hourH = 60 * pxPerMin;
   const hours = Array.from({ length: DAY_END_HOUR - DAY_START_HOUR }, (_, i) => i);
   return (
     <>
       {hours.map(i => (
         <Box key={i} sx={{
-          position: 'absolute', top: i * HOUR_H, left: 0, right: 0,
+          position: 'absolute', top: i * hourH, left: 0, right: 0,
           borderTop: '1px solid', borderColor: 'divider', pointerEvents: 'none',
         }} />
       ))}
-      {/* Half-hour dashes */}
       {hours.map(i => (
         <Box key={`half-${i}`} sx={{
-          position: 'absolute', top: i * HOUR_H + HOUR_H / 2, left: 0, right: 0,
+          position: 'absolute', top: i * hourH + hourH / 2, left: 0, right: 0,
           borderTop: '1px dashed', borderColor: alpha('#000', 0.04), pointerEvents: 'none',
         }} />
       ))}
@@ -179,66 +184,106 @@ function GridLines() {
 
 // ─── Single stop block ────────────────────────────────────────────────────────
 function StopBlock({
-  stop, onDelete, onClick,
+  stop, onDelete, onClick, pxPerMin, isMobile,
 }: {
   stop: Stop;
   onDelete?: () => void;
   onClick?: () => void;
+  pxPerMin: number;
+  isMobile: boolean;
 }) {
   const startMin = stopStartMinutes(stop);
   if (startMin === null) return null;
 
-  const top    = minutesToPx(startMin);
-  const height = Math.max((stop.duration ?? 60) * PX_PER_MIN, 28);
-  const cfg    = STOP_CONFIG[stop.type] ?? STOP_CONFIG.other;
+  const top      = minutesToPx(startMin, pxPerMin);
+  const height   = Math.max((stop.duration ?? 60) * pxPerMin, isMobile ? 36 : 28);
+  const cfg      = STOP_CONFIG[stop.type] ?? STOP_CONFIG.other;
   const isLocked = stop.source === 'logistics';
-  const tall   = height > 50;
+  // On mobile: always show detail if block is tall enough. On desktop: original threshold.
+  const showDetail = isMobile ? height > 44 : height > 50;
 
   return (
     <Box
       onClick={onClick}
       sx={{
-        position: 'absolute', left: 0, right: 4, top,
-        height, zIndex: 2,
+        position: 'absolute',
+        left: 0,
+        right: isMobile ? 2 : 4,
+        top,
+        height,
+        zIndex: 2,
         backgroundColor: cfg.bg,
         borderLeft: `3px solid ${cfg.color}`,
         borderRadius: '0 6px 6px 0',
-        px: 1, py: 0.4,
-        display: 'flex', alignItems: 'flex-start', gap: 0.5,
+        px: isMobile ? 1 : 1,
+        py: isMobile ? 0.6 : 0.4,
+        display: 'flex',
+        alignItems: 'flex-start',
+        gap: 0.5,
         boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
         cursor: isLocked ? 'default' : 'pointer',
         overflow: 'hidden',
         transition: 'box-shadow 0.15s',
-        '&:hover': { boxShadow: isLocked ? undefined : '0 2px 8px rgba(0,0,0,0.14)' },
+        // On mobile: active state instead of hover
+        '&:active': !isLocked ? { boxShadow: '0 2px 8px rgba(0,0,0,0.18)', opacity: 0.92 } : {},
+        '&:hover': !isMobile && !isLocked ? { boxShadow: '0 2px 8px rgba(0,0,0,0.14)' } : {},
+        // Minimum touch target height enforced by the height calc above
+        minHeight: isMobile ? 36 : 'unset',
       }}
     >
       <Box sx={{ flexGrow: 1, overflow: 'hidden', minWidth: 0 }}>
+        {/* Name row */}
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-          {stop.icon && <Typography sx={{ fontSize: '0.8rem', lineHeight: 1, flexShrink: 0 }}>{stop.icon}</Typography>}
+          {stop.icon && (
+            <Typography sx={{ fontSize: isMobile ? '0.85rem' : '0.8rem', lineHeight: 1, flexShrink: 0 }}>
+              {stop.icon}
+            </Typography>
+          )}
           <Typography
             sx={{
-              fontSize: '0.75rem', fontWeight: 700, color: cfg.color,
-              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+              fontSize: isMobile ? '0.8rem' : '0.75rem',
+              fontWeight: 700,
+              color: cfg.color,
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
             }}
           >
             {stop.name}
           </Typography>
           {isLocked && <LockIcon sx={{ fontSize: 10, color: cfg.color, opacity: 0.6, flexShrink: 0 }} />}
         </Box>
-        {tall && (
-          <Typography sx={{ fontSize: '0.68rem', color: 'text.secondary', lineHeight: 1.2, mt: 0.2 }}>
+        {/* Detail row — always visible on mobile if tall enough, hover-free */}
+        {showDetail && (
+          <Typography sx={{ fontSize: '0.68rem', color: 'text.secondary', lineHeight: 1.3, mt: 0.25 }}>
             {formatTime(startMin)} · {stop.duration}min
             {stop.notes && ` · ${stop.notes}`}
           </Typography>
         )}
       </Box>
+
+      {/* Delete — larger touch target on mobile */}
       {!isLocked && onDelete && (
         <IconButton
           size="small"
           onClick={e => { e.stopPropagation(); onDelete(); }}
-          sx={{ p: 0.2, flexShrink: 0, color: cfg.color, opacity: 0.5, '&:hover': { opacity: 1 } }}
+          sx={{
+            p: isMobile ? 0.75 : 0.2,
+            flexShrink: 0,
+            color: cfg.color,
+            opacity: isMobile ? 0.55 : 0.5,
+            // On mobile: always slightly visible so users know it's there
+            '&:active': { opacity: 1, backgroundColor: alpha(cfg.color, 0.12) },
+            '&:hover': { opacity: 1 },
+            // Ensure minimum 44×44 tap target area on mobile
+            ...(isMobile && {
+              minWidth: 32,
+              minHeight: 32,
+              mr: -0.5,
+            }),
+          }}
         >
-          <DeleteIcon sx={{ fontSize: 13 }} />
+          <DeleteIcon sx={{ fontSize: isMobile ? 15 : 13 }} />
         </IconButton>
       )}
     </Box>
@@ -246,10 +291,17 @@ function StopBlock({
 }
 
 // ─── Free time gap label ──────────────────────────────────────────────────────
-function FreeGap({ slot, onQuickAdd }: { slot: { start: number; end: number; mins: number }; onQuickAdd: (time: string) => void }) {
+function FreeGap({
+  slot, onQuickAdd, pxPerMin, isMobile,
+}: {
+  slot: { start: number; end: number; mins: number };
+  onQuickAdd: (time: string) => void;
+  pxPerMin: number;
+  isMobile: boolean;
+}) {
   if (slot.mins < 30) return null;
-  const top    = minutesToPx(slot.start);
-  const height = slot.mins * PX_PER_MIN;
+  const top    = minutesToPx(slot.start, pxPerMin);
+  const height = slot.mins * pxPerMin;
   const h      = Math.floor(slot.mins / 60);
   const m      = slot.mins % 60;
   const label  = h > 0 ? `${h}h${m > 0 ? ` ${m}m` : ''} free` : `${m}m free`;
@@ -258,23 +310,32 @@ function FreeGap({ slot, onQuickAdd }: { slot: { start: number; end: number; min
     <Box
       onClick={() => onQuickAdd(formatTime(slot.start))}
       sx={{
-        position: 'absolute', left: 0, right: 4, top, height,
+        position: 'absolute', left: 0, right: isMobile ? 2 : 4, top, height,
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         cursor: 'pointer', zIndex: 1,
-        '&:hover .free-label': { opacity: 1 },
-        '&:hover': { backgroundColor: alpha('#55702C', 0.04) },
         borderRadius: 1,
+        // On mobile: label is always subtly visible (no hover state on touch devices)
+        '&:hover .free-label': { opacity: 1 },
+        '&:active': { backgroundColor: alpha('#55702C', 0.06) },
+        '&:hover': { backgroundColor: alpha('#55702C', 0.04) },
       }}
     >
       <Typography
         className="free-label"
         variant="caption"
         sx={{
-          opacity: 0, transition: 'opacity 0.15s',
-          color: 'text.disabled', fontSize: '0.7rem',
+          // Mobile: always faintly visible; desktop: reveal on hover
+          opacity: isMobile ? 0.45 : 0,
+          transition: 'opacity 0.15s',
+          color: 'text.disabled',
+          fontSize: '0.7rem',
           backgroundColor: 'background.paper',
-          border: '1px dashed', borderColor: 'divider',
-          px: 1, py: 0.25, borderRadius: 4,
+          border: '1px dashed',
+          borderColor: 'divider',
+          px: 1,
+          py: 0.25,
+          borderRadius: 4,
+          pointerEvents: 'none',
         }}
       >
         + {label}
@@ -284,19 +345,23 @@ function FreeGap({ slot, onQuickAdd }: { slot: { start: number; end: number; min
 }
 
 // ─── Travel connector ─────────────────────────────────────────────────────────
-function TravelConnector({ stop }: { stop: Stop }) {
+function TravelConnector({ stop, pxPerMin }: { stop: Stop; pxPerMin: number }) {
   const t = stop.travelToNext;
   if (!t) return null;
   const start = stopStartMinutes(stop);
   if (start === null) return null;
-  const top = minutesToPx(start + (stop.duration ?? 60));
+  const top = minutesToPx(start + (stop.duration ?? 60), pxPerMin);
 
   return (
     <Box sx={{
       position: 'absolute', left: 0, right: 4, top, zIndex: 3,
-      height: Math.max(t.duration * PX_PER_MIN, 18),
+      height: Math.max(t.duration * pxPerMin, 18),
       display: 'flex', alignItems: 'center',
-      backgroundColor: t.isImpossible ? alpha('#ef4444', 0.08) : t.isTight ? alpha('#f59e0b', 0.08) : 'transparent',
+      backgroundColor: t.isImpossible
+        ? alpha('#ef4444', 0.08)
+        : t.isTight
+        ? alpha('#f59e0b', 0.08)
+        : 'transparent',
       px: 1,
     }}>
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
@@ -306,7 +371,13 @@ function TravelConnector({ stop }: { stop: Stop }) {
           ? <DirectionsWalkIcon sx={{ fontSize: 12, color: 'text.disabled' }} />
           : <LocalTaxiIcon sx={{ fontSize: 12, color: 'text.disabled' }} />
         }
-        <Typography variant="caption" sx={{ fontSize: '0.65rem', color: t.isImpossible ? 'error.main' : t.isTight ? 'warning.dark' : 'text.disabled' }}>
+        <Typography
+          variant="caption"
+          sx={{
+            fontSize: '0.65rem',
+            color: t.isImpossible ? 'error.main' : t.isTight ? 'warning.dark' : 'text.disabled',
+          }}
+        >
           {t.duration}min · {(t.distance / 1000).toFixed(1)}km
           {t.isTight && ' ⚠️'}
           {t.isImpossible && ' 🚨'}
@@ -318,16 +389,22 @@ function TravelConnector({ stop }: { stop: Stop }) {
 
 // ─── Add stop drawer ──────────────────────────────────────────────────────────
 function AddStopDrawer({
-  open, onClose, onAdd, defaultTime, defaultType,
+  open, onClose, onAdd, defaultTime, defaultType, isMobile,
 }: {
   open: boolean;
   onClose: () => void;
   onAdd: (stop: Partial<Stop>) => Promise<void>;
   defaultTime: string;
   defaultType: string;
+  isMobile: boolean;
 }) {
   const [form, setForm] = useState({
-    name: '', type: defaultType, scheduledStart: defaultTime, duration: 60, notes: '', address: '',
+    name: '',
+    type: defaultType,
+    scheduledStart: defaultTime,
+    duration: 60,
+    notes: '',
+    address: '',
     coordinates: undefined as { lat: number; lng: number } | undefined,
   });
   const [saving, setSaving] = useState(false);
@@ -336,7 +413,9 @@ function AddStopDrawer({
 
   useEffect(() => {
     setForm(f => ({
-      ...f, type: defaultType, scheduledStart: defaultTime,
+      ...f,
+      type: defaultType,
+      scheduledStart: defaultTime,
       duration: DEFAULT_DURATIONS[defaultType] ?? 60,
     }));
     setLocationQuery('');
@@ -354,7 +433,12 @@ function AddStopDrawer({
   };
 
   const selectLocation = (f: any) => {
-    setForm(p => ({ ...p, name: p.name || f.text, address: f.place_name, coordinates: { lng: f.center[0], lat: f.center[1] } }));
+    setForm(p => ({
+      ...p,
+      name: p.name || f.text,
+      address: f.place_name,
+      coordinates: { lng: f.center[0], lat: f.center[1] },
+    }));
     setLocationQuery(f.place_name);
     setSuggestions([]);
   };
@@ -368,24 +452,61 @@ function AddStopDrawer({
 
   const cfg = STOP_CONFIG[form.type] ?? STOP_CONFIG.other;
 
+  // ── Mobile: bottom sheet ── Desktop: right drawer ──
+  const drawerSx = isMobile
+    ? {
+        borderTopLeftRadius: 16,
+        borderTopRightRadius: 16,
+        maxHeight: '88vh',
+        overflowY: 'auto' as const,
+        px: 2.5,
+        pt: 1.5,
+        pb: 4,
+        // Safe area padding for phones with bottom nav bars
+        paddingBottom: 'max(env(safe-area-inset-bottom, 16px), 32px)',
+      }
+    : {
+        width: 380,
+        p: 3,
+      };
+
   return (
-    <Drawer anchor="right" open={open} onClose={onClose}
-      PaperProps={{ sx: { width: 380, p: 3 } }}
+    <Drawer
+      anchor={isMobile ? 'bottom' : 'right'}
+      open={open}
+      onClose={onClose}
+      PaperProps={{ sx: drawerSx }}
     >
+      {/* Mobile: drag handle pill */}
+      {isMobile && (
+        <Box sx={{ display: 'flex', justifyContent: 'center', mb: 1.5 }}>
+          <Box sx={{
+            width: 40, height: 4, borderRadius: 2,
+            backgroundColor: alpha('#000', 0.15),
+          }} />
+        </Box>
+      )}
+
+      {/* Header */}
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
         <Typography variant="h6" fontWeight={700}>Add to day</Typography>
-        <IconButton onClick={onClose}><CloseIcon /></IconButton>
+        <IconButton
+          onClick={onClose}
+          sx={{ ...(isMobile && { p: 1, minWidth: 44, minHeight: 44 }) }}
+        >
+          <CloseIcon />
+        </IconButton>
       </Box>
 
       {/* Type picker */}
-      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 3 }}>
+      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 2.5 }}>
         {QUICK_ADD_TYPES.map(t => {
           const c = STOP_CONFIG[t];
           return (
             <Chip
               key={t}
               label={c.label}
-              size="small"
+              size={isMobile ? 'medium' : 'small'}
               onClick={() => setForm(f => ({ ...f, type: t, duration: DEFAULT_DURATIONS[t] ?? 60 }))}
               sx={{
                 borderColor: c.color,
@@ -393,6 +514,11 @@ function AddStopDrawer({
                 color: c.color,
                 fontWeight: form.type === t ? 700 : 400,
                 border: '1px solid',
+                // Larger tap target on mobile
+                ...(isMobile && {
+                  height: 36,
+                  '& .MuiChip-label': { px: 1.5 },
+                }),
               }}
             />
           );
@@ -405,8 +531,9 @@ function AddStopDrawer({
           value={form.name}
           onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
           fullWidth
-          autoFocus
+          autoFocus={!isMobile}  // Don't auto-focus on mobile — avoids keyboard jumping sheet
           placeholder={`e.g. ${cfg.label.split(' ').slice(1).join(' ')} with client`}
+          InputProps={{ sx: isMobile ? { fontSize: '1rem' } : {} }}
         />
 
         <Box sx={{ display: 'flex', gap: 2 }}>
@@ -417,6 +544,7 @@ function AddStopDrawer({
             onChange={e => setForm(f => ({ ...f, scheduledStart: e.target.value }))}
             fullWidth
             InputLabelProps={{ shrink: true }}
+            InputProps={{ sx: isMobile ? { fontSize: '1rem' } : {} }}
           />
           <TextField
             label="Duration (min)"
@@ -425,6 +553,7 @@ function AddStopDrawer({
             onChange={e => setForm(f => ({ ...f, duration: Number(e.target.value) }))}
             fullWidth
             inputProps={{ min: 5, step: 5 }}
+            InputProps={{ sx: isMobile ? { fontSize: '1rem' } : {} }}
           />
         </Box>
 
@@ -436,12 +565,27 @@ function AddStopDrawer({
             onChange={e => searchLocation(e.target.value)}
             fullWidth
             placeholder="Search for a place..."
+            InputProps={{ sx: isMobile ? { fontSize: '1rem' } : {} }}
           />
           {suggestions.length > 0 && (
-            <Paper sx={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 20, maxHeight: 180, overflow: 'auto', boxShadow: 4 }}>
+            <Paper sx={{
+              position: 'absolute', top: '100%', left: 0, right: 0,
+              zIndex: 20, maxHeight: 200, overflow: 'auto', boxShadow: 6,
+            }}>
               {suggestions.map((f, i) => (
-                <Box key={i} onClick={() => selectLocation(f)}
-                  sx={{ px: 2, py: 1.5, cursor: 'pointer', '&:hover': { backgroundColor: 'action.hover' }, borderBottom: '1px solid', borderColor: 'divider' }}>
+                <Box
+                  key={i}
+                  onClick={() => selectLocation(f)}
+                  sx={{
+                    px: 2,
+                    py: isMobile ? 2 : 1.5,  // taller rows on mobile
+                    cursor: 'pointer',
+                    '&:hover': { backgroundColor: 'action.hover' },
+                    '&:active': { backgroundColor: 'action.selected' },
+                    borderBottom: '1px solid',
+                    borderColor: 'divider',
+                  }}
+                >
                   <Typography variant="body2" fontWeight={600}>{f.text}</Typography>
                   <Typography variant="caption" color="text.secondary">{f.place_name}</Typography>
                 </Box>
@@ -456,16 +600,24 @@ function AddStopDrawer({
           onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
           fullWidth
           multiline
-          rows={2}
+          rows={isMobile ? 2 : 2}
           placeholder="Any details, links, confirmation numbers..."
+          InputProps={{ sx: isMobile ? { fontSize: '1rem' } : {} }}
         />
 
         <Button
           variant="contained"
           onClick={submit}
           disabled={!form.name || saving}
-          sx={{ mt: 1 }}
           fullWidth
+          sx={{
+            mt: 1,
+            ...(isMobile && {
+              py: 1.75,
+              fontSize: '1rem',
+              borderRadius: 2,
+            }),
+          }}
         >
           {saving ? <CircularProgress size={20} /> : 'Add to itinerary'}
         </Button>
@@ -476,174 +628,191 @@ function AddStopDrawer({
 
 // ─── Main ItineraryTab ────────────────────────────────────────────────────────
 export default function ItineraryTab({ tripId, startDate, endDate }: Props) {
-  const [days, setDays] = useState<Day[]>([]);
-  const [loading, setLoading] = useState(true);
+  const theme   = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
+
+  // Responsive pixels-per-minute
+  const pxPerMin   = isMobile ? PX_PER_MIN_MOBILE : PX_PER_MIN_DESKTOP;
+  const timelineH  = TOTAL_MINS * pxPerMin;
+
+  const [days, setDays]               = useState<Day[]>([]);
+  const [loading, setLoading]         = useState(true);
   const [activeDayIdx, setActiveDayIdx] = useState(0);
   const [calculating, setCalculating] = useState(false);
-  const [drawer, setDrawer] = useState<{ open: boolean; time: string; type: string }>({
+  const [showAllChips, setShowAllChips] = useState(false);
+  const [drawer, setDrawer]           = useState<{ open: boolean; time: string; type: string }>({
     open: false, time: '09:00', type: 'activity',
   });
 
-useEffect(() => {
-  async function loadItinerary() {
-    try {
-      const res = await fetch(`/api/trips/${tripId}/itinerary`);
-      const data = await res.json();
-
-      setDays(data.days ?? []);
-
-      const cached = await getTripCache(tripId);
-      await saveTripCache(tripId, {
-        ...(cached ?? {}),
-        itinerary: data.days ?? [],
-      });
-
-    } catch {
-      const cached = await getTripCache(tripId);
-      if (cached?.itinerary) {
-        setDays(cached.itinerary);
+  useEffect(() => {
+    async function loadItinerary() {
+      try {
+        const res  = await fetch(`/api/trips/${tripId}/itinerary`);
+        const data = await res.json();
+        setDays(data.days ?? []);
+        const cached = await getTripCache(tripId);
+        await saveTripCache(tripId, { ...(cached ?? {}), itinerary: data.days ?? [] });
+      } catch {
+        const cached = await getTripCache(tripId);
+        if (cached?.itinerary) setDays(cached.itinerary);
+      } finally {
+        setLoading(false);
       }
-    } finally {
-      setLoading(false);
     }
-  }
-
-  loadItinerary();
-}, [tripId]);
+    loadItinerary();
+  }, [tripId]);
 
   const activeDay = days[activeDayIdx];
 
-  const openDrawer = (time: string, type = 'activity') => setDrawer({ open: true, time, type });
+  const openDrawer = (time: string, type = 'activity') =>
+    setDrawer({ open: true, time, type });
 
-const addStop = async (stop: Partial<Stop>) => {
-  const day = days[activeDayIdx];
+  const addStop = async (stop: Partial<Stop>) => {
+    const day = days[activeDayIdx];
+    const updatedDays = [...days];
+    updatedDays[activeDayIdx] = {
+      ...day,
+      stops: [
+        ...day.stops,
+        {
+          ...stop,
+          scheduledStart: `${day.date.split('T')[0]}T${stop.scheduledStart}:00`,
+          duration: stop.duration ?? 60,
+        } as Stop,
+      ],
+    };
+    setDays(updatedDays);
+    await saveTripCache(tripId, { ...(await getTripCache(tripId)), itinerary: updatedDays });
 
-  const updatedDays = [...days];
-  updatedDays[activeDayIdx] = {
-    ...day,
-    stops: [
-      ...day.stops,
-      {
-        ...stop,
-        scheduledStart: `${day.date.split('T')[0]}T${stop.scheduledStart}:00`,
-        duration: stop.duration ?? 60,
-      } as Stop,
-    ],
+    if (!navigator.onLine) {
+      await queueAction({ type: 'ADD_STOP', tripId, payload: { dayDate: day.date, stop } });
+      return;
+    }
+
+    const res = await fetch(`/api/trips/${tripId}/itinerary/stops`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        dayDate: day.date,
+        stop: { ...stop, scheduledStart: `${day.date.split('T')[0]}T${stop.scheduledStart}:00` },
+      }),
+    });
+    const data = await res.json();
+    setDays(data.days);
   };
 
-  setDays(updatedDays);
+  const deleteStop = async (stopId: string) => {
+    const updatedDays = days.map(day => ({
+      ...day,
+      stops: day.stops.filter(s => s._id !== stopId),
+    }));
+    setDays(updatedDays);
+    await saveTripCache(tripId, { ...(await getTripCache(tripId)), itinerary: updatedDays });
 
-  await saveTripCache(tripId, {
-    ...(await getTripCache(tripId)),
-    itinerary: updatedDays,
-  });
+    if (!navigator.onLine) {
+      await queueAction({ type: 'DELETE_STOP', tripId, stopId });
+      return;
+    }
 
-  if (!navigator.onLine) {
-    await queueAction({
-      type: 'ADD_STOP',
-      tripId,
-      payload: {
-        dayDate: day.date,
-        stop,
-      },
-    });
-    return;
-  }
+    const res  = await fetch(`/api/trips/${tripId}/itinerary/stops/${stopId}`, { method: 'DELETE' });
+    const data = await res.json();
+    setDays(data.days);
+  };
 
-  const res = await fetch(`/api/trips/${tripId}/itinerary/stops`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      dayDate: day.date,
-      stop: {
-        ...stop,
-        scheduledStart: `${day.date.split('T')[0]}T${stop.scheduledStart}:00`,
-      },
-    }),
-  });
+  const calculateTravel = async () => {
+    setCalculating(true);
 
-  const data = await res.json();
-  setDays(data.days);
-};
+    if (!navigator.onLine) {
+      await queueAction({ type: 'CALCULATE_TRAVEL', tripId });
+      setCalculating(false);
+      return;
+    }
 
-const deleteStop = async (stopId: string) => {
-  const updatedDays = days.map(day => ({
-    ...day,
-    stops: day.stops.filter(s => s._id !== stopId),
-  }));
-
-  setDays(updatedDays);
-
-  await saveTripCache(tripId, {
-    ...(await getTripCache(tripId)),
-    itinerary: updatedDays,
-  });
-
-  if (!navigator.onLine) {
-    await queueAction({
-      type: 'DELETE_STOP',
-      tripId,
-      stopId,
-    });
-    return;
-  }
-
-  const res = await fetch(`/api/trips/${tripId}/itinerary/stops/${stopId}`, { method: 'DELETE' });
-  const data = await res.json();
-  setDays(data.days);
-};
-
-const calculateTravel = async () => {
-  setCalculating(true);
-
-  if (!navigator.onLine) {
-    await queueAction({
-      type: 'CALCULATE_TRAVEL',
-      tripId,
-    });
+    const res  = await fetch(`/api/trips/${tripId}/itinerary/calculate-travel`, { method: 'POST' });
+    const data = await res.json();
+    setDays(data.days);
+    await saveTripCache(tripId, { ...(await getTripCache(tripId)), itinerary: data.days });
     setCalculating(false);
-    return;
-  }
+  };
 
-  const res = await fetch(`/api/trips/${tripId}/itinerary/calculate-travel`, { method: 'POST' });
-  const data = await res.json();
+  if (loading) return (
+    <Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}>
+      <CircularProgress />
+    </Box>
+  );
+  if (!days.length) return (
+    <Typography color="text.secondary" sx={{ py: 4, textAlign: 'center' }}>
+      No itinerary days found.
+    </Typography>
+  );
 
-  setDays(data.days);
-
-  await saveTripCache(tripId, {
-    ...(await getTripCache(tripId)),
-    itinerary: data.days,
-  });
-
-  setCalculating(false);
-};
-
-  if (loading) return <Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}><CircularProgress /></Box>;
-  if (!days.length) return <Typography color="text.secondary" sx={{ py: 4, textAlign: 'center' }}>No itinerary days found.</Typography>;
-
-  const free = activeDay ? totalFreeMinutes(activeDay.stops) : 0;
-  const freeH = Math.floor(free / 60);
-  const freeM = free % 60;
+  const free   = activeDay ? totalFreeMinutes(activeDay.stops) : 0;
+  const freeH  = Math.floor(free / 60);
+  const freeM  = free % 60;
   const freeLabel = freeH > 0 ? `${freeH}h${freeM > 0 ? ` ${freeM}m` : ''} free` : `${freeM}m free`;
+
+  // Quick add chips — on mobile show 4 initially, rest behind "more" toggle
+  const visibleChipCount  = isMobile ? 4 : 5;
+  const visibleChips      = showAllChips ? QUICK_ADD_TYPES : QUICK_ADD_TYPES.slice(0, visibleChipCount);
+  const hasHiddenChips    = !showAllChips && QUICK_ADD_TYPES.length > visibleChipCount;
 
   return (
     <Box>
       {/* ── Top bar ── */}
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-        <Typography variant="h6" fontWeight={700}>Day by Day</Typography>
-        <Box sx={{ display: 'flex', gap: 1 }}>
+      <Box sx={{
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        mb: 2.5,
+        gap: 1,
+      }}>
+        <Typography variant={isMobile ? 'h6' : 'h6'} fontWeight={700}>
+          Day by Day
+        </Typography>
+
+        <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+          {/* Calculate A-to-B: icon-only on mobile, labelled on desktop */}
+          {isMobile ? (
+            <Tooltip title="Calculate A-to-B travel times">
+              <span>
+                <IconButton
+                  onClick={calculateTravel}
+                  disabled={calculating}
+                  size="medium"
+                  sx={{
+                    border: '1px solid',
+                    borderColor: 'divider',
+                    borderRadius: 1.5,
+                    minWidth: 44,
+                    minHeight: 44,
+                    color: 'text.secondary',
+                  }}
+                >
+                  {calculating
+                    ? <CircularProgress size={18} />
+                    : <RouteIcon fontSize="small" />
+                  }
+                </IconButton>
+              </span>
+            </Tooltip>
+          ) : (
+            <Button
+              variant="outlined"
+              size="small"
+              onClick={calculateTravel}
+              disabled={calculating}
+              startIcon={calculating ? <CircularProgress size={14} /> : <DirectionsWalkIcon />}
+            >
+              {calculating ? 'Calculating...' : 'Calculate A-to-B'}
+            </Button>
+          )}
+
           <Button
-            variant="outlined" size="small"
-            onClick={calculateTravel}
-            disabled={calculating}
-            startIcon={calculating ? <CircularProgress size={14} /> : <DirectionsWalkIcon />}
-          >
-            {calculating ? 'Calculating...' : 'Calculate A-to-B'}
-          </Button>
-          <Button
-            variant="contained" size="small"
+            variant="contained"
+            size={isMobile ? 'medium' : 'small'}
             startIcon={<AddIcon />}
             onClick={() => openDrawer('09:00', 'activity')}
+            sx={isMobile ? { minHeight: 44, px: 2 } : {}}
           >
             Add
           </Button>
@@ -651,14 +820,21 @@ const calculateTravel = async () => {
       </Box>
 
       {/* ── Day selector ── */}
-      <Box sx={{ display: 'flex', gap: 1, mb: 3, overflowX: 'auto', pb: 0.5,
-        '&::-webkit-scrollbar': { height: 4 },
+      <Box sx={{
+        display: 'flex',
+        gap: isMobile ? 0.75 : 1,
+        mb: 2.5,
+        overflowX: 'auto',
+        pb: 0.5,
+        // Hide scrollbar on mobile — swipe is the natural gesture
+        scrollbarWidth: 'none',
+        '&::-webkit-scrollbar': { height: isMobile ? 0 : 4 },
         '&::-webkit-scrollbar-thumb': { backgroundColor: 'divider', borderRadius: 2 },
       }}>
         {days.map((day, i) => {
-          const d   = new Date(day.date);
-          const dow = d.toLocaleDateString('en-IE', { weekday: 'short' });
-          const dom = d.toLocaleDateString('en-IE', { day: 'numeric', month: 'short' });
+          const d      = new Date(day.date);
+          const dow    = d.toLocaleDateString('en-IE', { weekday: 'short' });
+          const dom    = d.toLocaleDateString('en-IE', { day: 'numeric', month: 'short' });
           const hasStops = day.stops.length > 0;
           const active = i === activeDayIdx;
           return (
@@ -666,21 +842,43 @@ const calculateTravel = async () => {
               key={day.date}
               onClick={() => setActiveDayIdx(i)}
               sx={{
-                flexShrink: 0, px: 2, py: 1.25, borderRadius: 2, cursor: 'pointer',
-                border: '2px solid', transition: 'all 0.15s',
+                flexShrink: 0,
+                // Larger tap target on mobile
+                px: isMobile ? 2 : 2,
+                py: isMobile ? 1.5 : 1.25,
+                borderRadius: 2,
+                cursor: 'pointer',
+                border: '2px solid',
+                transition: 'all 0.15s',
                 borderColor: active ? 'primary.main' : 'divider',
                 backgroundColor: active ? 'primary.main' : 'background.paper',
                 color: active ? 'white' : 'text.primary',
+                minWidth: isMobile ? 62 : 'unset',
                 '&:hover': { borderColor: 'primary.main' },
+                '&:active': { opacity: 0.88 },
               }}
             >
-              <Typography variant="caption" display="block" sx={{ opacity: 0.8, fontWeight: 600, textAlign: 'center' }}>
+              <Typography
+                variant="caption"
+                display="block"
+                sx={{ opacity: 0.8, fontWeight: 600, textAlign: 'center', fontSize: isMobile ? '0.7rem' : undefined }}
+              >
                 {dow}
               </Typography>
-              <Typography variant="body2" fontWeight={700} textAlign="center">{dom}</Typography>
+              <Typography
+                variant="body2"
+                fontWeight={700}
+                textAlign="center"
+                sx={{ fontSize: isMobile ? '0.8rem' : undefined }}
+              >
+                {dom}
+              </Typography>
               {hasStops && (
                 <Box sx={{ display: 'flex', justifyContent: 'center', mt: 0.5 }}>
-                  <Box sx={{ width: 6, height: 6, borderRadius: '50%', backgroundColor: active ? 'rgba(255,255,255,0.7)' : 'primary.main' }} />
+                  <Box sx={{
+                    width: 6, height: 6, borderRadius: '50%',
+                    backgroundColor: active ? 'rgba(255,255,255,0.7)' : 'primary.main',
+                  }} />
                 </Box>
               )}
             </Box>
@@ -690,13 +888,34 @@ const calculateTravel = async () => {
 
       {/* ── Day header ── */}
       {activeDay && (
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-          <Box>
-            <Typography variant="h5" fontWeight={800}>
-              Day {activeDay.dayNumber} —{' '}
-              {new Date(activeDay.date).toLocaleDateString('en-IE', { weekday: 'long', day: 'numeric', month: 'long' })}
+        <Box sx={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: isMobile ? 'flex-start' : 'center',
+          mb: 2,
+          gap: 1,
+        }}>
+          <Box sx={{ minWidth: 0 }}>
+            <Typography
+              variant={isMobile ? 'h6' : 'h5'}
+              fontWeight={800}
+              sx={{ lineHeight: 1.25 }}
+            >
+              Day {activeDay.dayNumber}
+              {isMobile ? '\n' : ' — '}
+              <Typography
+                component="span"
+                variant={isMobile ? 'body1' : 'h5'}
+                fontWeight={isMobile ? 500 : 800}
+                color={isMobile ? 'text.secondary' : 'inherit'}
+                sx={{ display: isMobile ? 'block' : 'inline' }}
+              >
+                {new Date(activeDay.date).toLocaleDateString('en-IE', {
+                  weekday: 'long', day: 'numeric', month: 'long',
+                })}
+              </Typography>
             </Typography>
-            <Box sx={{ display: 'flex', gap: 1, mt: 0.5 }}>
+            <Box sx={{ display: 'flex', gap: 0.75, mt: 0.75, flexWrap: 'wrap' }}>
               <Chip
                 size="small"
                 label={`${activeDay.stops.filter(s => s.source !== 'logistics').length} planned`}
@@ -717,51 +936,113 @@ const calculateTravel = async () => {
               )}
             </Box>
           </Box>
-          <Button variant="outlined" size="small" startIcon={<AddIcon />} onClick={() => openDrawer('09:00', 'meeting')}>
-            Quick add
-          </Button>
+
+          {/* Quick add — hidden on mobile (Add button in top bar is sufficient) */}
+          {!isMobile && (
+            <Button
+              variant="outlined"
+              size="small"
+              startIcon={<AddIcon />}
+              onClick={() => openDrawer('09:00', 'meeting')}
+              sx={{ flexShrink: 0 }}
+            >
+              Quick add
+            </Button>
+          )}
         </Box>
       )}
 
-      {/* ── Quick add type row ── */}
-      <Box sx={{ display: 'flex', gap: 1, mb: 2.5, flexWrap: 'wrap' }}>
-        {QUICK_ADD_TYPES.slice(0, 5).map(t => {
+      {/* ── Quick add chip row ── */}
+      <Box sx={{ display: 'flex', gap: 1, mb: 2.5, flexWrap: 'wrap', alignItems: 'center' }}>
+        {visibleChips.map(t => {
           const c = STOP_CONFIG[t];
           return (
             <Chip
               key={t}
               label={c.label}
-              size="small"
+              size={isMobile ? 'medium' : 'small'}
               onClick={() => openDrawer('09:00', t)}
               variant="outlined"
-              sx={{ borderColor: alpha(c.color, 0.4), color: c.color, '&:hover': { backgroundColor: c.bg } }}
+              sx={{
+                borderColor: alpha(c.color, 0.4),
+                color: c.color,
+                '&:hover': { backgroundColor: c.bg },
+                '&:active': { backgroundColor: c.bg },
+                ...(isMobile && {
+                  height: 36,
+                  '& .MuiChip-label': { px: 1.5, fontSize: '0.8rem' },
+                }),
+              }}
             />
           );
         })}
+        {/* Show more / show less toggle on mobile */}
+        {isMobile && (
+          <Chip
+            size="medium"
+            label={showAllChips ? 'Less' : `+${QUICK_ADD_TYPES.length - visibleChipCount} more`}
+            onClick={() => setShowAllChips(v => !v)}
+            icon={<ExpandMoreIcon sx={{
+              fontSize: 16,
+              transform: showAllChips ? 'rotate(180deg)' : 'none',
+              transition: 'transform 0.2s',
+            }} />}
+            sx={{
+              height: 36,
+              backgroundColor: alpha('#000', 0.04),
+              color: 'text.secondary',
+              '& .MuiChip-label': { px: 1, fontSize: '0.8rem' },
+            }}
+          />
+        )}
       </Box>
 
       {/* ── Timeline ── */}
       {activeDay && (
-        <Paper sx={{ backgroundColor: 'background.paper', overflow: 'hidden', borderRadius: 2, border: '1px solid', borderColor: 'divider' }}>
-          <Box sx={{ display: 'flex', position: 'relative', height: TIMELINE_H + 32 }}>
+        <Paper sx={{
+          backgroundColor: 'background.paper',
+          overflow: 'hidden',
+          borderRadius: 2,
+          border: '1px solid',
+          borderColor: 'divider',
+        }}>
+          <Box sx={{ display: 'flex', position: 'relative', height: timelineH + 32 }}>
 
             {/* Hour ruler */}
-            <Box sx={{ flexShrink: 0, width: 52, position: 'relative', borderRight: '1px solid', borderColor: 'divider', pt: 2 }}>
-              <HourRuler />
+            <Box sx={{
+              flexShrink: 0,
+              width: 44,
+              position: 'relative',
+              borderRight: '1px solid',
+              borderColor: 'divider',
+              pt: 2,
+            }}>
+              <HourRuler pxPerMin={pxPerMin} />
             </Box>
 
             {/* Main timeline column */}
             <Box
-              sx={{ flex: 1, position: 'relative', pt: 2, pb: 2, cursor: 'crosshair' }}
+              sx={{
+                flex: 1,
+                position: 'relative',
+                pt: 2,
+                pb: 2,
+                // On mobile: tap opens drawer. On desktop: crosshair for precise clicking.
+                cursor: isMobile ? 'default' : 'crosshair',
+                // Prevent accidental timeline taps when scrolling on mobile
+                WebkitOverflowScrolling: 'touch',
+              }}
               onClick={e => {
+                // On mobile we don't use click-to-place — users use the Add button
+                if (isMobile) return;
                 const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                const relY = e.clientY - rect.top - 16; // account for pt:2 (16px)
-                const mins = Math.round(relY / PX_PER_MIN / 15) * 15 + DAY_START_HOUR * 60;
+                const relY = e.clientY - rect.top - 16;
+                const mins = Math.round(relY / pxPerMin / 15) * 15 + DAY_START_HOUR * 60;
                 const clamped = Math.max(DAY_START_HOUR * 60, Math.min(DAY_END_HOUR * 60 - 30, mins));
                 openDrawer(formatTime(clamped));
               }}
             >
-              <GridLines />
+              <GridLines pxPerMin={pxPerMin} />
 
               {/* Free time gaps */}
               {freeSlots(activeDay.stops).map((slot, i) => (
@@ -769,6 +1050,8 @@ const calculateTravel = async () => {
                   key={i}
                   slot={slot}
                   onQuickAdd={time => openDrawer(time)}
+                  pxPerMin={pxPerMin}
+                  isMobile={isMobile}
                 />
               ))}
 
@@ -784,19 +1067,39 @@ const calculateTravel = async () => {
                         openDrawer(t ? formatTime(t) : '09:00', stop.type);
                       }
                     }}
+                    pxPerMin={pxPerMin}
+                    isMobile={isMobile}
                   />
-                  <TravelConnector stop={stop} />
+                  <TravelConnector stop={stop} pxPerMin={pxPerMin} />
                 </Box>
               ))}
 
-              {/* "Click to add" hint when day is empty */}
+              {/* Empty state */}
               {activeDay.stops.length === 0 && (
                 <Box sx={{
-                  position: 'absolute', inset: 0, display: 'flex',
-                  flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+                  position: 'absolute', inset: 0,
+                  display: 'flex', flexDirection: 'column',
+                  alignItems: 'center', justifyContent: 'center',
+                  gap: 1.5,
                   pointerEvents: 'none',
                 }}>
-                  <Typography variant="body2" color="text.disabled">Click anywhere to add</Typography>
+                  <Typography variant="body2" color="text.disabled">
+                    {isMobile ? 'Tap Add to start planning your day' : 'Click anywhere to add a stop'}
+                  </Typography>
+                  {isMobile && (
+                    // Re-enable pointer events just for this button so user can tap it
+                    <Box sx={{ pointerEvents: 'auto' }}>
+                      <Button
+                        variant="outlined"
+                        size="small"
+                        startIcon={<AddIcon />}
+                        onClick={() => openDrawer('09:00', 'activity')}
+                        sx={{ borderRadius: 2 }}
+                      >
+                        Add first stop
+                      </Button>
+                    </Box>
+                  )}
                 </Box>
               )}
             </Box>
@@ -811,6 +1114,7 @@ const calculateTravel = async () => {
         onAdd={addStop}
         defaultTime={drawer.time}
         defaultType={drawer.type}
+        isMobile={isMobile}
       />
     </Box>
   );
