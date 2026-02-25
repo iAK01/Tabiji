@@ -26,12 +26,15 @@ import BusinessIcon         from '@mui/icons-material/Business';
 import RestaurantIcon       from '@mui/icons-material/Restaurant';
 import SportsSoccerIcon     from '@mui/icons-material/SportsSoccer';
 import LaunchIcon           from '@mui/icons-material/Launch';
-import AttractionIcon       from '@mui/icons-material/AccountBalance';  // museum/attraction stand-in
+import AttractionIcon       from '@mui/icons-material/AccountBalance';
 import EventIcon            from '@mui/icons-material/Event';
 import AirportSearch        from '@/components/ui/AirportSearch';
 import AirlineSearch        from '@/components/ui/AirlineSearch';
+import AddressSearch        from '@/components/ui/AddressSearch';
+import NavigateButton       from '@/components/ui/NavigateButton';
 import BookingLinks         from '@/components/logistics/BookingLinks';
 import { saveTripCache, getTripCache, queueAction } from '@/lib/offline/db';
+import type { ResolvedAddress } from '@/components/ui/AddressSearch';
 
 interface LogisticsTabProps {
   tripId: string;
@@ -57,6 +60,11 @@ const TRANSPORT_TYPES = [
 ] as const;
 
 type TransportType = typeof TRANSPORT_TYPES[number]['value'];
+
+// Transport types where departure location is a navigable real-world place
+const NAVIGABLE_TRANSPORT_TYPES = new Set([
+  'train', 'bus', 'ferry', 'car_hire', 'taxi', 'private_transfer',
+]);
 
 // ─── Venue types ──────────────────────────────────────────────────────────────
 const VENUE_TYPES = [
@@ -95,26 +103,43 @@ const STATUS_COLOUR: Record<string, 'default' | 'warning' | 'success' | 'error' 
   confirmed: 'success', cancelled: 'error',
 };
 
+// ── Blank states — coordinates added for navigable fields ────────────────────
 const BLANK_TRANSPORT = {
-  type:               'flight' as TransportType,
-  status:             'not_booked',
-  departureLocation:  '',
-  arrivalLocation:    '',
-  departureTime:      '',
-  arrivalTime:        '',
-  confirmationNumber: '',
-  cost:               '',
-  notes:              '',
+  type:                 'flight' as TransportType,
+  status:               'not_booked',
+  departureLocation:    '',
+  departureCoordinates: null as { lat: number; lng: number } | null,
+  arrivalLocation:      '',
+  arrivalCoordinates:   null as { lat: number; lng: number } | null,
+  departureTime:        '',
+  arrivalTime:          '',
+  confirmationNumber:   '',
+  cost:                 '',
+  notes:                '',
   details: {
     airline: '', airlineIata: '', flightNumber: '', seat: '', cabin: '',
     operator: '', railSubtype: '',
-    rentalCompany: '', pickupLocation: '', dropoffLocation: '', vehicle: '',
+    rentalCompany: '',
+    pickupLocation:      '',
+    pickupCoordinates:   null as { lat: number; lng: number } | null,
+    dropoffLocation:     '',
+    dropoffCoordinates:  null as { lat: number; lng: number } | null,
+    vehicle: '',
   },
 };
 
 const BLANK_ACCOM = {
-  type: 'hotel', status: 'not_booked', name: '', address: '',
-  checkIn: '', checkOut: '', confirmationNumber: '', cost: '', notes: '',
+  type:               'hotel',
+  status:             'not_booked',
+  name:               '',
+  address:            '',
+  coordinates:        null as { lat: number; lng: number } | null,
+  addressVerified:    false,
+  checkIn:            '',
+  checkOut:           '',
+  confirmationNumber: '',
+  cost:               '',
+  notes:              '',
 };
 
 const BLANK_VENUE = {
@@ -122,6 +147,7 @@ const BLANK_VENUE = {
   status:             'not_booked',
   name:               '',
   address:            '',
+  coordinates:        null as { lat: number; lng: number } | null,
   date:               '',
   time:               '',
   endTime:            '',
@@ -175,14 +201,14 @@ function getTransportLabel(t: any): string {
 
 function getTransportSubtitle(t: any): string {
   switch (t.type) {
-    case 'flight':          return t.details?.airline ?? t.airline ?? '';
+    case 'flight':           return t.details?.airline  ?? t.airline   ?? '';
     case 'train':
     case 'bus':
-    case 'ferry':           return t.details?.operator ?? '';
-    case 'car_hire':        return t.details?.vehicle ?? '';
+    case 'ferry':            return t.details?.operator ?? '';
+    case 'car_hire':         return t.details?.vehicle  ?? '';
     case 'taxi':
     case 'private_transfer': return t.details?.operator ?? '';
-    default:                return '';
+    default:                 return '';
   }
 }
 
@@ -350,7 +376,7 @@ export default function LogisticsTab({ tripId, trip }: LogisticsTabProps) {
   const fmtDate = (d: string) =>
     d ? new Date(d).toLocaleDateString('en-IE', { dateStyle: 'medium' }) : '';
 
-  const setDetail = (key: string, val: string) =>
+  const setDetail = (key: string, val: any) =>
     setTransport(p => ({ ...p, details: { ...p.details, [key]: val } }));
 
   const changeType = (newType: TransportType) =>
@@ -396,12 +422,24 @@ export default function LogisticsTab({ tripId, trip }: LogisticsTabProps) {
               ))}
             </Select>
           </FormControl>
-          <TextField label="From (station)" fullWidth placeholder="Dublin Heuston"
-            value={transport.departureLocation}
-            onChange={e => setTransport(p => ({ ...p, departureLocation: e.target.value }))} />
-          <TextField label="To (station)" fullWidth placeholder="Belfast Great Victoria St"
-            value={transport.arrivalLocation}
-            onChange={e => setTransport(p => ({ ...p, arrivalLocation: e.target.value }))} />
+          <AddressSearch
+            label="From (station)" value={transport.departureLocation}
+            placeholder="Dublin Heuston"
+            onChange={(r: ResolvedAddress | null) => setTransport(p => ({
+              ...p,
+              departureLocation:    r?.address     ?? '',
+              departureCoordinates: r?.coordinates ?? null,
+            }))}
+          />
+          <AddressSearch
+            label="To (station)" value={transport.arrivalLocation}
+            placeholder="Belfast Great Victoria St"
+            onChange={(r: ResolvedAddress | null) => setTransport(p => ({
+              ...p,
+              arrivalLocation:    r?.address     ?? '',
+              arrivalCoordinates: r?.coordinates ?? null,
+            }))}
+          />
           <TextField label="Seat / coach" fullWidth placeholder="Coach B, Seat 42"
             value={transport.details.seat} onChange={e => setDetail('seat', e.target.value)} />
         </>)}
@@ -409,10 +447,22 @@ export default function LogisticsTab({ tripId, trip }: LogisticsTabProps) {
         {type === 'bus' && (<>
           <TextField label="Operator" fullWidth placeholder="Bus Éireann, Aircoach…"
             value={transport.details.operator} onChange={e => setDetail('operator', e.target.value)} />
-          <TextField label="From (stop / station)" fullWidth value={transport.departureLocation}
-            onChange={e => setTransport(p => ({ ...p, departureLocation: e.target.value }))} />
-          <TextField label="To (stop / station)" fullWidth value={transport.arrivalLocation}
-            onChange={e => setTransport(p => ({ ...p, arrivalLocation: e.target.value }))} />
+          <AddressSearch
+            label="From (stop / station)" value={transport.departureLocation}
+            onChange={(r: ResolvedAddress | null) => setTransport(p => ({
+              ...p,
+              departureLocation:    r?.address     ?? '',
+              departureCoordinates: r?.coordinates ?? null,
+            }))}
+          />
+          <AddressSearch
+            label="To (stop / station)" value={transport.arrivalLocation}
+            onChange={(r: ResolvedAddress | null) => setTransport(p => ({
+              ...p,
+              arrivalLocation:    r?.address     ?? '',
+              arrivalCoordinates: r?.coordinates ?? null,
+            }))}
+          />
           <TextField label="Seat" fullWidth value={transport.details.seat}
             onChange={e => setDetail('seat', e.target.value)} />
         </>)}
@@ -420,12 +470,24 @@ export default function LogisticsTab({ tripId, trip }: LogisticsTabProps) {
         {type === 'ferry' && (<>
           <TextField label="Operator" fullWidth placeholder="Stena Line, Irish Ferries…"
             value={transport.details.operator} onChange={e => setDetail('operator', e.target.value)} />
-          <TextField label="From (port)" fullWidth placeholder="Dublin Port"
-            value={transport.departureLocation}
-            onChange={e => setTransport(p => ({ ...p, departureLocation: e.target.value }))} />
-          <TextField label="To (port)" fullWidth placeholder="Holyhead"
-            value={transport.arrivalLocation}
-            onChange={e => setTransport(p => ({ ...p, arrivalLocation: e.target.value }))} />
+          <AddressSearch
+            label="From (port)" value={transport.departureLocation}
+            placeholder="Dublin Port"
+            onChange={(r: ResolvedAddress | null) => setTransport(p => ({
+              ...p,
+              departureLocation:    r?.address     ?? '',
+              departureCoordinates: r?.coordinates ?? null,
+            }))}
+          />
+          <AddressSearch
+            label="To (port)" value={transport.arrivalLocation}
+            placeholder="Holyhead"
+            onChange={(r: ResolvedAddress | null) => setTransport(p => ({
+              ...p,
+              arrivalLocation:    r?.address     ?? '',
+              arrivalCoordinates: r?.coordinates ?? null,
+            }))}
+          />
           <FormControl fullWidth>
             <InputLabel>Cabin</InputLabel>
             <Select value={transport.details.cabin} label="Cabin"
@@ -452,34 +514,78 @@ export default function LogisticsTab({ tripId, trip }: LogisticsTabProps) {
           <TextField label="Rental company" fullWidth placeholder="Hertz, Avis, Enterprise…"
             value={transport.details.rentalCompany}
             onChange={e => setDetail('rentalCompany', e.target.value)} />
-          <TextField label="Pickup location" fullWidth placeholder="OTP Airport Terminal 1"
-            value={transport.details.pickupLocation}
-            onChange={e => { setDetail('pickupLocation', e.target.value); setTransport(p => ({ ...p, departureLocation: e.target.value })); }} />
-          <TextField label="Drop-off location" fullWidth placeholder="Same / City centre"
-            value={transport.details.dropoffLocation}
-            onChange={e => { setDetail('dropoffLocation', e.target.value); setTransport(p => ({ ...p, arrivalLocation: e.target.value })); }} />
+          <AddressSearch
+            label="Pickup location" value={transport.details.pickupLocation}
+            placeholder="OTP Airport Terminal 1"
+            onChange={(r: ResolvedAddress | null) => {
+              setDetail('pickupLocation',    r?.address     ?? '');
+              setDetail('pickupCoordinates', r?.coordinates ?? null);
+              setTransport(p => ({
+                ...p,
+                departureLocation:    r?.address     ?? '',
+                departureCoordinates: r?.coordinates ?? null,
+              }));
+            }}
+          />
+          <AddressSearch
+            label="Drop-off location" value={transport.details.dropoffLocation}
+            placeholder="Same / City centre"
+            onChange={(r: ResolvedAddress | null) => {
+              setDetail('dropoffLocation',    r?.address     ?? '');
+              setDetail('dropoffCoordinates', r?.coordinates ?? null);
+              setTransport(p => ({
+                ...p,
+                arrivalLocation:    r?.address     ?? '',
+                arrivalCoordinates: r?.coordinates ?? null,
+              }));
+            }}
+          />
           <TextField label="Vehicle class (optional)" fullWidth placeholder="Economy, SUV…"
             value={transport.details.vehicle} onChange={e => setDetail('vehicle', e.target.value)} />
         </>)}
 
         {type === 'taxi' && (<>
-          <TextField label="From" fullWidth placeholder="OTP Airport"
-            value={transport.departureLocation}
-            onChange={e => setTransport(p => ({ ...p, departureLocation: e.target.value }))} />
-          <TextField label="To" fullWidth placeholder="Hotel / City centre"
-            value={transport.arrivalLocation}
-            onChange={e => setTransport(p => ({ ...p, arrivalLocation: e.target.value }))} />
+          <AddressSearch
+            label="From" value={transport.departureLocation}
+            placeholder="OTP Airport"
+            onChange={(r: ResolvedAddress | null) => setTransport(p => ({
+              ...p,
+              departureLocation:    r?.address     ?? '',
+              departureCoordinates: r?.coordinates ?? null,
+            }))}
+          />
+          <AddressSearch
+            label="To" value={transport.arrivalLocation}
+            placeholder="Hotel / City centre"
+            onChange={(r: ResolvedAddress | null) => setTransport(p => ({
+              ...p,
+              arrivalLocation:    r?.address     ?? '',
+              arrivalCoordinates: r?.coordinates ?? null,
+            }))}
+          />
           <TextField label="Operator (optional)" fullWidth placeholder="Bolt, Free Now…"
             value={transport.details.operator} onChange={e => setDetail('operator', e.target.value)} />
         </>)}
 
         {type === 'private_transfer' && (<>
-          <TextField label="From" fullWidth placeholder="OTP Airport"
-            value={transport.departureLocation}
-            onChange={e => setTransport(p => ({ ...p, departureLocation: e.target.value }))} />
-          <TextField label="To" fullWidth placeholder="Hotel"
-            value={transport.arrivalLocation}
-            onChange={e => setTransport(p => ({ ...p, arrivalLocation: e.target.value }))} />
+          <AddressSearch
+            label="From" value={transport.departureLocation}
+            placeholder="OTP Airport"
+            onChange={(r: ResolvedAddress | null) => setTransport(p => ({
+              ...p,
+              departureLocation:    r?.address     ?? '',
+              departureCoordinates: r?.coordinates ?? null,
+            }))}
+          />
+          <AddressSearch
+            label="To" value={transport.arrivalLocation}
+            placeholder="Hotel"
+            onChange={(r: ResolvedAddress | null) => setTransport(p => ({
+              ...p,
+              arrivalLocation:    r?.address     ?? '',
+              arrivalCoordinates: r?.coordinates ?? null,
+            }))}
+          />
           <TextField label="Operator / provider" fullWidth placeholder="Company or driver name"
             value={transport.details.operator} onChange={e => setDetail('operator', e.target.value)} />
           <TextField label="Vehicle (optional)" fullWidth placeholder="Mercedes E-Class"
@@ -524,47 +630,61 @@ export default function LogisticsTab({ tripId, trip }: LogisticsTabProps) {
   };
 
   // ── Transport card ─────────────────────────────────────────────────────────
-  const TransportCard = ({ t, i }: { t: any; i: number }) => (
-    <Paper sx={{ p: { xs: 2, sm: 2.5 }, mb: 2, backgroundColor: 'background.paper' }}>
-      <Box sx={{ display: 'flex', gap: 1.5 }}>
-        <Box sx={{ color: 'primary.main', mt: 0.25, flexShrink: 0 }}>
-          {transportIcon(t.type, { fontSize: 'medium' })}
-        </Box>
-        <Box sx={{ flexGrow: 1, minWidth: 0 }}>
-          <Typography fontWeight={700} sx={{ fontSize: '1rem' }}>
-            {getTransportLabel(t)}
-          </Typography>
-          {getTransportSubtitle(t) && (
-            <Typography variant="body2" color="text.secondary">{getTransportSubtitle(t)}</Typography>
-          )}
-          {(t.departureTime || t.arrivalTime) && (
-            <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-              {t.departureTime ? fmtDateTime(t.departureTime) : ''}
-              {t.arrivalTime   ? ` → ${fmtDateTime(t.arrivalTime)}` : ''}
+  const TransportCard = ({ t, i }: { t: any; i: number }) => {
+    const isNavigable = NAVIGABLE_TRANSPORT_TYPES.has(t.type);
+    const navDest = isNavigable ? {
+      name:        getTransportLabel(t),
+      address:     t.departureLocation ?? t.details?.pickupLocation ?? '',
+      coordinates: t.departureCoordinates ?? t.details?.pickupCoordinates ?? null,
+    } : null;
+
+    return (
+      <Paper sx={{ p: { xs: 2, sm: 2.5 }, mb: 2, backgroundColor: 'background.paper' }}>
+        <Box sx={{ display: 'flex', gap: 1.5 }}>
+          <Box sx={{ color: 'primary.main', mt: 0.25, flexShrink: 0 }}>
+            {transportIcon(t.type, { fontSize: 'medium' })}
+          </Box>
+          <Box sx={{ flexGrow: 1, minWidth: 0 }}>
+            <Typography fontWeight={700} sx={{ fontSize: '1rem' }}>
+              {getTransportLabel(t)}
             </Typography>
-          )}
-          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1.5, mt: 1 }}>
-            {(t.details?.seat ?? t.seat) && (
-              <Typography variant="caption" color="text.secondary">
-                Seat {t.details?.seat ?? t.seat}
+            {getTransportSubtitle(t) && (
+              <Typography variant="body2" color="text.secondary">{getTransportSubtitle(t)}</Typography>
+            )}
+            {(t.departureTime || t.arrivalTime) && (
+              <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                {t.departureTime ? fmtDateTime(t.departureTime) : ''}
+                {t.arrivalTime   ? ` → ${fmtDateTime(t.arrivalTime)}` : ''}
               </Typography>
             )}
-            {t.confirmationNumber && (
-              <Typography variant="caption" color="text.secondary">Ref: {t.confirmationNumber}</Typography>
-            )}
-            {t.cost && <Typography variant="caption" color="text.secondary">€{t.cost}</Typography>}
+            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1.5, mt: 1 }}>
+              {(t.details?.seat ?? t.seat) && (
+                <Typography variant="caption" color="text.secondary">
+                  Seat {t.details?.seat ?? t.seat}
+                </Typography>
+              )}
+              {t.confirmationNumber && (
+                <Typography variant="caption" color="text.secondary">Ref: {t.confirmationNumber}</Typography>
+              )}
+              {t.cost && <Typography variant="caption" color="text.secondary">€{t.cost}</Typography>}
+            </Box>
+          </Box>
+          <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 0.5, flexShrink: 0 }}>
+            <Chip label={t.status.replace('_', ' ')} color={STATUS_COLOUR[t.status]} size="small"
+              sx={{ fontWeight: 700, fontSize: '0.7rem', textTransform: 'capitalize' }} />
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+              {navDest && (
+                <NavigateButton destination={navDest} suggestedMode="driving" size="small" />
+              )}
+              <IconButton size="small" onClick={e => openMenu(e, 'transport', i)}>
+                <MoreVertIcon fontSize="small" />
+              </IconButton>
+            </Box>
           </Box>
         </Box>
-        <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 0.5, flexShrink: 0 }}>
-          <Chip label={t.status.replace('_', ' ')} color={STATUS_COLOUR[t.status]} size="small"
-            sx={{ fontWeight: 700, fontSize: '0.7rem', textTransform: 'capitalize' }} />
-          <IconButton size="small" onClick={e => openMenu(e, 'transport', i)}>
-            <MoreVertIcon fontSize="small" />
-          </IconButton>
-        </Box>
-      </Box>
-    </Paper>
-  );
+      </Paper>
+    );
+  };
 
   // ── Accommodation card ─────────────────────────────────────────────────────
   const AccomCard = ({ a, i }: { a: any; i: number }) => (
@@ -589,9 +709,16 @@ export default function LogisticsTab({ tripId, trip }: LogisticsTabProps) {
         <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 0.5, flexShrink: 0 }}>
           <Chip label={a.status.replace('_', ' ')} color={STATUS_COLOUR[a.status]} size="small"
             sx={{ fontWeight: 700, fontSize: '0.7rem', textTransform: 'capitalize' }} />
-          <IconButton size="small" onClick={e => openMenu(e, 'accom', i)}>
-            <MoreVertIcon fontSize="small" />
-          </IconButton>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+            <NavigateButton
+              destination={{ name: a.name, address: a.address, coordinates: a.coordinates ?? null }}
+              suggestedMode="driving"
+              size="small"
+            />
+            <IconButton size="small" onClick={e => openMenu(e, 'accom', i)}>
+              <MoreVertIcon fontSize="small" />
+            </IconButton>
+          </Box>
         </Box>
       </Box>
     </Paper>
@@ -617,37 +744,40 @@ export default function LogisticsTab({ tripId, trip }: LogisticsTabProps) {
               </Typography>
             )}
             <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1.5, mt: 1 }}>
-              <Chip
-                label={venueTypeLabel}
-                size="small"
-                variant="outlined"
-                sx={{ fontSize: '0.65rem', height: 20 }}
-              />
+              <Chip label={venueTypeLabel} size="small" variant="outlined"
+                sx={{ fontSize: '0.65rem', height: 20 }} />
               {v.confirmationNumber && (
                 <Typography variant="caption" color="text.secondary">Ref: {v.confirmationNumber}</Typography>
               )}
               {v.cost && <Typography variant="caption" color="text.secondary">€{v.cost}</Typography>}
-{v.website && (
-  <Chip
-    label="Website"
-    size="small"
-    component="a"
-    href={v.website}
-    target="_blank"
-    rel="noopener noreferrer"
-    clickable
-    icon={<LaunchIcon sx={{ fontSize: '0.75rem !important' }} />}
-    sx={{ fontSize: '0.65rem', height: 24 }}
-  />
-)}
+              {v.website && (
+                <Chip
+                  label="Website"
+                  size="small"
+                  component="a"
+                  href={v.website}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  clickable
+                  icon={<LaunchIcon sx={{ fontSize: '0.75rem !important' }} />}
+                  sx={{ fontSize: '0.65rem', height: 24 }}
+                />
+              )}
             </Box>
           </Box>
           <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 0.5, flexShrink: 0 }}>
             <Chip label={v.status.replace('_', ' ')} color={STATUS_COLOUR[v.status]} size="small"
               sx={{ fontWeight: 700, fontSize: '0.7rem', textTransform: 'capitalize' }} />
-            <IconButton size="small" onClick={e => openMenu(e, 'venue', i)}>
-              <MoreVertIcon fontSize="small" />
-            </IconButton>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+              <NavigateButton
+                destination={{ name: v.name, address: v.address, coordinates: v.coordinates ?? null }}
+                suggestedMode="walking"
+                size="small"
+              />
+              <IconButton size="small" onClick={e => openMenu(e, 'venue', i)}>
+                <MoreVertIcon fontSize="small" />
+              </IconButton>
+            </Box>
           </Box>
         </Box>
       </Paper>
@@ -786,7 +916,7 @@ export default function LogisticsTab({ tripId, trip }: LogisticsTabProps) {
                 ))}
               </Box>
             </Box>
-           {TransportFields()}
+            {TransportFields()}
           </Box>
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 3, gap: 1, flexDirection: { xs: 'column-reverse', sm: 'row' } }}>
@@ -812,8 +942,17 @@ export default function LogisticsTab({ tripId, trip }: LogisticsTabProps) {
             </FormControl>
             <TextField label="Name" fullWidth placeholder="Hotel Intercontinental"
               value={accom.name} onChange={e => setAccom(p => ({ ...p, name: e.target.value }))} />
-            <TextField label="Address" fullWidth value={accom.address}
-              onChange={e => setAccom(p => ({ ...p, address: e.target.value }))} />
+            <AddressSearch
+              label="Address"
+              value={accom.address}
+              placeholder="Search for the hotel or property address…"
+              onChange={(r: ResolvedAddress | null) => setAccom(p => ({
+                ...p,
+                address:         r?.address     ?? '',
+                coordinates:     r?.coordinates ?? null,
+                addressVerified: !!r,
+              }))}
+            />
             <TextField label="Check in" type="date" fullWidth InputLabelProps={{ shrink: true }}
               value={accom.checkIn} onChange={e => setAccom(p => ({ ...p, checkIn: e.target.value }))} />
             <TextField label="Check out" type="date" fullWidth InputLabelProps={{ shrink: true }}
@@ -849,8 +988,6 @@ export default function LogisticsTab({ tripId, trip }: LogisticsTabProps) {
         <DialogTitle fontWeight={700}>Add Venue</DialogTitle>
         <DialogContent>
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, pt: 1 }}>
-
-            {/* Venue type picker */}
             <Box>
               <Typography variant="caption" color="text.secondary" fontWeight={600}
                 sx={{ display: 'block', mb: 1, textTransform: 'uppercase', fontSize: '0.65rem', letterSpacing: '0.05em' }}>
@@ -866,11 +1003,18 @@ export default function LogisticsTab({ tripId, trip }: LogisticsTabProps) {
                 ))}
               </Box>
             </Box>
-
             <TextField label="Venue name" fullWidth placeholder="3Arena, RDS, The Workman's Club…"
               value={venue.name} onChange={e => setVenue(p => ({ ...p, name: e.target.value }))} />
-            <TextField label="Address" fullWidth placeholder="East Link Bridge, North Wall Quay…"
-              value={venue.address} onChange={e => setVenue(p => ({ ...p, address: e.target.value }))} />
+            <AddressSearch
+              label="Address"
+              value={venue.address}
+              placeholder="East Link Bridge, North Wall Quay…"
+              onChange={(r: ResolvedAddress | null) => setVenue(p => ({
+                ...p,
+                address:     r?.address     ?? '',
+                coordinates: r?.coordinates ?? null,
+              }))}
+            />
             <TextField label="Date" type="date" fullWidth InputLabelProps={{ shrink: true }}
               value={venue.date} onChange={e => setVenue(p => ({ ...p, date: e.target.value }))} />
             <Box sx={{ display: 'flex', gap: 2 }}>

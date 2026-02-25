@@ -7,26 +7,16 @@ const UserSchema = new Schema({
   avatarUrl: String,
 
   homeLocation: {
-    addressLine1: String,
-    addressLine2: String,
     city: String,
-    postcode: String,
     country: String,
     countryCode: String,
-    coordinates: { lat: Number, lng: Number }, // Geocoded server-side when needed for routing
+    coordinates: { lat: Number, lng: Number },
     timezone: String,
     currency: String,
     currencySymbol: String,
     electricalPlug: String,
     language: String,
     emergency: String,
-  },
-
-  preferredAirport: {
-    iata: String,
-    name: String,
-    city: String,
-    country: String,
   },
 
   passport: {
@@ -36,17 +26,32 @@ const UserSchema = new Schema({
     number: String,
   },
 
-  travelInsurance: {
-    provider: String,
-    policyNumber: String,
-    emergencyPhone: String,
-    expiry: Date,
-  },
-
   preferences: {
     units: { type: String, enum: ['metric', 'imperial'], default: 'metric' },
     language: { type: String, default: 'en' },
     defaultTripType: { type: String, enum: ['work', 'leisure', 'mixed'] },
+
+    // ── Navigation app preferences per travel mode ──────────────────────────
+    // 'apple_maps' is only meaningful on iOS — the UI filters it by platform
+    navigationApps: {
+      walking: {
+        type: String,
+        enum: ['apple_maps', 'google_maps', 'waze'],
+        default: 'google_maps',
+      },
+      driving: {
+        type: String,
+        enum: ['apple_maps', 'google_maps', 'waze'],
+        default: 'google_maps',
+      },
+      transit: {
+        type: String,
+        enum: ['apple_maps', 'google_maps', 'waze'],
+        default: 'google_maps',
+      },
+      // Set to true once user has explicitly configured their preferences
+      setupComplete: { type: Boolean, default: false },
+    },
   },
 }, { timestamps: true });
 

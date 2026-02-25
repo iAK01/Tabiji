@@ -63,7 +63,7 @@ const TAB_CONFIG = [
   { label: 'Context', Icon: LightbulbIcon },
   { label: 'Weather',      Icon: WbSunnyIcon },
   { label: 'Map',          Icon: MapIcon },
-  { label: 'Files',        Icon: FolderOpenIcon },
+  { label: 'Resources',        Icon: FolderOpenIcon },
 ];
 
 const QUICK_ACTIONS = [
