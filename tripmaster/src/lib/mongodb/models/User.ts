@@ -7,10 +7,13 @@ const UserSchema = new Schema({
   avatarUrl: String,
 
   homeLocation: {
+    addressLine1: String,
+    addressLine2: String,
     city: String,
+    postcode: String,
     country: String,
     countryCode: String,
-    coordinates: { lat: Number, lng: Number },
+    coordinates: { lat: Number, lng: Number }, // Geocoded server-side when needed for routing
     timezone: String,
     currency: String,
     currencySymbol: String,
@@ -19,11 +22,25 @@ const UserSchema = new Schema({
     emergency: String,
   },
 
+  preferredAirport: {
+    iata: String,
+    name: String,
+    city: String,
+    country: String,
+  },
+
   passport: {
-    country: String,       // Country that issued the passport
+    country: String,
     countryCode: String,
     expiry: Date,
-    number: String,        // Optional — useful for pre-fill on forms
+    number: String,
+  },
+
+  travelInsurance: {
+    provider: String,
+    policyNumber: String,
+    emergencyPhone: String,
+    expiry: Date,
   },
 
   preferences: {

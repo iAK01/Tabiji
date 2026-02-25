@@ -24,7 +24,7 @@ import FreeBreakfastIcon from '@mui/icons-material/FreeBreakfast';
 import { saveTripCache, getTripCache, queueAction } from '@/lib/offline/db';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
-const DAY_START_HOUR = 7;     // 7am
+const DAY_START_HOUR = 6;     // 6am
 const DAY_END_HOUR   = 24;    // midnight
 const PX_PER_MIN     = 1.2;   // pixels per minute — controls timeline density
 const TOTAL_MINS     = (DAY_END_HOUR - DAY_START_HOUR) * 60;
@@ -43,15 +43,16 @@ const STOP_CONFIG: Record<string, { label: string; color: string; bg: string; Ic
   transport:   { label: '🚌 Transport',     color: '#0369a1', bg: '#E0F2FE', Icon: DirectionsBusIcon },
   work:        { label: '💻 Work block',   color: '#1D2642', bg: '#E8EAF0', Icon: WorkIcon },
   other:       { label: '📍 Other',        color: '#6b7280', bg: '#F3F4F6', Icon: EventIcon },
+  gig:         { label: '🎤 Gig',          color: '#ff69b4', bg: '#ffe0f0', Icon: EventIcon },
 };
 
 const QUICK_ADD_TYPES = [
-  'meeting', 'meal', 'breakfast', 'activity', 'sightseeing', 'transport', 'work', 'other'
+  'meeting', 'meal', 'breakfast', 'activity', 'sightseeing', 'transport', 'work', 'other', 'gig'
 ];
 
 const DEFAULT_DURATIONS: Record<string, number> = {
   flight: 180, hotel: 0, meeting: 60, meal: 75, breakfast: 45,
-  activity: 120, sightseeing: 90, transport: 45, work: 120, other: 60,
+  activity: 120, sightseeing: 90, transport: 45, work: 120, other: 60, gig: 120,
 };
 
 // ─── Interfaces ───────────────────────────────────────────────────────────────

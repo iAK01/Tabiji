@@ -1,31 +1,32 @@
 import mongoose, { Schema } from 'mongoose';
 
 const LocationSchema = new Schema({
-  city: String,
-  country: String,
-  countryCode: String,
-  coordinates: { lat: Number, lng: Number },
-  timezone: String,
-  currency: String,
+  city:          String,
+  country:       String,
+  countryCode:   String,
+  coordinates:   { lat: Number, lng: Number },
+  timezone:      String,
+  currency:      String,
   currencySymbol: String,
   electricalPlug: String,
+  iataCode:      String,  // nearest airport IATA — e.g. DUB, OTP, BRE
 }, { _id: false });
 
 const TripSchema = new Schema({
   userId: { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
-  name: { type: String, required: true },
-  origin: LocationSchema,
+  name:   { type: String, required: true },
+  origin:      LocationSchema,
   destination: LocationSchema,
   additionalDestinations: [{ ...LocationSchema.obj, arrivalDate: Date, departureDate: Date, nights: Number }],
   startDate: Date,
-  endDate: Date,
-  nights: Number,
-  tripType: { type: String, enum: ['work', 'leisure', 'mixed'] },
-  purpose: String,
-  coverPhotoUrl: String,
-  coverPhotoThumb: String,
+  endDate:   Date,
+  nights:    Number,
+  tripType:  { type: String, enum: ['work', 'leisure', 'mixed'] },
+  purpose:   String,
+  coverPhotoUrl:    String,
+  coverPhotoThumb:  String,
   coverPhotoCredit: String,
-  weather: { type: Schema.Types.Mixed },
+  weather:   { type: Schema.Types.Mixed },
   status: {
     type: String,
     enum: ['idea', 'planning', 'confirmed', 'active', 'completed', 'cancelled'],

@@ -1,11 +1,11 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   Box, Container, Typography, AppBar, Toolbar, IconButton, Button,
   Paper, TextField, Select, MenuItem, FormControl, InputLabel,
-  Chip, CircularProgress, Alert, Divider, ToggleButton, ToggleButtonGroup,
+  Chip, CircularProgress, Alert, ToggleButton, ToggleButtonGroup,
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import EditIcon from '@mui/icons-material/Edit';
@@ -15,44 +15,69 @@ import PersonIcon from '@mui/icons-material/Person';
 import HomeIcon from '@mui/icons-material/Home';
 import BadgeIcon from '@mui/icons-material/Badge';
 import TuneIcon from '@mui/icons-material/Tune';
-import { COUNTRY_LIST, COUNTRY_META, getCountryMeta } from '@/lib/data/countries';
+import FlightIcon from '@mui/icons-material/Flight';
+import HealthAndSafetyIcon from '@mui/icons-material/HealthAndSafety';
+import MyLocationIcon from '@mui/icons-material/MyLocation';
+import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
+import { COUNTRY_LIST, getCountryMeta } from '@/lib/data/countries';
+import AirportSearch from '@/components/ui/AirportSearch';
+import { Airport } from '@/lib/data/airports';
+
+// ─── Types ───────────────────────────────────────────────────────────────────
+
+interface Coordinates { lat: number; lng: number }
+
+interface HomeLocation {
+  addressLine1: string;
+  addressLine2: string;
+  city: string;
+  postcode: string;
+  country: string;
+  countryCode: string;
+  coordinates: Coordinates | null;
+  timezone: string;
+  currency: string;
+  currencySymbol: string;
+  electricalPlug: string;
+  language: string;
+  emergency: string;
+}
 
 interface UserProfile {
   name: string;
   email: string;
-  homeLocation: {
-    city: string;
-    country: string;
-    countryCode: string;
-    timezone: string;
-    currency: string;
-    currencySymbol: string;
-    electricalPlug: string;
-    language: string;
-    emergency: string;
-  };
-  passport: {
-    country: string;
-    countryCode: string;
-    expiry: string;
-    number: string;
-  };
-  preferences: {
-    units: 'metric' | 'imperial';
-    defaultTripType: 'work' | 'leisure' | 'mixed';
-  };
+  homeLocation: HomeLocation;
+  preferredAirport: { iata: string; name: string; city: string; country: string } | null;
+  passport: { country: string; countryCode: string; expiry: string; number: string };
+  travelInsurance: { provider: string; policyNumber: string; emergencyPhone: string; expiry: string };
+  preferences: { units: 'metric' | 'imperial'; defaultTripType: 'work' | 'leisure' | 'mixed' };
 }
 
 const emptyProfile: UserProfile = {
   name: '',
   email: '',
-  homeLocation: { city: '', country: '', countryCode: '', timezone: '', currency: '', currencySymbol: '', electricalPlug: '', language: '', emergency: '' },
+  homeLocation: {
+    addressLine1: '', addressLine2: '', city: '', postcode: '',
+    country: '', countryCode: '', coordinates: null,
+    timezone: '', currency: '', currencySymbol: '',
+    electricalPlug: '', language: '', emergency: '',
+  },
+  preferredAirport: null,
   passport: { country: '', countryCode: '', expiry: '', number: '' },
+  travelInsurance: { provider: '', policyNumber: '', emergencyPhone: '', expiry: '' },
   preferences: { units: 'metric', defaultTripType: 'leisure' },
 };
 
-// Group countries by region for the select
 const REGIONS = Array.from(new Set(COUNTRY_LIST.map(c => c.region)));
+const MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN;
+
+// ─── Static map URL from coordinates ─────────────────────────────────────────
+function staticMapUrl(coords: Coordinates) {
+  const { lat, lng } = coords;
+  return `https://api.mapbox.com/styles/v1/mapbox/streets-v12/static/pin-l+e05c2b(${lng},${lat})/${lng},${lat},14/600x200@2x?access_token=${MAPBOX_TOKEN}`;
+}
+
+// ─── Component ───────────────────────────────────────────────────────────────
 
 export default function ProfilePage() {
   const router = useRouter();
@@ -63,6 +88,10 @@ export default function ProfilePage() {
   const [editing, setEditing] = useState(false);
   const [saved, setSaved] = useState(false);
 
+  // Geocoding state
+  const [geocoding, setGeocoding] = useState(false);
+  const [geocodeError, setGeocodeError] = useState<string | null>(null);
+
   const isOnboarding = !profile?.homeLocation?.countryCode;
 
   useEffect(() => {
@@ -70,22 +99,70 @@ export default function ProfilePage() {
       .then(res => res.json())
       .then(data => {
         if (data.user) {
-          setProfile(data.user);
-          setForm({
-            name: data.user.name || '',
-            email: data.user.email || '',
-            homeLocation: data.user.homeLocation || emptyProfile.homeLocation,
-            passport: data.user.passport || emptyProfile.passport,
-            preferences: data.user.preferences || emptyProfile.preferences,
-          });
-          // If no home location set, drop straight into edit mode
+          const merged: UserProfile = {
+            ...emptyProfile,
+            ...data.user,
+            homeLocation: { ...emptyProfile.homeLocation, ...data.user.homeLocation },
+            passport: { ...emptyProfile.passport, ...data.user.passport },
+            travelInsurance: { ...emptyProfile.travelInsurance, ...data.user.travelInsurance },
+            preferences: { ...emptyProfile.preferences, ...data.user.preferences },
+          };
+          setProfile(merged);
+          setForm(merged);
           if (!data.user.homeLocation?.countryCode) setEditing(true);
         }
         setLoading(false);
       });
   }, []);
 
-  // When home country changes, auto-fill meta fields
+  // ── Geocode the address via Mapbox ────────────────────────────────────────
+  const geocodeAddress = useCallback(async () => {
+    const { addressLine1, city, country } = form.homeLocation;
+    if (!addressLine1 || !city || !country) {
+      setGeocodeError('Please fill in at least Address Line 1, City, and Country before locating.');
+      return;
+    }
+
+    setGeocoding(true);
+    setGeocodeError(null);
+
+    const parts = [
+      form.homeLocation.addressLine1,
+      form.homeLocation.addressLine2,
+      form.homeLocation.city,
+      form.homeLocation.postcode,
+      form.homeLocation.country,
+    ].filter(Boolean).join(', ');
+
+    try {
+      const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(parts)}.json?limit=1&access_token=${MAPBOX_TOKEN}`;
+      const res = await fetch(url);
+      const data = await res.json();
+      const feature = data.features?.[0];
+
+      if (!feature) {
+        setGeocodeError('Address not found — try adjusting the spelling or postcode.');
+        setForm(p => ({ ...p, homeLocation: { ...p.homeLocation, coordinates: null } }));
+      } else {
+        const [lng, lat] = feature.center;
+        setForm(p => ({ ...p, homeLocation: { ...p.homeLocation, coordinates: { lat, lng } } }));
+      }
+    } catch {
+      setGeocodeError('Geocoding failed — check your connection and try again.');
+    } finally {
+      setGeocoding(false);
+    }
+  }, [form.homeLocation]);
+
+  // Clear coordinates if address fields change after a successful geocode
+  const updateAddressField = (field: keyof HomeLocation, value: string) => {
+    setForm(p => ({
+      ...p,
+      homeLocation: { ...p.homeLocation, [field]: value, coordinates: null },
+    }));
+    setGeocodeError(null);
+  };
+
   const handleHomeCountryChange = (code: string) => {
     const country = COUNTRY_LIST.find(c => c.code === code);
     const meta = getCountryMeta(code);
@@ -101,17 +178,22 @@ export default function ProfilePage() {
         electricalPlug: meta.electricalPlug,
         language: meta.language,
         emergency: meta.emergency,
+        coordinates: null,
       },
+    }));
+    setGeocodeError(null);
+  };
+
+  const handlePreferredAirportChange = (airport: Airport) => {
+    setForm(p => ({
+      ...p,
+      preferredAirport: { iata: airport.iata, name: airport.name, city: airport.city, country: airport.country },
     }));
   };
 
-  // When passport country changes, auto-fill name
   const handlePassportCountryChange = (code: string) => {
     const country = COUNTRY_LIST.find(c => c.code === code);
-    setForm(p => ({
-      ...p,
-      passport: { ...p.passport, countryCode: code, country: country?.name || '' },
-    }));
+    setForm(p => ({ ...p, passport: { ...p.passport, countryCode: code, country: country?.name || '' } }));
   };
 
   const handleSave = async () => {
@@ -128,12 +210,28 @@ export default function ProfilePage() {
     setTimeout(() => setSaved(false), 3000);
   };
 
-  // Passport expiry warning
+  // ── Warnings ───────────────────────────────────────────────────────────────
   const passportDaysLeft = profile?.passport?.expiry
     ? Math.floor((new Date(profile.passport.expiry).getTime() - Date.now()) / 86400000)
     : null;
-
   const passportWarning = passportDaysLeft !== null && passportDaysLeft < 180;
+
+  const insDays = profile?.travelInsurance?.expiry
+    ? Math.floor((new Date(profile.travelInsurance.expiry).getTime() - Date.now()) / 86400000)
+    : null;
+  const insWarning = insDays !== null && insDays < 30;
+
+  const hasInsurance = profile?.travelInsurance?.provider || profile?.travelInsurance?.policyNumber;
+
+  const homeAddressLines = profile?.homeLocation
+    ? [
+        profile.homeLocation.addressLine1,
+        profile.homeLocation.addressLine2,
+        profile.homeLocation.city,
+        profile.homeLocation.postcode,
+        profile.homeLocation.country,
+      ].filter(Boolean)
+    : [];
 
   if (loading) {
     return <Box sx={{ display: 'flex', justifyContent: 'center', py: 12 }}><CircularProgress /></Box>;
@@ -150,42 +248,38 @@ export default function ProfilePage() {
             {isOnboarding ? 'Set up your profile' : 'My Profile'}
           </Typography>
           {!isOnboarding && !editing && (
-            <Button color="inherit" startIcon={<EditIcon />} onClick={() => setEditing(true)}>
-              Edit
-            </Button>
+            <Button color="inherit" startIcon={<EditIcon />} onClick={() => setEditing(true)}>Edit</Button>
           )}
         </Toolbar>
       </AppBar>
 
       <Container maxWidth="sm" sx={{ py: 4 }}>
 
-        {/* Onboarding banner */}
         {isOnboarding && (
           <Alert severity="info" sx={{ mb: 3 }}>
-            Welcome! Set your home country so TripMaster can calculate electrical adapters, currency, timezone, and language differences for every trip.
+            Welcome! Set your home location so TripMaster can route you to the airport and calculate adapters, currency, and timezone differences for every trip.
           </Alert>
         )}
-
         {saved && (
-          <Alert severity="success" sx={{ mb: 3 }} icon={<CheckCircleIcon />}>
-            Profile saved successfully.
-          </Alert>
+          <Alert severity="success" sx={{ mb: 3 }} icon={<CheckCircleIcon />}>Profile saved successfully.</Alert>
         )}
-
-        {/* Passport expiry warning — view mode only */}
         {!editing && passportWarning && (
-          <Alert severity="warning" icon={<WarningAmberIcon />} sx={{ mb: 3 }}>
+          <Alert severity="warning" icon={<WarningAmberIcon />} sx={{ mb: 2 }}>
             Your passport expires in {passportDaysLeft} days.
-            {passportDaysLeft < 0 ? ' It has already expired.' : ' Most countries require 6 months validity.'}
+            {passportDaysLeft! < 0 ? ' It has already expired.' : ' Most countries require 6 months validity.'}
+          </Alert>
+        )}
+        {!editing && insWarning && (
+          <Alert severity="warning" icon={<WarningAmberIcon />} sx={{ mb: 2 }}>
+            Your travel insurance expires in {insDays} days.
           </Alert>
         )}
 
-        {/* ── VIEW MODE ── */}
+        {/* ════════════════ VIEW MODE ════════════════ */}
         {!editing && profile && (
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
 
-            {/* Personal */}
-            <Paper sx={{ p: 3, backgroundColor: 'background.paper' }}>
+            <Paper sx={{ p: 3 }}>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
                 <PersonIcon color="primary" />
                 <Typography variant="subtitle1" fontWeight={700}>Personal</Typography>
@@ -194,23 +288,38 @@ export default function ProfilePage() {
               <Typography variant="body2" color="text.secondary">{profile.email}</Typography>
             </Paper>
 
-            {/* Home location */}
-            <Paper sx={{ p: 3, backgroundColor: 'background.paper' }}>
+            <Paper sx={{ p: 3 }}>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
                 <HomeIcon color="primary" />
                 <Typography variant="subtitle1" fontWeight={700}>Home</Typography>
               </Box>
               {profile.homeLocation?.countryCode ? (
                 <Box>
-                  <Typography variant="body1">
-                    {profile.homeLocation.city ? `${profile.homeLocation.city}, ` : ''}{profile.homeLocation.country}
-                  </Typography>
+                  {homeAddressLines.map((line, i) => (
+                    <Typography key={i} variant={i === 0 ? 'body1' : 'body2'} color={i === 0 ? 'text.primary' : 'text.secondary'}>
+                      {line}
+                    </Typography>
+                  ))}
+                  {/* Map preview in view mode */}
+                  {profile.homeLocation.coordinates ? (
+                    <Box sx={{ mt: 2, borderRadius: 1, overflow: 'hidden', border: '1px solid', borderColor: 'divider' }}>
+                      <img
+                        src={staticMapUrl(profile.homeLocation.coordinates)}
+                        alt="Home location map"
+                        style={{ width: '100%', display: 'block' }}
+                      />
+                    </Box>
+                  ) : (
+                    <Alert severity="warning" icon={<ErrorOutlineIcon />} sx={{ mt: 2 }} variant="outlined">
+                      No coordinates — edit your profile and click "Locate address" to fix routing.
+                    </Alert>
+                  )}
                   <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mt: 1.5 }}>
-                    <Chip size="small" label={`🔌 ${profile.homeLocation.electricalPlug}`} variant="outlined" />
-                    <Chip size="small" label={`💰 ${profile.homeLocation.currency} ${profile.homeLocation.currencySymbol}`} variant="outlined" />
-                    <Chip size="small" label={`🗣️ ${profile.homeLocation.language}`} variant="outlined" />
-                    <Chip size="small" label={`⏰ ${profile.homeLocation.timezone}`} variant="outlined" />
-                    <Chip size="small" label={`🚨 ${profile.homeLocation.emergency}`} variant="outlined" />
+                    {profile.homeLocation.electricalPlug && <Chip size="small" label={`🔌 ${profile.homeLocation.electricalPlug}`} variant="outlined" />}
+                    {profile.homeLocation.currency && <Chip size="small" label={`💰 ${profile.homeLocation.currency} ${profile.homeLocation.currencySymbol}`} variant="outlined" />}
+                    {profile.homeLocation.language && <Chip size="small" label={`🗣️ ${profile.homeLocation.language}`} variant="outlined" />}
+                    {profile.homeLocation.timezone && <Chip size="small" label={`⏰ ${profile.homeLocation.timezone}`} variant="outlined" />}
+                    {profile.homeLocation.emergency && <Chip size="small" label={`🚨 ${profile.homeLocation.emergency}`} variant="outlined" />}
                   </Box>
                 </Box>
               ) : (
@@ -218,8 +327,25 @@ export default function ProfilePage() {
               )}
             </Paper>
 
-            {/* Passport */}
-            <Paper sx={{ p: 3, backgroundColor: 'background.paper' }}>
+            <Paper sx={{ p: 3 }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
+                <FlightIcon color="primary" />
+                <Typography variant="subtitle1" fontWeight={700}>Preferred Airport</Typography>
+              </Box>
+              {profile.preferredAirport?.iata ? (
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                  <Typography variant="h5" fontWeight={700} color="primary.main">{profile.preferredAirport.iata}</Typography>
+                  <Box>
+                    <Typography variant="body1">{profile.preferredAirport.name}</Typography>
+                    <Typography variant="body2" color="text.secondary">{profile.preferredAirport.city}, {profile.preferredAirport.country}</Typography>
+                  </Box>
+                </Box>
+              ) : (
+                <Typography variant="body2" color="text.secondary">Not set</Typography>
+              )}
+            </Paper>
+
+            <Paper sx={{ p: 3 }}>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
                 <BadgeIcon color="primary" />
                 <Typography variant="subtitle1" fontWeight={700}>Passport</Typography>
@@ -228,11 +354,7 @@ export default function ProfilePage() {
                 <Box>
                   <Typography variant="body1">{profile.passport.country}</Typography>
                   {profile.passport.expiry && (
-                    <Typography
-                      variant="body2"
-                      color={passportWarning ? 'error' : 'text.secondary'}
-                      sx={{ mt: 0.5 }}
-                    >
+                    <Typography variant="body2" color={passportWarning ? 'error' : 'text.secondary'} sx={{ mt: 0.5 }}>
                       Expires: {new Date(profile.passport.expiry).toLocaleDateString('en-IE', { day: 'numeric', month: 'long', year: 'numeric' })}
                       {passportWarning && ` ⚠️ (${passportDaysLeft} days)`}
                     </Typography>
@@ -243,8 +365,29 @@ export default function ProfilePage() {
               )}
             </Paper>
 
-            {/* Preferences */}
-            <Paper sx={{ p: 3, backgroundColor: 'background.paper' }}>
+            <Paper sx={{ p: 3 }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
+                <HealthAndSafetyIcon color="primary" />
+                <Typography variant="subtitle1" fontWeight={700}>Travel Insurance</Typography>
+              </Box>
+              {hasInsurance ? (
+                <Box>
+                  {profile.travelInsurance.provider && <Typography variant="body1">{profile.travelInsurance.provider}</Typography>}
+                  {profile.travelInsurance.policyNumber && <Typography variant="body2" color="text.secondary">Policy: {profile.travelInsurance.policyNumber}</Typography>}
+                  {profile.travelInsurance.emergencyPhone && <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>📞 {profile.travelInsurance.emergencyPhone}</Typography>}
+                  {profile.travelInsurance.expiry && (
+                    <Typography variant="body2" color={insWarning ? 'error' : 'text.secondary'} sx={{ mt: 0.5 }}>
+                      Expires: {new Date(profile.travelInsurance.expiry).toLocaleDateString('en-IE', { day: 'numeric', month: 'long', year: 'numeric' })}
+                      {insWarning && ` ⚠️ (${insDays} days)`}
+                    </Typography>
+                  )}
+                </Box>
+              ) : (
+                <Typography variant="body2" color="text.secondary">Not set</Typography>
+              )}
+            </Paper>
+
+            <Paper sx={{ p: 3 }}>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
                 <TuneIcon color="primary" />
                 <Typography variant="subtitle1" fontWeight={700}>Preferences</Typography>
@@ -260,12 +403,12 @@ export default function ProfilePage() {
           </Box>
         )}
 
-        {/* ── EDIT / ONBOARDING FORM ── */}
+        {/* ════════════════ EDIT FORM ════════════════ */}
         {editing && (
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
 
             {/* Personal */}
-            <Paper sx={{ p: 3, backgroundColor: 'background.paper' }}>
+            <Paper sx={{ p: 3 }}>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2.5 }}>
                 <PersonIcon color="primary" />
                 <Typography variant="subtitle1" fontWeight={700}>Personal</Typography>
@@ -278,18 +421,51 @@ export default function ProfilePage() {
               />
             </Paper>
 
-            {/* Home location */}
-            <Paper sx={{ p: 3, backgroundColor: 'background.paper' }}>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2.5 }}>
+            {/* Home Location */}
+            <Paper sx={{ p: 3 }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
                 <HomeIcon color="primary" />
                 <Typography variant="subtitle1" fontWeight={700}>Home location</Typography>
               </Box>
+              <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 2.5 }}>
+                Used to route you from home to your departure airport
+              </Typography>
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                <TextField
+                  label="Address line 1"
+                  value={form.homeLocation.addressLine1}
+                  onChange={e => updateAddressField('addressLine1', e.target.value)}
+                  fullWidth
+                  placeholder="e.g. 8 Main Street"
+                />
+                <TextField
+                  label="Address line 2 (optional)"
+                  value={form.homeLocation.addressLine2}
+                  onChange={e => updateAddressField('addressLine2', e.target.value)}
+                  fullWidth
+                  placeholder="e.g. Apartment No. 1"
+                />
+                <Box sx={{ display: 'flex', gap: 2 }}>
+                  <TextField
+                    label="City"
+                    value={form.homeLocation.city}
+                    onChange={e => updateAddressField('city', e.target.value)}
+                    fullWidth
+                    placeholder="e.g. Howth"
+                  />
+                  <TextField
+                    label="Postcode"
+                    value={form.homeLocation.postcode}
+                    onChange={e => updateAddressField('postcode', e.target.value)}
+                    sx={{ width: 160 }}
+                    placeholder="e.g. D13 T1F3"
+                  />
+                </Box>
                 <FormControl fullWidth required>
-                  <InputLabel>Home country</InputLabel>
+                  <InputLabel>Country</InputLabel>
                   <Select
                     value={form.homeLocation.countryCode}
-                    label="Home country"
+                    label="Country"
                     onChange={e => handleHomeCountryChange(e.target.value)}
                   >
                     {REGIONS.map(region => [
@@ -302,27 +478,78 @@ export default function ProfilePage() {
                     ])}
                   </Select>
                 </FormControl>
-                <TextField
-                  label="Home city (optional)"
-                  value={form.homeLocation.city}
-                  onChange={e => setForm(p => ({ ...p, homeLocation: { ...p.homeLocation, city: e.target.value } }))}
-                  fullWidth
-                  placeholder="e.g. Dublin"
-                />
-                {/* Auto-filled info chips */}
+
+                {/* Locate button + map preview */}
+                <Box>
+                  <Button
+                    variant="outlined"
+                    startIcon={geocoding ? <CircularProgress size={16} /> : <MyLocationIcon />}
+                    onClick={geocodeAddress}
+                    disabled={geocoding || !form.homeLocation.addressLine1 || !form.homeLocation.city}
+                    fullWidth
+                  >
+                    {geocoding ? 'Locating...' : form.homeLocation.coordinates ? 'Re-locate address' : 'Locate address on map'}
+                  </Button>
+
+                  {geocodeError && (
+                    <Alert severity="error" icon={<ErrorOutlineIcon />} sx={{ mt: 1.5 }}>
+                      {geocodeError}
+                    </Alert>
+                  )}
+
+                  {form.homeLocation.coordinates && !geocodeError && (
+                    <Box sx={{ mt: 1.5 }}>
+                      <Alert severity="success" icon={<CheckCircleIcon />} sx={{ mb: 1 }}>
+                        Address located — confirm the pin looks correct below.
+                      </Alert>
+                      <Box sx={{ borderRadius: 1, overflow: 'hidden', border: '1px solid', borderColor: 'success.main' }}>
+                        <img
+                          src={staticMapUrl(form.homeLocation.coordinates)}
+                          alt="Address location preview"
+                          style={{ width: '100%', display: 'block' }}
+                        />
+                      </Box>
+                      <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
+                        {form.homeLocation.coordinates.lat.toFixed(5)}, {form.homeLocation.coordinates.lng.toFixed(5)}
+                      </Typography>
+                    </Box>
+                  )}
+                </Box>
+
                 {form.homeLocation.countryCode && (
                   <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-                    <Chip size="small" label={`🔌 ${form.homeLocation.electricalPlug}`} color="primary" variant="outlined" />
-                    <Chip size="small" label={`💰 ${form.homeLocation.currency}`} color="primary" variant="outlined" />
-                    <Chip size="small" label={`🗣️ ${form.homeLocation.language}`} color="primary" variant="outlined" />
-                    <Chip size="small" label={`⏰ ${form.homeLocation.timezone}`} color="primary" variant="outlined" />
+                    {form.homeLocation.electricalPlug && <Chip size="small" label={`🔌 ${form.homeLocation.electricalPlug}`} color="primary" variant="outlined" />}
+                    {form.homeLocation.currency && <Chip size="small" label={`💰 ${form.homeLocation.currency}`} color="primary" variant="outlined" />}
+                    {form.homeLocation.language && <Chip size="small" label={`🗣️ ${form.homeLocation.language}`} color="primary" variant="outlined" />}
+                    {form.homeLocation.timezone && <Chip size="small" label={`⏰ ${form.homeLocation.timezone}`} color="primary" variant="outlined" />}
                   </Box>
                 )}
               </Box>
             </Paper>
 
+            {/* Preferred Airport */}
+            <Paper sx={{ p: 3 }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
+                <FlightIcon color="primary" />
+                <Typography variant="subtitle1" fontWeight={700}>Preferred Airport</Typography>
+              </Box>
+              <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 2 }}>
+                Your usual departure airport — used as the default when creating trips
+              </Typography>
+              <AirportSearch
+                label="Preferred departure airport"
+                value={form.preferredAirport ? `${form.preferredAirport.iata} — ${form.preferredAirport.city}` : ''}
+                onChange={handlePreferredAirportChange}
+              />
+              {form.preferredAirport && (
+                <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+                  {form.preferredAirport.name}
+                </Typography>
+              )}
+            </Paper>
+
             {/* Passport */}
-            <Paper sx={{ p: 3, backgroundColor: 'background.paper' }}>
+            <Paper sx={{ p: 3 }}>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
                 <BadgeIcon color="primary" />
                 <Typography variant="subtitle1" fontWeight={700}>Passport</Typography>
@@ -365,8 +592,49 @@ export default function ProfilePage() {
               </Box>
             </Paper>
 
+            {/* Travel Insurance */}
+            <Paper sx={{ p: 3 }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
+                <HealthAndSafetyIcon color="primary" />
+                <Typography variant="subtitle1" fontWeight={700}>Travel Insurance</Typography>
+              </Box>
+              <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 2 }}>
+                Quick access to your policy details while travelling
+              </Typography>
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                <TextField
+                  label="Insurance provider"
+                  value={form.travelInsurance.provider}
+                  onChange={e => setForm(p => ({ ...p, travelInsurance: { ...p.travelInsurance, provider: e.target.value } }))}
+                  fullWidth
+                  placeholder="e.g. Allianz, AXA, Aviva"
+                />
+                <TextField
+                  label="Policy number"
+                  value={form.travelInsurance.policyNumber}
+                  onChange={e => setForm(p => ({ ...p, travelInsurance: { ...p.travelInsurance, policyNumber: e.target.value } }))}
+                  fullWidth
+                />
+                <TextField
+                  label="Emergency phone number"
+                  value={form.travelInsurance.emergencyPhone}
+                  onChange={e => setForm(p => ({ ...p, travelInsurance: { ...p.travelInsurance, emergencyPhone: e.target.value } }))}
+                  fullWidth
+                  placeholder="e.g. +353 1 234 5678"
+                />
+                <TextField
+                  label="Policy expiry date"
+                  type="date"
+                  value={form.travelInsurance.expiry ? form.travelInsurance.expiry.split('T')[0] : ''}
+                  onChange={e => setForm(p => ({ ...p, travelInsurance: { ...p.travelInsurance, expiry: e.target.value } }))}
+                  fullWidth
+                  InputLabelProps={{ shrink: true }}
+                />
+              </Box>
+            </Paper>
+
             {/* Preferences */}
-            <Paper sx={{ p: 3, backgroundColor: 'background.paper' }}>
+            <Paper sx={{ p: 3 }}>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2.5 }}>
                 <TuneIcon color="primary" />
                 <Typography variant="subtitle1" fontWeight={700}>Preferences</Typography>

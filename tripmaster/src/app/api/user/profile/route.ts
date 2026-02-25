@@ -26,8 +26,10 @@ export async function PUT(req: Request) {
     {
       $set: {
         name: body.name,
-        homeLocation: body.homeLocation,
+        homeLocation: body.homeLocation,       // coordinates included from client-side geocoding
+        preferredAirport: body.preferredAirport ?? null,
         passport: body.passport,
+        travelInsurance: body.travelInsurance,
         preferences: body.preferences,
       },
     },

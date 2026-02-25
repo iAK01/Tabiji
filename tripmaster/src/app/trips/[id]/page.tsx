@@ -19,12 +19,15 @@ import BackpackIcon from '@mui/icons-material/Backpack';
 import LightbulbIcon from '@mui/icons-material/Lightbulb';
 import WbSunnyIcon from '@mui/icons-material/WbSunny';
 import GridViewIcon from '@mui/icons-material/GridView';
+import FolderOpenIcon from '@mui/icons-material/FolderOpen';
 import LogisticsTab from '@/components/logistics/LogisticsTab';
 import ItineraryTab from '@/components/itinerary/ItineraryTab';
 import PackingTab from '@/components/packing/PackingTab';
 import IntelligenceTab from '@/components/intelligence/IntelligenceTab';
 import WeatherTab from '@/components/weather/WeatherTab';
 import TripOverview from '@/components/overview/TripOverview';
+import FilesTab from '@/components/files/FilesTab';
+
 import dynamic from 'next/dynamic';
 import { saveTripCache, getTripCache, queueAction } from '@/lib/offline/db';
 
@@ -60,6 +63,7 @@ const TAB_CONFIG = [
   { label: 'Context', Icon: LightbulbIcon },
   { label: 'Weather',      Icon: WbSunnyIcon },
   { label: 'Map',          Icon: MapIcon },
+  { label: 'Files',        Icon: FolderOpenIcon },
 ];
 
 const QUICK_ACTIONS = [
@@ -69,6 +73,7 @@ const QUICK_ACTIONS = [
   { label: 'Context',     tab: 4, Icon: LightbulbIcon },
   { label: 'Weather',          tab: 5, Icon: WbSunnyIcon },
   { label: 'Map',              tab: 6, Icon: MapIcon },
+  { label: 'Files',            tab: 7, Icon: FolderOpenIcon },
 ];
 
 export default function TripPage() {
@@ -191,17 +196,19 @@ const saveEdit = async () => {
       <ArrowBackIcon />
     </IconButton>
 
-    <Box
-      component="img"
-      src="/Logo.jpeg"
-      alt="Logo"
-      sx={{
-        flexShrink: 0,
-        width: { xs: 48, sm: 112 },
-        height: { xs: 48, sm: 112 },
-        objectFit: 'contain'
-      }}
-    />
+   <Box
+  component="img"
+  src="/Logo.jpeg"
+  alt="Logo"
+  onClick={() => router.push('/dashboard')}
+  sx={{
+    flexShrink: 0,
+    width: { xs: 48, sm: 112 },
+    height: { xs: 48, sm: 112 },
+    objectFit: 'contain',
+    cursor: 'pointer',
+  }}
+/>
 
     <Typography
       variant="h4"
@@ -315,12 +322,13 @@ const saveEdit = async () => {
           <TripOverview trip={trip} onNavigate={setActiveTab} />
         )}
 
-        {activeTab === 1 && <LogisticsTab tripId={trip._id} />}
+        {activeTab === 1 && <LogisticsTab tripId={trip._id} trip={trip} />}
         {activeTab === 2 && <ItineraryTab tripId={trip._id} startDate={trip.startDate} endDate={trip.endDate} />}
         {activeTab === 3 && <PackingTab tripId={trip._id} tripType={trip.tripType} nights={trip.nights} />}
         {activeTab === 4 && <IntelligenceTab tripId={trip._id} />}
         {activeTab === 5 && <WeatherTab tripId={trip._id} destinationCity={trip.destination?.city} />}
         {activeTab === 6 && <MapTab tripId={trip._id} trip={trip} />}
+        {activeTab === 7 && <FilesTab tripId={trip._id} />}
 
       </Container>
 
