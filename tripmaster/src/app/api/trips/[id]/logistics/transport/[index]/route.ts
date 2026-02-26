@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import connectDB from '@/lib/mongodb/connection';
 import TripLogistics from '@/lib/mongodb/models/TripLogistics';
+import { syncLogisticsToItinerary } from '@/lib/itinerary/syncLogistics';
 
 export async function DELETE(_req: Request, { params }: { params: Promise<{ id: string; index: string }> }) {
   const { id, index } = await params;
@@ -12,5 +13,6 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
   if (!logistics) return NextResponse.json({ error: 'Not found' }, { status: 404 });
   logistics.transportation.splice(Number(index), 1);
   await logistics.save();
+  await syncLogisticsToItinerary(id, logistics);
   return NextResponse.json({ logistics });
 }

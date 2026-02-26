@@ -137,7 +137,7 @@ export async function syncLogisticsToItinerary(tripId: string, logistics?: any) 
           date:           toDateString(depTime),
           name,                          // ← was `label`
           type,
-          color,
+          color,  
           time,
           scheduledStart: toScheduledStart(depTime, time),
           scheduledEnd:   arrTime ? new Date(arrTime).toISOString() : undefined,
