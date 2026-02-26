@@ -1,22 +1,25 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import {
   Box, Typography, Paper, Chip, CircularProgress,
-  LinearProgress, Divider, Button, alpha,
+  LinearProgress, Divider, Button, alpha, IconButton, Tooltip,
 } from '@mui/material';
 import CheckCircleIcon           from '@mui/icons-material/CheckCircle';
 import WarningAmberIcon          from '@mui/icons-material/WarningAmber';
 import RadioButtonUncheckedIcon  from '@mui/icons-material/RadioButtonUnchecked';
+import BlockIcon                 from '@mui/icons-material/Block';
+import UndoIcon                  from '@mui/icons-material/Undo';
 import FlightIcon                from '@mui/icons-material/Flight';
 import HotelIcon                 from '@mui/icons-material/Hotel';
 import BackpackIcon              from '@mui/icons-material/Backpack';
 import LocalParkingIcon          from '@mui/icons-material/LocalParking';
 import DirectionsCarIcon         from '@mui/icons-material/DirectionsCar';
 import AccessTimeIcon            from '@mui/icons-material/AccessTime';
+import TheaterComedyIcon         from '@mui/icons-material/TheaterComedy';
 import NavigateButton            from '@/components/ui/NavigateButton';
 
-// ─── Helpers (duplicated from ItineraryTab — kept local to avoid circular dep) ─
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 function stopStartMinutes(stop: any): number | null {
   const timeStr = stop.scheduledStart
     ? stop.scheduledStart.includes('T')
@@ -53,22 +56,36 @@ interface Props {
 
 type StatusLevel = 'ok' | 'warn' | 'empty' | 'info';
 
-interface StatusRow {
+interface StatusCard {
+  key:      string;           // unique key for dismiss persistence
   icon:     React.ReactNode;
   label:    string;
   value:    string;
   level:    StatusLevel;
   action?:  { label: string; tab: number };
-  /** If provided, a navigate button is shown on the row */
   navDest?: { name?: string; address?: string; coordinates?: { lat: number; lng: number } | null };
 }
 
-const STATUS_ICON = {
-  ok:    <CheckCircleIcon          sx={{ fontSize: 18, color: 'success.main' }}  />,
-  warn:  <WarningAmberIcon         sx={{ fontSize: 18, color: 'warning.main' }}  />,
-  empty: <RadioButtonUncheckedIcon sx={{ fontSize: 18, color: 'text.disabled' }} />,
-  info:  <CheckCircleIcon          sx={{ fontSize: 18, color: 'primary.main' }}  />,
-};
+const LEVEL_COLOR = {
+  ok:    'success.main',
+  warn:  'warning.dark',
+  empty: 'text.disabled',
+  info:  'primary.main',
+} as const;
+
+const LEVEL_BG = {
+  ok:    'rgba(46,125,50,0.06)',
+  warn:  'rgba(237,108,2,0.06)',
+  empty: 'rgba(0,0,0,0.03)',
+  info:  'rgba(29,38,66,0.05)',
+} as const;
+
+const LEVEL_BORDER = {
+  ok:    'rgba(46,125,50,0.2)',
+  warn:  'rgba(237,108,2,0.3)',
+  empty: 'rgba(0,0,0,0.08)',
+  info:  'rgba(29,38,66,0.15)',
+} as const;
 
 // ─── Component ────────────────────────────────────────────────────────────────
 export default function TripOverview({ trip, onNavigate }: Props) {
@@ -76,6 +93,27 @@ export default function TripOverview({ trip, onNavigate }: Props) {
   const [packing,    setPacking]    = useState<any>(null);
   const [itinerary,  setItinerary]  = useState<any>(null);
   const [loading,    setLoading]    = useState(true);
+  const [dismissed,  setDismissed]  = useState<Set<string>>(new Set());
+
+  // Persist dismissed cards per trip in localStorage
+  const dismissKey = `tabiji-not-required-${trip._id}`;
+
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem(dismissKey);
+      if (stored) setDismissed(new Set(JSON.parse(stored)));
+    } catch {}
+  }, [dismissKey]);
+
+  const toggleDismiss = useCallback((key: string) => {
+    setDismissed(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      try { localStorage.setItem(dismissKey, JSON.stringify([...next])); } catch {}
+      return next;
+    });
+  }, [dismissKey]);
 
   useEffect(() => {
     Promise.all([
@@ -91,18 +129,15 @@ export default function TripOverview({ trip, onNavigate }: Props) {
   }, [trip._id]);
 
   // ── Date maths ────────────────────────────────────────────────────────────
-  const today      = new Date();
-  today.setHours(0, 0, 0, 0);
-  const departure  = new Date(trip.startDate);
-  departure.setHours(0, 0, 0, 0);
-  const tripEnd    = new Date(trip.endDate);
-  tripEnd.setHours(23, 59, 59, 999);
-  const daysUntil  = Math.ceil((departure.getTime() - today.getTime()) / 86400000);
-  const isPast     = today > tripEnd;
-  const isToday    = daysUntil === 0;
-  const isActive   = !isPast && today >= departure;
+  const today     = new Date(); today.setHours(0, 0, 0, 0);
+  const departure = new Date(trip.startDate); departure.setHours(0, 0, 0, 0);
+  const tripEnd   = new Date(trip.endDate);   tripEnd.setHours(23, 59, 59, 999);
+  const daysUntil = Math.ceil((departure.getTime() - today.getTime()) / 86400000);
+  const isPast    = today > tripEnd;
+  const isToday   = daysUntil === 0;
+  const isActive  = !isPast && today >= departure;
 
-  // ── What's Next — only relevant when trip is active ───────────────────────
+  // ── What's Next ───────────────────────────────────────────────────────────
   let nextStop: any = null;
   if (isActive && itinerary?.days) {
     const todayStr = new Date().toISOString().split('T')[0];
@@ -110,7 +145,7 @@ export default function TripOverview({ trip, onNavigate }: Props) {
       (d: any) => new Date(d.date).toISOString().split('T')[0] === todayStr,
     );
     if (todayDay?.stops?.length) {
-      const now     = new Date();
+      const now = new Date();
       const nowMins = now.getHours() * 60 + now.getMinutes();
       const upcoming = todayDay.stops
         .map((s: any) => ({ ...s, _startMins: stopStartMinutes(s) }))
@@ -121,20 +156,18 @@ export default function TripOverview({ trip, onNavigate }: Props) {
   }
 
   // ── Logistics analysis ────────────────────────────────────────────────────
-  const flights    = logistics?.transportation?.filter((t: any) => t.type === 'flight') ?? [];
-  const outbound   = flights.filter((f: any) => f.departureAirport !== trip.destination?.city?.slice(0, 3));
-  const inbound    = flights.filter((f: any) => f.arrivalAirport   !== trip.destination?.city?.slice(0, 3));
-  const noFlights  = flights.length === 0;
-
+  const flights        = logistics?.transportation?.filter((t: any) => t.type === 'flight') ?? [];
+  const noFlights      = flights.length === 0;
   const accommodation  = logistics?.accommodation ?? [];
-  const allHotelsBooked  = accommodation.length > 0 && accommodation.every((a: any) => a.status === 'confirmed');
-  const someHotelsBooked = accommodation.some((a: any) => a.status === 'confirmed');
-  const noHotel          = accommodation.length === 0;
-
+  const allBooked      = accommodation.length > 0 && accommodation.every((a: any) => a.status === 'confirmed');
+  const someBooked     = accommodation.some((a: any) => a.status === 'confirmed');
+  const noHotel        = accommodation.length === 0;
+  const venues         = logistics?.venues ?? [];
+  const noVenues       = venues.length === 0;
   const groundTransport = logistics?.transportation?.filter((t: any) =>
     t.type !== 'flight' && (
       t.notes?.toLowerCase().includes('park') ||
-      ['parking', 'taxi', 'transfer', 'bus', 'train'].includes(t.type)
+      ['parking', 'taxi', 'transfer', 'bus', 'train', 'car', 'rental'].includes(t.type)
     )
   ) ?? [];
 
@@ -145,62 +178,95 @@ export default function TripOverview({ trip, onNavigate }: Props) {
   const packPct     = totalItems > 0 ? Math.round((packedItems / totalItems) * 100) : 0;
   const noList      = totalItems === 0;
 
-  // ── Status rows ───────────────────────────────────────────────────────────
-  const rows: StatusRow[] = [];
+  // ── Build status cards ────────────────────────────────────────────────────
+  const cards: StatusCard[] = [];
 
+  // Flights
   if (noFlights) {
-    rows.push({ icon: <FlightIcon sx={{ fontSize: 18 }} />, label: 'Outbound flight',
-      value: 'Not added', level: 'empty', action: { label: 'Add flight', tab: 1 } });
+    cards.push({
+      key: 'flights',
+      icon: <FlightIcon sx={{ fontSize: 22 }} />,
+      label: 'Flights',
+      value: 'Not added',
+      level: 'empty',
+      action: { label: 'Add flight', tab: 1 },
+    });
   } else {
-    const outFlight = outbound[0] ?? flights[0];
-    rows.push({
-      icon: <FlightIcon sx={{ fontSize: 18 }} />, label: 'Outbound flight',
-      value: outFlight
-        ? `${outFlight.details?.flightNumber ?? outFlight.flightNumber ?? ''} · ${outFlight.departureLocation ?? ''} → ${outFlight.arrivalLocation ?? ''} · ${outFlight.status === 'confirmed' ? 'Confirmed' : 'Not booked'}`
-        : 'Not added',
-      level: outFlight?.status === 'confirmed' ? 'ok' : 'warn',
-      action: outFlight?.status !== 'confirmed' ? { label: 'Update', tab: 1 } : undefined,
+    const outFlight = flights[0];
+    const retFlight = flights.length > 1 ? flights[flights.length - 1] : null;
+    const allConfirmed = flights.every((f: any) => f.status === 'confirmed');
+    cards.push({
+      key: 'flights',
+      icon: <FlightIcon sx={{ fontSize: 22 }} />,
+      label: `Flights (${flights.length})`,
+      value: allConfirmed
+        ? flights.map((f: any) => f.details?.flightNumber ?? f.flightNumber ?? '–').join(' · ') + ' · Confirmed'
+        : `${flights.filter((f: any) => f.status === 'confirmed').length} of ${flights.length} confirmed`,
+      level: allConfirmed ? 'ok' : 'warn',
+      action: !allConfirmed ? { label: 'Update', tab: 1 } : undefined,
     });
   }
 
-  if (flights.length > 1) {
-    const retFlight = inbound[0] ?? flights[flights.length - 1];
-    rows.push({
-      icon: <FlightIcon sx={{ fontSize: 18, transform: 'scaleX(-1)' }} />, label: 'Return flight',
-      value: `${retFlight.details?.flightNumber ?? retFlight.flightNumber ?? ''} · ${retFlight.departureLocation ?? ''} → ${retFlight.arrivalLocation ?? ''} · ${retFlight.status === 'confirmed' ? 'Confirmed' : 'Not booked'}`,
-      level: retFlight?.status === 'confirmed' ? 'ok' : 'warn',
-      action: retFlight?.status !== 'confirmed' ? { label: 'Update', tab: 1 } : undefined,
-    });
-  }
-
+  // Accommodation
   if (noHotel) {
-    rows.push({ icon: <HotelIcon sx={{ fontSize: 18 }} />, label: 'Accommodation',
-      value: 'Not added', level: 'empty', action: { label: 'Add hotel', tab: 1 } });
+    cards.push({
+      key: 'accommodation',
+      icon: <HotelIcon sx={{ fontSize: 22 }} />,
+      label: 'Accommodation',
+      value: 'Not added',
+      level: 'empty',
+      action: { label: 'Add hotel', tab: 1 },
+    });
   } else {
-    // Navigate to first confirmed (or first) accommodation
     const navAccom = accommodation.find((a: any) => a.status === 'confirmed') ?? accommodation[0];
-    rows.push({
-      icon: <HotelIcon sx={{ fontSize: 18 }} />,
+    cards.push({
+      key: 'accommodation',
+      icon: <HotelIcon sx={{ fontSize: 22 }} />,
       label: `Accommodation (${accommodation.length})`,
-      value: allHotelsBooked
+      value: allBooked
         ? accommodation.map((a: any) => a.name).join(', ') + ' · Confirmed'
-        : someHotelsBooked ? 'Partially confirmed' : 'Not confirmed',
-      level: allHotelsBooked ? 'ok' : 'warn',
-      action: !allHotelsBooked ? { label: 'Update', tab: 1 } : undefined,
-      navDest: navAccom ? {
-        name:        navAccom.name,
-        address:     navAccom.address,
-        coordinates: navAccom.coordinates ?? null,
-      } : undefined,
+        : someBooked ? 'Partially confirmed' : 'Not confirmed',
+      level: allBooked ? 'ok' : 'warn',
+      action: !allBooked ? { label: 'Update', tab: 1 } : undefined,
+      navDest: navAccom ? { name: navAccom.name, address: navAccom.address, coordinates: navAccom.coordinates ?? null } : undefined,
     });
   }
 
-  if (groundTransport.length === 0) {
-    rows.push({ icon: <DirectionsCarIcon sx={{ fontSize: 18 }} />,
-      label: 'Airport transfer / parking', value: 'Not arranged', level: 'empty',
-      action: { label: 'Add', tab: 1 } });
+  // Venues / events
+  if (noVenues) {
+    cards.push({
+      key: 'venues',
+      icon: <TheaterComedyIcon sx={{ fontSize: 22 }} />,
+      label: 'Venues / events',
+      value: 'None added',
+      level: 'empty',
+      action: { label: 'Add venue', tab: 1 },
+    });
   } else {
-    rows.push({ icon: <LocalParkingIcon sx={{ fontSize: 18 }} />,
+    const allVenuesBooked = venues.every((v: any) => v.status === 'confirmed' || v.status === 'booked');
+    cards.push({
+      key: 'venues',
+      icon: <TheaterComedyIcon sx={{ fontSize: 22 }} />,
+      label: `Venues / events (${venues.length})`,
+      value: venues.map((v: any) => v.name).join(', '),
+      level: allVenuesBooked ? 'ok' : 'info',
+    });
+  }
+
+  // Airport transfer / parking
+  if (groundTransport.length === 0) {
+    cards.push({
+      key: 'transfer',
+      icon: <DirectionsCarIcon sx={{ fontSize: 22 }} />,
+      label: 'Airport transfer / parking',
+      value: 'Not arranged',
+      level: 'empty',
+      action: { label: 'Add', tab: 1 },
+    });
+  } else {
+    cards.push({
+      key: 'transfer',
+      icon: <LocalParkingIcon sx={{ fontSize: 22 }} />,
       label: 'Airport transfer / parking',
       value: groundTransport.map((t: any) => t.type).join(', ') + ' · ' +
         (groundTransport[0]?.status === 'confirmed' ? 'Confirmed' : 'Not confirmed'),
@@ -208,22 +274,32 @@ export default function TripOverview({ trip, onNavigate }: Props) {
     });
   }
 
+  // Packing
   if (noList) {
-    rows.push({ icon: <BackpackIcon sx={{ fontSize: 18 }} />, label: 'Packing list',
-      value: 'Not generated yet', level: 'empty', action: { label: 'Generate list', tab: 3 } });
+    cards.push({
+      key: 'packing',
+      icon: <BackpackIcon sx={{ fontSize: 22 }} />,
+      label: 'Packing list',
+      value: 'Not generated yet',
+      level: 'empty',
+      action: { label: 'Generate list', tab: 3 },
+    });
   } else {
-    rows.push({
-      icon: <BackpackIcon sx={{ fontSize: 18 }} />, label: 'Packing',
+    cards.push({
+      key: 'packing',
+      icon: <BackpackIcon sx={{ fontSize: 22 }} />,
+      label: 'Packing',
       value: `${packedItems} of ${totalItems} items packed (${packPct}%)`,
       level: packPct === 100 ? 'ok' : daysUntil <= 3 ? 'warn' : 'info',
       action: packPct < 100 ? { label: 'View list', tab: 3 } : undefined,
     });
   }
 
-  const urgentItems = rows.filter(r => r.level === 'warn').length;
-  const emptyItems  = rows.filter(r => r.level === 'empty').length;
+  // Active cards (not dismissed, or dismissed but we still render them dimmed)
+  const urgentItems = cards.filter(c => !dismissed.has(c.key) && c.level === 'warn').length;
+  const emptyItems  = cards.filter(c => !dismissed.has(c.key) && c.level === 'empty').length;
 
-  // ── Helpers for next stop display ─────────────────────────────────────────
+  // ── next stop helpers ─────────────────────────────────────────────────────
   const nextStartMins = nextStop ? stopStartMinutes(nextStop) : null;
   const minsUntilNext = nextStartMins !== null
     ? nextStartMins - (new Date().getHours() * 60 + new Date().getMinutes())
@@ -233,7 +309,7 @@ export default function TripOverview({ trip, onNavigate }: Props) {
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
 
-      {/* ── What's Next — only when trip is active ── */}
+      {/* ── What's Next ── */}
       {isActive && nextStop && (
         <Paper sx={{
           p: { xs: 2, sm: 2.5 },
@@ -251,49 +327,26 @@ export default function TripOverview({ trip, onNavigate }: Props) {
               <Typography variant="h6" fontWeight={800} sx={{ mt: 0.25, lineHeight: 1.2 }}>
                 {nextStop.name}
               </Typography>
-              {(nextStop.address) && (
-                <Typography variant="body2" color="text.secondary" sx={{ mt: 0.25 }}>
-                  {nextStop.address}
-                </Typography>
+              {nextStop.address && (
+                <Typography variant="body2" color="text.secondary" sx={{ mt: 0.25 }}>{nextStop.address}</Typography>
               )}
               {nextStop.notes && (
-                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
-                  {nextStop.notes}
-                </Typography>
-              )}
-              {nextStop.travelToNext && (
-                <Chip
-                  size="small"
-                  label={`${nextStop.travelToNext.duration}min travel`}
-                  sx={{ mt: 1, backgroundColor: alpha('#1D2642', 0.07), fontSize: '0.7rem', fontWeight: 600 }}
-                />
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>{nextStop.notes}</Typography>
               )}
             </Box>
-            {/* Navigate button — prominent here */}
             <NavigateButton
-              destination={{
-                name:        nextStop.name,
-                address:     nextStop.address,
-                coordinates: nextStop.coordinates ?? null,
-              }}
-              suggestedMode="walking"
-              variant="button"
-              label="Navigate"
+              destination={{ name: nextStop.name, address: nextStop.address, coordinates: nextStop.coordinates ?? null }}
+              suggestedMode="walking" variant="button" label="Navigate"
               sx={{ flexShrink: 0 }}
             />
           </Box>
         </Paper>
       )}
 
-      {/* ── No more stops today (but trip is active) ── */}
       {isActive && !nextStop && (
         <Paper sx={{ p: { xs: 2, sm: 2.5 }, backgroundColor: 'rgba(107,124,92,0.06)', border: '1px solid', borderColor: 'primary.light', borderRadius: 2 }}>
-          <Typography variant="body2" fontWeight={700} color="primary.main">
-            ✅ Nothing more scheduled for today
-          </Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-            Check the itinerary tab for tomorrow.
-          </Typography>
+          <Typography variant="body2" fontWeight={700} color="primary.main">✅ Nothing more scheduled for today</Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>Check the itinerary tab for tomorrow.</Typography>
         </Paper>
       )}
 
@@ -321,9 +374,7 @@ export default function TripOverview({ trip, onNavigate }: Props) {
           <Box sx={{ mt: 2.5 }}>
             <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.75 }}>
               <Typography variant="caption" color="text.secondary" fontWeight={600}>Packing progress</Typography>
-              <Typography variant="caption" fontWeight={700} color={packPct === 100 ? 'success.main' : 'text.secondary'}>
-                {packPct}%
-              </Typography>
+              <Typography variant="caption" fontWeight={700} color={packPct === 100 ? 'success.main' : 'text.secondary'}>{packPct}%</Typography>
             </Box>
             <LinearProgress
               variant="determinate" value={packPct}
@@ -355,65 +406,103 @@ export default function TripOverview({ trip, onNavigate }: Props) {
         </Paper>
       )}
 
-      {/* ── Status checklist ── */}
+      {/* ── Trip Status cards ── */}
       {loading ? (
         <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
           <CircularProgress size={28} />
         </Box>
       ) : (
-        <Paper sx={{ backgroundColor: 'background.paper', overflow: 'hidden' }}>
-          <Box sx={{ px: { xs: 2.5, sm: 3 }, pt: 2.5, pb: 1 }}>
-            <Typography variant="h6" fontWeight={700} sx={{ fontSize: { xs: '1.05rem', sm: '1.15rem' } }}>
-              Trip Status
-            </Typography>
-          </Box>
-          {rows.map((row, i) => (
-            <Box key={i}>
-              {i > 0 && <Divider />}
-              <Box sx={{
-                px: { xs: 2.5, sm: 3 }, py: { xs: 1.75 },
-                display: 'flex', alignItems: 'center', gap: 1.5,
-              }}>
-                <Box sx={{ flexShrink: 0, color: 'text.secondary' }}>{STATUS_ICON[row.level]}</Box>
-                <Box sx={{ flexShrink: 0, color: 'text.disabled' }}>{row.icon}</Box>
-                <Box sx={{ flexGrow: 1, minWidth: 0 }}>
-                  <Typography variant="body2" fontWeight={700} sx={{ fontSize: { xs: '0.9rem', sm: '0.875rem' } }}>
-                    {row.label}
-                  </Typography>
+        <Box>
+          <Typography variant="h6" fontWeight={700} sx={{ mb: 1.5, fontSize: { xs: '1.05rem', sm: '1.15rem' } }}>
+            Trip Status
+          </Typography>
+          <Box sx={{
+            display: 'grid',
+            gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' },
+            gap: 1.5,
+          }}>
+            {cards.map((card) => {
+              const isDismissed = dismissed.has(card.key);
+              return (
+                <Paper
+                  key={card.key}
+                  variant="outlined"
+                  sx={{
+                    p: 2,
+                    position: 'relative',
+                    backgroundColor: isDismissed ? 'rgba(0,0,0,0.02)' : LEVEL_BG[card.level],
+                    borderColor: isDismissed ? 'divider' : LEVEL_BORDER[card.level],
+                    opacity: isDismissed ? 0.6 : 1,
+                    transition: 'opacity 0.2s, background-color 0.2s',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 1.25,
+                  }}
+                >
+                  {/* Card header: icon + label + dismiss toggle */}
+                  <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1 }}>
+                    <Box sx={{ color: isDismissed ? 'text.disabled' : LEVEL_COLOR[card.level], mt: 0.25 }}>
+                      {card.icon}
+                    </Box>
+                    <Typography variant="body2" fontWeight={700} sx={{ flexGrow: 1, fontSize: '0.9rem', lineHeight: 1.3 }}>
+                      {card.label}
+                    </Typography>
+                    <Tooltip title={isDismissed ? 'Mark as required' : 'Not required for this trip'}>
+                      <IconButton
+                        size="small"
+                        onClick={() => toggleDismiss(card.key)}
+                        sx={{
+                          p: 0.5, mt: -0.5, mr: -0.5,
+                          color: isDismissed ? 'primary.main' : 'text.disabled',
+                          '&:hover': { color: isDismissed ? 'primary.dark' : 'text.secondary' },
+                        }}
+                      >
+                        {isDismissed ? <UndoIcon sx={{ fontSize: 16 }} /> : <BlockIcon sx={{ fontSize: 16 }} />}
+                      </IconButton>
+                    </Tooltip>
+                  </Box>
+
+                  {/* Status value */}
                   <Typography
                     variant="caption"
-                    color={
-                      row.level === 'ok'    ? 'success.main' :
-                      row.level === 'warn'  ? 'warning.dark' :
-                      row.level === 'empty' ? 'text.disabled' :
-                      'primary.main'
-                    }
-                    sx={{ fontSize: { xs: '0.82rem', sm: '0.78rem' } }}
+                    sx={{
+                      fontSize: '0.82rem',
+                      color: isDismissed ? 'text.disabled' : LEVEL_COLOR[card.level],
+                      textDecoration: isDismissed ? 'line-through' : 'none',
+                      lineHeight: 1.4,
+                      display: 'block',
+                    }}
                   >
-                    {row.value}
+                    {isDismissed ? 'Not required for this trip' : card.value}
                   </Typography>
-                </Box>
-                {/* Navigate button on rows that have a navigable destination */}
-                {row.navDest && (
-                  <NavigateButton
-                    destination={row.navDest}
-                    suggestedMode="driving"
-                    size="small"
-                  />
-                )}
-                {row.action && (
-                  <Button
-                    size="small" variant="outlined"
-                    onClick={() => onNavigate(row.action!.tab)}
-                    sx={{ flexShrink: 0, fontSize: { xs: '0.75rem', sm: '0.72rem' }, py: 0.5, px: 1.25 }}
-                  >
-                    {row.action.label}
-                  </Button>
-                )}
-              </Box>
-            </Box>
-          ))}
-        </Paper>
+
+                  {/* Actions row */}
+                  {!isDismissed && (card.action || card.navDest) && (
+                    <Box sx={{ display: 'flex', gap: 1, mt: 'auto' }}>
+                      {card.navDest && (
+                        <NavigateButton
+                          destination={card.navDest}
+                          suggestedMode="driving"
+                          size="small"
+                        />
+                      )}
+                      {card.action && (
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          onClick={() => onNavigate(card.action!.tab)}
+                          sx={{ fontSize: '0.75rem', py: 0.5, px: 1.25 }}
+                        >
+                          {card.action.label}
+                        </Button>
+                      )}
+                    </Box>
+                  )}
+                </Paper>
+              );
+            })}
+          </Box>
+        </Box>
       )}
 
       {/* ── Trip details ── */}

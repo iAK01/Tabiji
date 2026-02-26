@@ -48,6 +48,12 @@ const BOOKING_LINKS = [
     },
   },
   {
+    name:    'Kiwi.com',
+    colour:  '#e5432a',
+    buildUrl: (o: string, d: string, dep: string, ret: string) =>
+      `https://www.kiwi.com/deep?from=${o}&to=${d}&departure=${iso(dep)}&return=${iso(ret)}`,
+  },
+  {
     name:    'Google Flights',
     colour:  '#1a73e8',
     buildUrl: (o: string, d: string, dep: string, ret: string) =>
