@@ -31,3 +31,22 @@ export async function DELETE(
 
   return NextResponse.json({ success: true });
 }
+
+export async function PUT(req: Request, { params }: { params: Promise<{ id: string; fileId: string }> }) {
+  const { id, fileId } = await params;
+  const session = await getServerSession();
+  if (!session?.user?.email) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
+  await connectDB();
+  const fd      = await req.formData();
+  const updates: Record<string, any> = {
+    name:  fd.get('name'),
+    type:  fd.get('type'),
+    notes: fd.get('notes') ?? '',
+  };
+  if (fd.get('linkUrl')) updates.linkUrl = fd.get('linkUrl');
+  if (fd.get('phone'))   updates.phone   = fd.get('phone');
+  if (fd.get('email'))   updates.email   = fd.get('email');
+  const TripFile = (await import('@/lib/mongodb/models/TripFile')).default;
+  const file = await TripFile.findByIdAndUpdate(fileId, updates, { new: true });
+  return NextResponse.json({ file });
+}

@@ -33,6 +33,8 @@ import AirlineSearch        from '@/components/ui/AirlineSearch';
 import AddressSearch        from '@/components/ui/AddressSearch';
 import NavigateButton       from '@/components/ui/NavigateButton';
 import BookingLinks         from '@/components/logistics/BookingLinks';
+import EditIcon from '@mui/icons-material/Edit';
+
 import { saveTripCache, getTripCache, queueAction } from '@/lib/offline/db';
 import type { ResolvedAddress } from '@/components/ui/AddressSearch';
 
@@ -230,10 +232,12 @@ export default function LogisticsTab({ tripId, trip }: LogisticsTabProps) {
   const [venueOpen,     setVenueOpen]     = useState(false);
   const [venue,         setVenue]         = useState({ ...BLANK_VENUE });
 
-  const [deleteTarget,  setDeleteTarget]  = useState<{ kind: 'transport' | 'accom' | 'venue'; index: number } | null>(null);
-  const [menuAnchor,    setMenuAnchor]    = useState<null | HTMLElement>(null);
-  const [menuTarget,    setMenuTarget]    = useState<{ kind: 'transport' | 'accom' | 'venue'; index: number } | null>(null);
-
+  const [deleteTarget,    setDeleteTarget]    = useState<{ kind: 'transport' | 'accom' | 'venue'; index: number } | null>(null);
+const [menuPosition,    setMenuPosition]    = useState<{ top: number; left: number } | null>(null);
+const [menuTarget,      setMenuTarget]      = useState<{ kind: 'transport' | 'accom' | 'venue'; index: number } | null>(null);
+const [editTransportIdx, setEditTransportIdx] = useState<number | null>(null);
+const [editAccomIdx,     setEditAccomIdx]     = useState<number | null>(null);
+const [editVenueIdx,     setEditVenueIdx]     = useState<number | null>(null);
   // ── Load ───────────────────────────────────────────────────────────────────
   useEffect(() => {
     async function loadLogistics() {
@@ -252,77 +256,101 @@ export default function LogisticsTab({ tripId, trip }: LogisticsTabProps) {
   }, [tripId]);
 
   // ── Saves ──────────────────────────────────────────────────────────────────
-  const saveTransport = async () => {
-    setSaving(true);
-    const updated = { ...(logistics ?? {}), transportation: [...(logistics?.transportation ?? []), transport] };
-    setLogistics(updated);
-    await saveTripCache(tripId, { ...(await getTripCache(tripId)), logistics: updated });
+const saveTransport = async () => {
+  setSaving(true);
+  const isEdit = editTransportIdx !== null;
+  const updated = {
+    ...(logistics ?? {}),
+    transportation: isEdit
+      ? logistics.transportation.map((t: any, i: number) => i === editTransportIdx ? transport : t)
+      : [...(logistics?.transportation ?? []), transport],
+  };
+  setLogistics(updated);
+  await saveTripCache(tripId, { ...(await getTripCache(tripId)), logistics: updated });
 
-    if (!navigator.onLine) {
-      await queueAction({ type: 'ADD_TRANSPORT', tripId, payload: transport });
-      setTransportOpen(false);
-      setTransport({ ...BLANK_TRANSPORT, details: { ...BLANK_TRANSPORT.details } });
-      setSaving(false);
-      return;
-    }
-
-    const res  = await fetch(`/api/trips/${tripId}/logistics/transport`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(transport),
-    });
-    const data = await res.json();
-    setLogistics(data.logistics);
+  if (!navigator.onLine) {
+    await queueAction({ type: isEdit ? 'EDIT_TRANSPORT' : 'ADD_TRANSPORT', tripId, payload: transport, index: editTransportIdx });
     setTransportOpen(false);
     setTransport({ ...BLANK_TRANSPORT, details: { ...BLANK_TRANSPORT.details } });
+    setEditTransportIdx(null);
     setSaving(false);
+    return;
+  }
+
+  const url    = isEdit ? `/api/trips/${tripId}/logistics/transport/${editTransportIdx}` : `/api/trips/${tripId}/logistics/transport`;
+  const method = isEdit ? 'PUT' : 'POST';
+  const res    = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(transport) });
+  const data   = await res.json();
+  setLogistics(data.logistics);
+  setTransportOpen(false);
+  setTransport({ ...BLANK_TRANSPORT, details: { ...BLANK_TRANSPORT.details } });
+  setEditTransportIdx(null);
+  setSaving(false);
+};
+
+const saveAccom = async () => {
+  setSaving(true);
+  const isEdit = editAccomIdx !== null;
+  const updated = {
+    ...(logistics ?? {}),
+    accommodation: isEdit
+      ? logistics.accommodation.map((a: any, i: number) => i === editAccomIdx ? accom : a)
+      : [...(logistics?.accommodation ?? []), accom],
   };
+  setLogistics(updated);
+  await saveTripCache(tripId, { ...(await getTripCache(tripId)), logistics: updated });
 
-  const saveAccom = async () => {
-    setSaving(true);
-    const updated = { ...(logistics ?? {}), accommodation: [...(logistics?.accommodation ?? []), accom] };
-    setLogistics(updated);
-    await saveTripCache(tripId, { ...(await getTripCache(tripId)), logistics: updated });
-
-    if (!navigator.onLine) {
-      await queueAction({ type: 'ADD_ACCOM', tripId, payload: accom });
-      setAccomOpen(false);
-      setAccom({ ...BLANK_ACCOM });
-      setSaving(false);
-      return;
-    }
-
-    const res  = await fetch(`/api/trips/${tripId}/logistics/accommodation`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(accom),
-    });
-    const data = await res.json();
-    setLogistics(data.logistics);
+  if (!navigator.onLine) {
+    await queueAction({ type: isEdit ? 'EDIT_ACCOM' : 'ADD_ACCOM', tripId, payload: accom, index: editAccomIdx });
     setAccomOpen(false);
     setAccom({ ...BLANK_ACCOM });
+    setEditAccomIdx(null);
     setSaving(false);
+    return;
+  }
+
+  const url    = isEdit ? `/api/trips/${tripId}/logistics/accommodation/${editAccomIdx}` : `/api/trips/${tripId}/logistics/accommodation`;
+  const method = isEdit ? 'PUT' : 'POST';
+  const res    = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(accom) });
+  const data   = await res.json();
+  setLogistics(data.logistics);
+  setAccomOpen(false);
+  setAccom({ ...BLANK_ACCOM });
+  setEditAccomIdx(null);
+  setSaving(false);
+};
+
+const saveVenue = async () => {
+  setSaving(true);
+  const isEdit = editVenueIdx !== null;
+  const updated = {
+    ...(logistics ?? {}),
+    venues: isEdit
+      ? (logistics.venues ?? []).map((v: any, i: number) => i === editVenueIdx ? venue : v)
+      : [...(logistics?.venues ?? []), venue],
   };
+  setLogistics(updated);
+  await saveTripCache(tripId, { ...(await getTripCache(tripId)), logistics: updated });
 
-  const saveVenue = async () => {
-    setSaving(true);
-    const updated = { ...(logistics ?? {}), venues: [...(logistics?.venues ?? []), venue] };
-    setLogistics(updated);
-    await saveTripCache(tripId, { ...(await getTripCache(tripId)), logistics: updated });
-
-    if (!navigator.onLine) {
-      await queueAction({ type: 'ADD_VENUE', tripId, payload: venue });
-      setVenueOpen(false);
-      setVenue({ ...BLANK_VENUE });
-      setSaving(false);
-      return;
-    }
-
-    const res  = await fetch(`/api/trips/${tripId}/logistics/venues`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(venue),
-    });
-    const data = await res.json();
-    setLogistics(data.logistics);
+  if (!navigator.onLine) {
+    await queueAction({ type: isEdit ? 'EDIT_VENUE' : 'ADD_VENUE', tripId, payload: venue, index: editVenueIdx });
     setVenueOpen(false);
     setVenue({ ...BLANK_VENUE });
+    setEditVenueIdx(null);
     setSaving(false);
-  };
+    return;
+  }
+
+  const url    = isEdit ? `/api/trips/${tripId}/logistics/venues/${editVenueIdx}` : `/api/trips/${tripId}/logistics/venues`;
+  const method = isEdit ? 'PUT' : 'POST';
+  const res    = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(venue) });
+  const data   = await res.json();
+  setLogistics(data.logistics);
+  setVenueOpen(false);
+  setVenue({ ...BLANK_VENUE });
+  setEditVenueIdx(null);
+  setSaving(false);
+};
 
   // ── Deletes ────────────────────────────────────────────────────────────────
   const confirmDelete = async () => {
@@ -363,13 +391,38 @@ export default function LogisticsTab({ tripId, trip }: LogisticsTabProps) {
     setDeleteTarget(null);
   };
 
-  const openMenu = (e: React.MouseEvent<HTMLElement>, kind: 'transport' | 'accom' | 'venue', index: number) => {
-    e.stopPropagation();
-    setMenuAnchor(e.currentTarget);
-    setMenuTarget({ kind, index });
-  };
-  const closeMenu = () => { setMenuAnchor(null); setMenuTarget(null); };
+const openMenu = (e: React.MouseEvent<HTMLElement>, kind: 'transport' | 'accom' | 'venue', index: number) => {
+  e.stopPropagation();
+  const rect = e.currentTarget.getBoundingClientRect();
+  setMenuPosition({ top: rect.bottom + window.scrollY, left: rect.left + window.scrollX });
+  setMenuTarget({ kind, index });
+};
+const closeMenu = () => { setMenuPosition(null); setMenuTarget(null); };
 
+const openEdit = () => {
+  if (!menuTarget) return;
+  const { kind, index } = menuTarget;
+if (kind === 'transport') {
+  const t = logistics.transportation[index];
+  const merged = {
+    ...BLANK_TRANSPORT,
+    ...t,
+    details: { ...BLANK_TRANSPORT.details, ...(t.details ?? {}) },
+  };
+  setTransport(merged);
+  setEditTransportIdx(index);
+  setTransportOpen(true);
+  } else if (kind === 'accom') {
+    setAccom({ ...BLANK_ACCOM, ...logistics.accommodation[index] });
+    setEditAccomIdx(index);
+    setAccomOpen(true);
+  } else if (kind === 'venue') {
+    setVenue({ ...BLANK_VENUE, ...logistics.venues[index] });
+    setEditVenueIdx(index);
+    setVenueOpen(true);
+  }
+  closeMenu();
+};
   // ── Helpers ────────────────────────────────────────────────────────────────
   const fmtDateTime = (dt: string) =>
     dt ? new Date(dt).toLocaleString('en-IE', { dateStyle: 'medium', timeStyle: 'short' }) : '';
@@ -877,11 +930,19 @@ export default function LogisticsTab({ tripId, trip }: LogisticsTabProps) {
       )}
 
       {/* ── Context menu ── */}
-      <Menu anchorEl={menuAnchor} open={Boolean(menuAnchor)} onClose={closeMenu}>
-        <MenuItem onClick={() => { setDeleteTarget(menuTarget); closeMenu(); }} sx={{ color: 'error.main', gap: 1 }}>
-          <DeleteIcon fontSize="medium" /> Delete
-        </MenuItem>
-      </Menu>
+     <Menu
+  anchorReference="anchorPosition"
+  anchorPosition={menuPosition ?? undefined}
+  open={Boolean(menuPosition)}
+  onClose={closeMenu}
+>
+<MenuItem onClick={openEdit} sx={{ gap: 1 }}>
+  <EditIcon fontSize="small" /> Edit
+</MenuItem>
+  <MenuItem onClick={() => { setDeleteTarget(menuTarget); closeMenu(); }} sx={{ color: 'error.main', gap: 1 }}>
+    <DeleteIcon fontSize="medium" /> Delete
+  </MenuItem>
+</Menu>
 
       {/* ── Delete confirmation ── */}
       <Dialog open={Boolean(deleteTarget)} onClose={() => setDeleteTarget(null)}>
@@ -898,7 +959,7 @@ export default function LogisticsTab({ tripId, trip }: LogisticsTabProps) {
       {/* ── Add transport dialog ── */}
       <Dialog open={transportOpen} onClose={() => setTransportOpen(false)}
         maxWidth="sm" fullWidth fullScreen={mobile}>
-        <DialogTitle fontWeight={700}>Add Transport</DialogTitle>
+        <DialogTitle fontWeight={700}>{editTransportIdx !== null ? 'Edit Transport' : 'Add Transport'}</DialogTitle>
         <DialogContent>
           <Box sx={{ pt: 1, display: 'flex', flexDirection: 'column', gap: 2.5 }}>
             <Box>
@@ -928,7 +989,7 @@ export default function LogisticsTab({ tripId, trip }: LogisticsTabProps) {
       {/* ── Add accommodation dialog ── */}
       <Dialog open={accomOpen} onClose={() => setAccomOpen(false)}
         maxWidth="sm" fullWidth fullScreen={mobile}>
-        <DialogTitle fontWeight={700}>Add Accommodation</DialogTitle>
+        <DialogTitle fontWeight={700}>{editAccomIdx !== null ? 'Edit Accommodation' : 'Add Accommodation'}</DialogTitle>
         <DialogContent>
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, pt: 1 }}>
             <FormControl fullWidth>
@@ -985,7 +1046,7 @@ export default function LogisticsTab({ tripId, trip }: LogisticsTabProps) {
       {/* ── Add venue dialog ── */}
       <Dialog open={venueOpen} onClose={() => setVenueOpen(false)}
         maxWidth="sm" fullWidth fullScreen={mobile}>
-        <DialogTitle fontWeight={700}>Add Venue</DialogTitle>
+       <DialogTitle fontWeight={700}>{editVenueIdx !== null ? 'Edit Venue' : 'Add Venue'}</DialogTitle>
         <DialogContent>
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, pt: 1 }}>
             <Box>

@@ -285,7 +285,7 @@ export default function TripPage() {
         {activeTab === 0 && <TripOverview trip={trip} onNavigate={setActiveTab} />}
         {activeTab === 1 && <LogisticsTab tripId={trip._id} trip={trip} />}
         {activeTab === 2 && <ItineraryTab tripId={trip._id} startDate={trip.startDate} endDate={trip.endDate} />}
-        {activeTab === 3 && <PackingTab tripId={trip._id} tripType={trip.tripType} nights={trip.nights} />}
+        {activeTab === 3 && <PackingTab tripId={trip._id} tripType={trip.tripType} nights={trip.nights} startDate={trip.startDate} />}
         {activeTab === 4 && <IntelligenceTab tripId={trip._id} />}
         {activeTab === 5 && <WeatherTab tripId={trip._id} destinationCity={trip.destination?.city} />}
         {activeTab === 6 && <MapTab tripId={trip._id} trip={trip} />}

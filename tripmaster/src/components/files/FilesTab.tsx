@@ -27,6 +27,7 @@ import HealthAndSafetyIcon    from '@mui/icons-material/HealthAndSafety';
 import FolderOpenIcon         from '@mui/icons-material/FolderOpen';
 import CloudUploadIcon        from '@mui/icons-material/CloudUpload';
 import PublicIcon             from '@mui/icons-material/Public';
+import EditIcon               from '@mui/icons-material/Edit';
 import MusicNoteIcon          from '@mui/icons-material/MusicNote';
 import LocationOnIcon         from '@mui/icons-material/LocationOn';
 import InfoIcon               from '@mui/icons-material/Info';
@@ -148,6 +149,7 @@ const BLANK_FILE_FORM    = { name: '', type: 'other' as FileTypeValue,    notes:
 const BLANK_LINK_FORM    = { name: '', type: 'event_website' as LinkTypeValue, url: '', notes: '' };
 const BLANK_CONTACT_FORM = { name: '', type: 'other' as ContactTypeValue, phone: '', email: '', notes: '' };
 
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function formatBytes(bytes: number): string {
@@ -228,13 +230,14 @@ function DropZone({ onFile }: { onFile: (f: File) => void }) {
 
 // ─── Contact card ─────────────────────────────────────────────────────────────
 
-function ContactCard({ file, onDelete }: { file: TripFile; onDelete: (id: string) => void }) {
+function ContactCard({ file, onDelete, onEdit }: { file: TripFile; onDelete: (id: string) => void; onEdit: (file: TripFile) => void }) {
   const [menuAnchor,  setMenuAnchor]  = useState<null | HTMLElement>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const color     = TYPE_COLOUR[file.type] ?? '#6b7280';
   const typeMeta  = CONTACT_TYPES.find(t => t.value === file.type);
   const hasPhone  = !!file.phone;
   const hasEmail  = !!file.email;
+
 
   return (
     <>
@@ -357,6 +360,10 @@ function ContactCard({ file, onDelete }: { file: TripFile; onDelete: (id: string
           </MenuItem>
         )}
         {(hasPhone || hasEmail) && <Divider />}
+        <MenuItem onClick={() => { setMenuAnchor(null); onEdit(file); }} sx={{ gap: 1.5, fontSize: '0.875rem' }}>
+  <EditIcon fontSize="small" /> Edit
+</MenuItem>
+<Divider />
         <MenuItem
           onClick={() => { setMenuAnchor(null); setConfirmOpen(true); }}
           sx={{ gap: 1.5, fontSize: '0.875rem', color: 'error.main' }}
@@ -385,7 +392,7 @@ function ContactCard({ file, onDelete }: { file: TripFile; onDelete: (id: string
 
 // ─── File / link card ─────────────────────────────────────────────────────────
 
-function ResourceCard({ file, onDelete }: { file: TripFile; onDelete: (id: string) => void }) {
+function ResourceCard({ file, onDelete, onEdit }: { file: TripFile; onDelete: (id: string) => void; onEdit: (file: TripFile) => void }) {
   const [menuAnchor,  setMenuAnchor]  = useState<null | HTMLElement>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const color     = TYPE_COLOUR[file.type] ?? '#6b7280';
@@ -475,6 +482,10 @@ function ResourceCard({ file, onDelete }: { file: TripFile; onDelete: (id: strin
           </MenuItem>
         )}
         <Divider />
+        <MenuItem onClick={() => { setMenuAnchor(null); onEdit(file); }} sx={{ gap: 1.5, fontSize: '0.875rem' }}>
+  <EditIcon fontSize="small" /> Edit
+</MenuItem>
+<Divider />
         <MenuItem
           onClick={() => { setMenuAnchor(null); setConfirmOpen(true); }}
           sx={{ gap: 1.5, fontSize: '0.875rem', color: 'error.main' }}
@@ -520,6 +531,8 @@ export default function FilesTab({ tripId }: FilesTabProps) {
   const [linkForm,     setLinkForm]     = useState({ ...BLANK_LINK_FORM });
   const [contactForm,  setContactForm]  = useState({ ...BLANK_CONTACT_FORM });
   const [error,        setError]        = useState<string | null>(null);
+  const [editingFile, setEditingFile] = useState<TripFile | null>(null);
+
 
   useEffect(() => {
     fetch(`/api/trips/${tripId}/files`)
@@ -538,6 +551,23 @@ export default function FilesTab({ tripId }: FilesTabProps) {
     setDialogOpen(true);
   };
 
+  const openEdit = (file: TripFile) => {
+  setEditingFile(file);
+  setError(null);
+  if (file.resourceType === 'contact') {
+    setMode('contact');
+    setContactForm({ name: file.name, type: file.type as ContactTypeValue, phone: file.phone ?? '', email: file.email ?? '', notes: file.notes ?? '' });
+  } else if (file.resourceType === 'link') {
+    setMode('link');
+    setLinkForm({ name: file.name, type: file.type as LinkTypeValue, url: file.linkUrl ?? '', notes: file.notes ?? '' });
+  } else {
+    setMode('file');
+    setFileForm({ name: file.name, type: file.type as FileTypeValue, notes: file.notes ?? '' });
+    setPendingFile(null); // can't re-upload, just editing metadata
+  }
+  setDialogOpen(true);
+};
+
   const handleFileSelected = (file: File) => {
     setPendingFile(file);
     const nameWithoutExt = file.name.replace(/\.[^/.]+$/, '').replace(/[_-]/g, ' ');
@@ -546,29 +576,36 @@ export default function FilesTab({ tripId }: FilesTabProps) {
     if (!dialogOpen) setDialogOpen(true);
   };
 
-  const handleUpload = async () => {
-    setUploading(true);
-    setUploadPct(0);
-    setError(null);
+const handleUpload = async () => {
+  setUploading(true);
+  setUploadPct(0);
+  setError(null);
 
-    const fd = new FormData();
+  const fd = new FormData();
 
-    if (mode === 'contact') {
-      if (!contactForm.name) { setError('Name is required'); setUploading(false); return; }
-      if (!contactForm.phone && !contactForm.email) { setError('At least one of phone or email is required'); setUploading(false); return; }
-      fd.append('resourceType', 'contact');
-      fd.append('name',  contactForm.name.trim());
-      fd.append('type',  contactForm.type);
-      fd.append('phone', contactForm.phone.trim());
-      fd.append('email', contactForm.email.trim());
-      fd.append('notes', contactForm.notes);
-    } else if (mode === 'link') {
-      if (!linkForm.url || !linkForm.name) { setError('Name and URL are required'); setUploading(false); return; }
-      fd.append('resourceType', 'link');
-      fd.append('name',    linkForm.name.trim());
-      fd.append('type',    linkForm.type);
-      fd.append('linkUrl', linkForm.url.trim());
-      fd.append('notes',   linkForm.notes);
+  if (mode === 'contact') {
+    if (!contactForm.name) { setError('Name is required'); setUploading(false); return; }
+    if (!contactForm.phone && !contactForm.email) { setError('At least one of phone or email is required'); setUploading(false); return; }
+    fd.append('resourceType', 'contact');
+    fd.append('name',  contactForm.name.trim());
+    fd.append('type',  contactForm.type);
+    fd.append('phone', contactForm.phone.trim());
+    fd.append('email', contactForm.email.trim());
+    fd.append('notes', contactForm.notes);
+  } else if (mode === 'link') {
+    if (!linkForm.url || !linkForm.name) { setError('Name and URL are required'); setUploading(false); return; }
+    fd.append('resourceType', 'link');
+    fd.append('name',    linkForm.name.trim());
+    fd.append('type',    linkForm.type);
+    fd.append('linkUrl', linkForm.url.trim());
+    fd.append('notes',   linkForm.notes);
+  } else {
+    if (editingFile) {
+      // Editing file metadata only — no re-upload
+      fd.append('resourceType', 'file');
+      fd.append('name',  fileForm.name.trim());
+      fd.append('type',  fileForm.type);
+      fd.append('notes', fileForm.notes);
     } else {
       if (!pendingFile || !fileForm.name) { setError('File and name are required'); setUploading(false); return; }
       fd.append('resourceType', 'file');
@@ -577,38 +614,34 @@ export default function FilesTab({ tripId }: FilesTabProps) {
       fd.append('type',  fileForm.type);
       fd.append('notes', fileForm.notes);
     }
+  }
 
-    // Contacts save instantly, files/links use progress animation
-    if (mode !== 'contact') {
-      const tick = setInterval(() => setUploadPct(p => Math.min(p + 12, 85)), 300);
-      try {
-        const res  = await fetch(`/api/trips/${tripId}/files`, { method: 'POST', body: fd });
-        const data = await res.json();
-        clearInterval(tick);
-        if (!res.ok) { setError(data.error ?? 'Failed'); setUploading(false); return; }
-        setUploadPct(100);
-        setFiles(prev => [data.file, ...prev]);
-        setTimeout(() => { setDialogOpen(false); setUploading(false); setUploadPct(0); setPendingFile(null); }, 400);
-      } catch {
-        clearInterval(tick);
-        setError('Something went wrong — please try again');
-        setUploading(false);
-      }
+  const isEdit = !!editingFile;
+  const url    = isEdit ? `/api/trips/${tripId}/files/${editingFile!._id}` : `/api/trips/${tripId}/files`;
+  const method = isEdit ? 'PUT' : 'POST';
+
+  const tick = setInterval(() => setUploadPct(p => Math.min(p + 12, 85)), 300);
+  try {
+    const res  = await fetch(url, { method, body: fd });
+    const data = await res.json();
+    clearInterval(tick);
+    if (!res.ok) { setError(data.error ?? 'Failed'); setUploading(false); return; }
+    setUploadPct(100);
+    if (isEdit) {
+      setFiles(prev => prev.map(f => f._id === editingFile!._id ? data.file : f));
     } else {
-      try {
-        setUploadPct(60);
-        const res  = await fetch(`/api/trips/${tripId}/files`, { method: 'POST', body: fd });
-        const data = await res.json();
-        if (!res.ok) { setError(data.error ?? 'Failed'); setUploading(false); return; }
-        setUploadPct(100);
-        setFiles(prev => [data.file, ...prev]);
-        setTimeout(() => { setDialogOpen(false); setUploading(false); setUploadPct(0); }, 300);
-      } catch {
-        setError('Something went wrong — please try again');
-        setUploading(false);
-      }
+      setFiles(prev => [data.file, ...prev]);
     }
-  };
+    setTimeout(() => {
+      setDialogOpen(false); setUploading(false); setUploadPct(0);
+      setPendingFile(null); setEditingFile(null);
+    }, 400);
+  } catch {
+    clearInterval(tick);
+    setError('Something went wrong — please try again');
+    setUploading(false);
+  }
+};
 
   const handleDelete = async (fileId: string) => {
     await fetch(`/api/trips/${tripId}/files/${fileId}`, { method: 'DELETE' });
@@ -619,10 +652,10 @@ export default function FilesTab({ tripId }: FilesTabProps) {
   const typeOrder: string[] = ALL_TYPES.map(t => t.value);
   const sortedKeys = [...grouped.keys()].sort((a, b) => typeOrder.indexOf(a) - typeOrder.indexOf(b));
 
-  const canSubmit =
+ const canSubmit =
     mode === 'contact' ? !!contactForm.name.trim() && (!!contactForm.phone.trim() || !!contactForm.email.trim()) :
     mode === 'link'    ? !!linkForm.name.trim() && !!linkForm.url.trim() :
-                         !!pendingFile && !!fileForm.name.trim();
+                         (!!editingFile || !!pendingFile) && !!fileForm.name.trim();
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
@@ -698,8 +731,8 @@ export default function FilesTab({ tripId }: FilesTabProps) {
                   <Box key={file._id}>
                     {i > 0 && <Divider />}
                     {file.resourceType === 'contact'
-                      ? <ContactCard file={file} onDelete={handleDelete} />
-                      : <ResourceCard file={file} onDelete={handleDelete} />
+                      ? <ContactCard file={file} onDelete={handleDelete} onEdit={openEdit} />
+                      : <ResourceCard file={file} onDelete={handleDelete} onEdit={openEdit} />
                     }
                   </Box>
                 ))}
@@ -712,18 +745,30 @@ export default function FilesTab({ tripId }: FilesTabProps) {
       {/* ── Dialog ── */}
       <Dialog
         open={dialogOpen}
-        onClose={() => { if (!uploading) setDialogOpen(false); }}
+       onClose={() => { if (!uploading) { setDialogOpen(false); setEditingFile(null); } }}
         maxWidth="sm" fullWidth fullScreen={mobile}
       >
         <DialogTitle fontWeight={700} sx={{ fontSize: { xs: '1.15rem', sm: '1.2rem' } }}>
-          {mode === 'contact' ? 'Add a contact' : mode === 'link' ? 'Save a link' : 'Upload a file'}
+          {editingFile
+  ? mode === 'contact' ? 'Edit contact' : mode === 'link' ? 'Edit link' : 'Edit file details'
+  : mode === 'contact' ? 'Add a contact' : mode === 'link' ? 'Save a link' : 'Upload a file'}
         </DialogTitle>
 
         <DialogContent>
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, pt: 1 }}>
 
             {/* ── File mode ── */}
-            {mode === 'file' && !pendingFile && <DropZone onFile={handleFileSelected} />}
+            {mode === 'file' && !pendingFile && !editingFile && <DropZone onFile={handleFileSelected} />}
+{mode === 'file' && editingFile && (
+  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, p: 1.5, borderRadius: 1.5,
+    backgroundColor: alpha('#55702C', 0.06), border: '1px solid', borderColor: alpha('#55702C', 0.2) }}>
+    <MimeIcon mimeType={editingFile.mimeType} size={22} />
+    <Box sx={{ flexGrow: 1, minWidth: 0 }}>
+      <Typography variant="body2" fontWeight={700}>{editingFile.name}</Typography>
+      <Typography variant="caption" color="text.secondary">Editing metadata only — file cannot be replaced</Typography>
+    </Box>
+  </Box>
+)}
 
             {mode === 'file' && pendingFile && (
               <Box sx={{
@@ -843,7 +888,8 @@ export default function FilesTab({ tripId }: FilesTabProps) {
         </DialogContent>
 
         <DialogActions sx={{ px: 3, pb: 3, gap: 1, flexDirection: { xs: 'column-reverse', sm: 'row' } }}>
-          <Button onClick={() => setDialogOpen(false)} disabled={uploading} fullWidth={mobile} size="large">
+          <Button onClick={() => { setDialogOpen(false); setEditingFile(null); }}
+ disabled={uploading} fullWidth={mobile} size="large">
             Cancel
           </Button>
           <Button
