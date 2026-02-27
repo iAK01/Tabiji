@@ -27,8 +27,9 @@ export async function GET(
 }
 
 // ─── POST /api/trips/[id]/files ───────────────────────────────────────────────
-// For files: multipart/form-data with file binary + metadata fields
-// For links: multipart/form-data with resourceType=link, linkUrl, name, type, notes
+// For files:    multipart/form-data with file binary + metadata fields
+// For links:    multipart/form-data with resourceType=link, linkUrl, name, type, notes
+// For contacts: multipart/form-data with resourceType=contact, name, type, phone, email, notes
 export async function POST(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -58,7 +59,27 @@ export async function POST(
     try { linkedTo = JSON.parse(linkedToRaw); } catch { /* ignore */ }
   }
 
-  // ── Link path ───────────────────────────────────────────────────────────────
+  // ── Contact path ─────────────────────────────────────────────────────────────
+  if (resourceType === 'contact') {
+    const phone = (formData.get('phone') as string) || '';
+    const email = (formData.get('email') as string) || '';
+
+    if (!phone && !email) {
+      return NextResponse.json({ error: 'At least one of phone or email is required' }, { status: 400 });
+    }
+
+    const doc = await TripFile.create({
+      tripId: id, userId: user._id,
+      resourceType: 'contact',
+      name, type, notes: notes || undefined,
+      phone: phone || undefined,
+      email: email || undefined,
+      linkedTo: linkedTo || undefined,
+    });
+    return NextResponse.json({ file: doc }, { status: 201 });
+  }
+
+  // ── Link path ─────────────────────────────────────────────────────────────────
   if (resourceType === 'link') {
     const linkUrl = formData.get('linkUrl') as string | null;
     if (!linkUrl) return NextResponse.json({ error: 'linkUrl is required for links' }, { status: 400 });
@@ -73,7 +94,7 @@ export async function POST(
     return NextResponse.json({ file: doc }, { status: 201 });
   }
 
-  // ── File path ───────────────────────────────────────────────────────────────
+  // ── File path ─────────────────────────────────────────────────────────────────
   const file = formData.get('file') as File | null;
   if (!file) return NextResponse.json({ error: 'file is required' }, { status: 400 });
 

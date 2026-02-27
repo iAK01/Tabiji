@@ -8,29 +8,39 @@ import {
   IconButton, Divider, LinearProgress, alpha,
   useTheme, useMediaQuery, Menu,
 } from '@mui/material';
-import AddIcon             from '@mui/icons-material/Add';
-import DeleteIcon          from '@mui/icons-material/Delete';
-import DownloadIcon        from '@mui/icons-material/Download';
-import OpenInNewIcon       from '@mui/icons-material/OpenInNew';
-import MoreVertIcon        from '@mui/icons-material/MoreVert';
-import InsertDriveFileIcon from '@mui/icons-material/InsertDriveFile';
-import PictureAsPdfIcon    from '@mui/icons-material/PictureAsPdf';
-import ImageIcon           from '@mui/icons-material/Image';
-import LinkIcon            from '@mui/icons-material/Link';
-import FlightIcon          from '@mui/icons-material/Flight';
-import TrainIcon           from '@mui/icons-material/Train';
-import HotelIcon           from '@mui/icons-material/Hotel';
-import DirectionsCarIcon   from '@mui/icons-material/DirectionsCar';
-import EventIcon           from '@mui/icons-material/Event';
-import BadgeIcon           from '@mui/icons-material/Badge';
-import HealthAndSafetyIcon from '@mui/icons-material/HealthAndSafety';
-import FolderOpenIcon      from '@mui/icons-material/FolderOpen';
-import CloudUploadIcon     from '@mui/icons-material/CloudUpload';
-import PublicIcon          from '@mui/icons-material/Public';
-import MusicNoteIcon       from '@mui/icons-material/MusicNote';
-import LocationOnIcon      from '@mui/icons-material/LocationOn';
-import InfoIcon            from '@mui/icons-material/Info';
+import AddIcon                from '@mui/icons-material/Add';
+import DeleteIcon             from '@mui/icons-material/Delete';
+import DownloadIcon           from '@mui/icons-material/Download';
+import OpenInNewIcon          from '@mui/icons-material/OpenInNew';
+import MoreVertIcon           from '@mui/icons-material/MoreVert';
+import InsertDriveFileIcon    from '@mui/icons-material/InsertDriveFile';
+import PictureAsPdfIcon       from '@mui/icons-material/PictureAsPdf';
+import ImageIcon              from '@mui/icons-material/Image';
+import LinkIcon               from '@mui/icons-material/Link';
+import FlightIcon             from '@mui/icons-material/Flight';
+import TrainIcon              from '@mui/icons-material/Train';
+import HotelIcon              from '@mui/icons-material/Hotel';
+import DirectionsCarIcon      from '@mui/icons-material/DirectionsCar';
+import EventIcon              from '@mui/icons-material/Event';
+import BadgeIcon              from '@mui/icons-material/Badge';
+import HealthAndSafetyIcon    from '@mui/icons-material/HealthAndSafety';
+import FolderOpenIcon         from '@mui/icons-material/FolderOpen';
+import CloudUploadIcon        from '@mui/icons-material/CloudUpload';
+import PublicIcon             from '@mui/icons-material/Public';
+import MusicNoteIcon          from '@mui/icons-material/MusicNote';
+import LocationOnIcon         from '@mui/icons-material/LocationOn';
+import InfoIcon               from '@mui/icons-material/Info';
 import ConfirmationNumberIcon from '@mui/icons-material/ConfirmationNumber';
+import PersonIcon             from '@mui/icons-material/Person';
+import PhoneIcon              from '@mui/icons-material/Phone';
+import EmailIcon              from '@mui/icons-material/Email';
+import SupportAgentIcon       from '@mui/icons-material/SupportAgent';
+import BusinessIcon           from '@mui/icons-material/Business';
+import CampaignIcon           from '@mui/icons-material/Campaign';
+import EngineeringIcon        from '@mui/icons-material/Engineering';
+import DirectionsBusIcon      from '@mui/icons-material/DirectionsBus';
+import LocalHospitalIcon      from '@mui/icons-material/LocalHospital';
+import GroupIcon              from '@mui/icons-material/Group';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -42,13 +52,15 @@ interface LinkedTo {
 
 interface TripFile {
   _id: string;
-  resourceType: 'file' | 'link';
+  resourceType: 'file' | 'link' | 'contact';
   name: string;
   type: string;
   gcsUrl?: string;
   linkUrl?: string;
   mimeType?: string;
   size?: number;
+  phone?: string;
+  email?: string;
   notes?: string;
   linkedTo?: LinkedTo;
   createdAt: string;
@@ -56,7 +68,7 @@ interface TripFile {
 
 interface FilesTabProps { tripId: string; }
 
-type Mode = 'file' | 'link';
+type Mode = 'file' | 'link' | 'contact';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -77,36 +89,64 @@ const LINK_TYPES = [
   { value: 'hotel',              label: 'Hotel',               Icon: HotelIcon },
   { value: 'event_website',      label: 'Event Website',       Icon: PublicIcon },
   { value: 'artist_lineup',      label: 'Artist / Lineup',     Icon: MusicNoteIcon },
-  { value: 'venue',         label: 'Venue',          Icon: LocationOnIcon },
+  { value: 'venue',              label: 'Venue',               Icon: LocationOnIcon },
   { value: 'booking_reference',  label: 'Booking Reference',   Icon: ConfirmationNumberIcon },
   { value: 'useful_info',        label: 'Useful Info',         Icon: InfoIcon },
   { value: 'other',              label: 'Other',               Icon: LinkIcon },
 ] as const;
 
-type FileTypeValue = typeof FILE_TYPES[number]['value'];
-type LinkTypeValue = typeof LINK_TYPES[number]['value'];
+const CONTACT_TYPES = [
+  { value: 'artist',               label: 'Artist',              Icon: MusicNoteIcon },
+  { value: 'venue_manager',        label: 'Venue Manager',       Icon: LocationOnIcon },
+  { value: 'event_manager',        label: 'Event Manager',       Icon: EventIcon },
+  { value: 'tour_manager',         label: 'Tour Manager',        Icon: GroupIcon },
+  { value: 'production',           label: 'Production',          Icon: EngineeringIcon },
+  { value: 'promoter',             label: 'Promoter',            Icon: CampaignIcon },
+  { value: 'accommodation_contact',label: 'Accommodation',       Icon: HotelIcon },
+  { value: 'transport_contact',    label: 'Transport',           Icon: DirectionsBusIcon },
+  { value: 'emergency_contact',    label: 'Emergency',           Icon: LocalHospitalIcon },
+  { value: 'other',                label: 'Other',               Icon: PersonIcon },
+] as const;
 
-const ALL_TYPES = [...FILE_TYPES, ...LINK_TYPES];
+type FileTypeValue    = typeof FILE_TYPES[number]['value'];
+type LinkTypeValue    = typeof LINK_TYPES[number]['value'];
+type ContactTypeValue = typeof CONTACT_TYPES[number]['value'];
+
+const ALL_TYPES = [...FILE_TYPES, ...LINK_TYPES, ...CONTACT_TYPES];
 
 const TYPE_COLOUR: Record<string, string> = {
-  boarding_pass:      '#C9521B',
-  train_ticket:       '#0369a1',
-  hotel_confirmation: '#5c35a0',
-  car_hire:           '#55702C',
-  event_brief:        '#1D2642',
-  event_website:      '#0891b2',
-  artist_lineup:      '#7c3aed',
-  venue_info:         '#55702C',
-  booking_reference:  '#C9521B',
-  visa:               '#b45309',
-  insurance:          '#0891b2',
-  passport:           '#b45309',
-  useful_info:        '#6b7280',
-  other:              '#6b7280',
+  // Files
+  boarding_pass:         '#C9521B',
+  train_ticket:          '#0369a1',
+  hotel_confirmation:    '#5c35a0',
+  car_hire:              '#55702C',
+  event_brief:           '#1D2642',
+  visa:                  '#b45309',
+  insurance:             '#0891b2',
+  passport:              '#b45309',
+  // Links
+  event_website:         '#0891b2',
+  artist_lineup:         '#7c3aed',
+  venue:                 '#55702C',
+  booking_reference:     '#C9521B',
+  useful_info:           '#6b7280',
+  // Contacts
+  artist:                '#7c3aed',
+  venue_manager:         '#55702C',
+  event_manager:         '#1D2642',
+  tour_manager:          '#0369a1',
+  production:            '#374151',
+  promoter:              '#C9521B',
+  accommodation_contact: '#5c35a0',
+  transport_contact:     '#0891b2',
+  emergency_contact:     '#dc2626',
+  // Shared
+  other:                 '#6b7280',
 };
 
-const BLANK_FILE_FORM = { name: '', type: 'other' as FileTypeValue, notes: '' };
-const BLANK_LINK_FORM = { name: '', type: 'event_website' as LinkTypeValue, url: '', notes: '' };
+const BLANK_FILE_FORM    = { name: '', type: 'other' as FileTypeValue,    notes: '' };
+const BLANK_LINK_FORM    = { name: '', type: 'event_website' as LinkTypeValue, url: '', notes: '' };
+const BLANK_CONTACT_FORM = { name: '', type: 'other' as ContactTypeValue, phone: '', email: '', notes: '' };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -186,14 +226,171 @@ function DropZone({ onFile }: { onFile: (f: File) => void }) {
   );
 }
 
+// ─── Contact card ─────────────────────────────────────────────────────────────
+
+function ContactCard({ file, onDelete }: { file: TripFile; onDelete: (id: string) => void }) {
+  const [menuAnchor,  setMenuAnchor]  = useState<null | HTMLElement>(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const color     = TYPE_COLOUR[file.type] ?? '#6b7280';
+  const typeMeta  = CONTACT_TYPES.find(t => t.value === file.type);
+  const hasPhone  = !!file.phone;
+  const hasEmail  = !!file.email;
+
+  return (
+    <>
+      <Box sx={{ px: { xs: 2, sm: 2.5 }, py: { xs: 1.75, sm: 2 }, display: 'flex', gap: 1.5 }}>
+
+        {/* colour accent bar */}
+        <Box sx={{ width: 3, alignSelf: 'stretch', borderRadius: 2, backgroundColor: color, flexShrink: 0 }} />
+
+        {/* avatar */}
+        <Box sx={{
+          width: 40, height: 40, borderRadius: '50%', flexShrink: 0,
+          backgroundColor: alpha(color, 0.12),
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          <TypeIcon type={file.type} size={20} />
+        </Box>
+
+        {/* details */}
+        <Box sx={{ flexGrow: 1, minWidth: 0 }}>
+
+          {/* name + role */}
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+            <Typography variant="body2" fontWeight={800} sx={{ fontSize: '0.9rem' }}>
+              {file.name}
+            </Typography>
+            {typeMeta && (
+              <Chip
+                label={typeMeta.label} size="small"
+                sx={{ height: 18, fontSize: '0.68rem', fontWeight: 700,
+                      backgroundColor: alpha(color, 0.12), color }}
+              />
+            )}
+          </Box>
+
+          {/* contact actions */}
+          {(hasPhone || hasEmail) && (
+            <Box sx={{ display: 'flex', gap: 1, mt: 1, flexWrap: 'wrap' }}>
+              {hasPhone && (
+                <Button
+                  component="a"
+                  href={`tel:${file.phone}`}
+                  size="small"
+                  startIcon={<PhoneIcon sx={{ fontSize: '0.95rem !important' }} />}
+                  variant="outlined"
+                  sx={{
+                    fontSize: '0.78rem', fontWeight: 700, py: 0.5, px: 1.25,
+                    borderColor: alpha(color, 0.35), color,
+                    '&:hover': { borderColor: color, backgroundColor: alpha(color, 0.06) },
+                    minHeight: 32,
+                  }}
+                >
+                  {file.phone}
+                </Button>
+              )}
+              {hasEmail && (
+                <Button
+                  component="a"
+                  href={`mailto:${file.email}`}
+                  size="small"
+                  startIcon={<EmailIcon sx={{ fontSize: '0.95rem !important' }} />}
+                  variant="outlined"
+                  sx={{
+                    fontSize: '0.78rem', fontWeight: 700, py: 0.5, px: 1.25,
+                    borderColor: alpha('#0891b2', 0.35), color: '#0891b2',
+                    '&:hover': { borderColor: '#0891b2', backgroundColor: alpha('#0891b2', 0.06) },
+                    minHeight: 32,
+                    maxWidth: { xs: '100%', sm: 260 },
+                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                  }}
+                >
+                  {file.email}
+                </Button>
+              )}
+            </Box>
+          )}
+
+          {/* meta row */}
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, mt: 0.75, flexWrap: 'wrap' }}>
+            <Typography variant="caption" color="text.disabled" sx={{ fontSize: '0.72rem' }}>
+              {new Date(file.createdAt).toLocaleDateString('en-IE', { day: 'numeric', month: 'short', year: 'numeric' })}
+            </Typography>
+            {file.linkedTo?.label && (
+              <>
+                <Typography variant="caption" color="text.disabled" sx={{ fontSize: '0.72rem' }}>·</Typography>
+                <Typography variant="caption" sx={{ fontSize: '0.72rem', color, fontWeight: 600 }}>
+                  {file.linkedTo.label}
+                </Typography>
+              </>
+            )}
+          </Box>
+
+          {file.notes && (
+            <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.72rem', mt: 0.25, display: 'block' }}>
+              {file.notes}
+            </Typography>
+          )}
+        </Box>
+
+        {/* overflow menu */}
+        <IconButton size="small" onClick={e => { e.stopPropagation(); setMenuAnchor(e.currentTarget); }} sx={{ flexShrink: 0, alignSelf: 'flex-start', mt: 0.25 }}>
+          <MoreVertIcon fontSize="small" />
+        </IconButton>
+      </Box>
+
+      <Menu
+        anchorEl={menuAnchor}
+        open={Boolean(menuAnchor)}
+        onClose={() => setMenuAnchor(null)}
+        transformOrigin={{ horizontal: 'right', vertical: 'top' }}
+        anchorOrigin={{ horizontal: 'right', vertical: 'bottom' }}
+      >
+        {hasPhone && (
+          <MenuItem component="a" href={`tel:${file.phone}`} onClick={() => setMenuAnchor(null)} sx={{ gap: 1.5, fontSize: '0.875rem' }}>
+            <PhoneIcon fontSize="small" /> Call {file.phone}
+          </MenuItem>
+        )}
+        {hasEmail && (
+          <MenuItem component="a" href={`mailto:${file.email}`} onClick={() => setMenuAnchor(null)} sx={{ gap: 1.5, fontSize: '0.875rem' }}>
+            <EmailIcon fontSize="small" /> Email
+          </MenuItem>
+        )}
+        {(hasPhone || hasEmail) && <Divider />}
+        <MenuItem
+          onClick={() => { setMenuAnchor(null); setConfirmOpen(true); }}
+          sx={{ gap: 1.5, fontSize: '0.875rem', color: 'error.main' }}
+        >
+          <DeleteIcon fontSize="small" /> Delete
+        </MenuItem>
+      </Menu>
+
+      <Dialog open={confirmOpen} onClose={() => setConfirmOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle fontWeight={700} sx={{ fontSize: '1.1rem' }}>Remove contact?</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary">
+            <strong>{file.name}</strong> will be permanently removed. This cannot be undone.
+          </Typography>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2.5, gap: 1 }}>
+          <Button onClick={() => setConfirmOpen(false)}>Cancel</Button>
+          <Button variant="contained" color="error" onClick={() => { setConfirmOpen(false); onDelete(file._id); }}>
+            Remove
+          </Button>
+        </DialogActions>
+      </Dialog>
+    </>
+  );
+}
+
 // ─── File / link card ─────────────────────────────────────────────────────────
 
 function ResourceCard({ file, onDelete }: { file: TripFile; onDelete: (id: string) => void }) {
   const [menuAnchor,  setMenuAnchor]  = useState<null | HTMLElement>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
-  const color      = TYPE_COLOUR[file.type] ?? '#6b7280';
-  const isLink     = file.resourceType === 'link';
-  const actionUrl  = isLink ? file.linkUrl : file.gcsUrl;
+  const color     = TYPE_COLOUR[file.type] ?? '#6b7280';
+  const isLink    = file.resourceType === 'link';
+  const actionUrl = isLink ? file.linkUrl : file.gcsUrl;
 
   return (
     <>
@@ -312,16 +509,17 @@ export default function FilesTab({ tripId }: FilesTabProps) {
   const theme  = useTheme();
   const mobile = useMediaQuery(theme.breakpoints.down('sm'));
 
-  const [files,       setFiles]       = useState<TripFile[]>([]);
-  const [loading,     setLoading]     = useState(true);
-  const [uploading,   setUploading]   = useState(false);
-  const [uploadPct,   setUploadPct]   = useState(0);
-  const [dialogOpen,  setDialogOpen]  = useState(false);
-  const [mode,        setMode]        = useState<Mode>('file');
-  const [pendingFile, setPendingFile] = useState<File | null>(null);
-  const [fileForm,    setFileForm]    = useState({ ...BLANK_FILE_FORM });
-  const [linkForm,    setLinkForm]    = useState({ ...BLANK_LINK_FORM });
-  const [error,       setError]       = useState<string | null>(null);
+  const [files,        setFiles]        = useState<TripFile[]>([]);
+  const [loading,      setLoading]      = useState(true);
+  const [uploading,    setUploading]    = useState(false);
+  const [uploadPct,    setUploadPct]    = useState(0);
+  const [dialogOpen,   setDialogOpen]   = useState(false);
+  const [mode,         setMode]         = useState<Mode>('file');
+  const [pendingFile,  setPendingFile]  = useState<File | null>(null);
+  const [fileForm,     setFileForm]     = useState({ ...BLANK_FILE_FORM });
+  const [linkForm,     setLinkForm]     = useState({ ...BLANK_LINK_FORM });
+  const [contactForm,  setContactForm]  = useState({ ...BLANK_CONTACT_FORM });
+  const [error,        setError]        = useState<string | null>(null);
 
   useEffect(() => {
     fetch(`/api/trips/${tripId}/files`)
@@ -335,6 +533,7 @@ export default function FilesTab({ tripId }: FilesTabProps) {
     setPendingFile(null);
     setFileForm({ ...BLANK_FILE_FORM });
     setLinkForm({ ...BLANK_LINK_FORM });
+    setContactForm({ ...BLANK_CONTACT_FORM });
     setError(null);
     setDialogOpen(true);
   };
@@ -354,7 +553,16 @@ export default function FilesTab({ tripId }: FilesTabProps) {
 
     const fd = new FormData();
 
-    if (mode === 'link') {
+    if (mode === 'contact') {
+      if (!contactForm.name) { setError('Name is required'); setUploading(false); return; }
+      if (!contactForm.phone && !contactForm.email) { setError('At least one of phone or email is required'); setUploading(false); return; }
+      fd.append('resourceType', 'contact');
+      fd.append('name',  contactForm.name.trim());
+      fd.append('type',  contactForm.type);
+      fd.append('phone', contactForm.phone.trim());
+      fd.append('email', contactForm.email.trim());
+      fd.append('notes', contactForm.notes);
+    } else if (mode === 'link') {
       if (!linkForm.url || !linkForm.name) { setError('Name and URL are required'); setUploading(false); return; }
       fd.append('resourceType', 'link');
       fd.append('name',    linkForm.name.trim());
@@ -370,27 +578,35 @@ export default function FilesTab({ tripId }: FilesTabProps) {
       fd.append('notes', fileForm.notes);
     }
 
-    const tick = setInterval(() => setUploadPct(p => Math.min(p + 12, 85)), 300);
-
-    try {
-      const res  = await fetch(`/api/trips/${tripId}/files`, { method: 'POST', body: fd });
-      const data = await res.json();
-      clearInterval(tick);
-
-      if (!res.ok) { setError(data.error ?? 'Failed'); setUploading(false); return; }
-
-      setUploadPct(100);
-      setFiles(prev => [data.file, ...prev]);
-      setTimeout(() => {
-        setDialogOpen(false);
+    // Contacts save instantly, files/links use progress animation
+    if (mode !== 'contact') {
+      const tick = setInterval(() => setUploadPct(p => Math.min(p + 12, 85)), 300);
+      try {
+        const res  = await fetch(`/api/trips/${tripId}/files`, { method: 'POST', body: fd });
+        const data = await res.json();
+        clearInterval(tick);
+        if (!res.ok) { setError(data.error ?? 'Failed'); setUploading(false); return; }
+        setUploadPct(100);
+        setFiles(prev => [data.file, ...prev]);
+        setTimeout(() => { setDialogOpen(false); setUploading(false); setUploadPct(0); setPendingFile(null); }, 400);
+      } catch {
+        clearInterval(tick);
+        setError('Something went wrong — please try again');
         setUploading(false);
-        setUploadPct(0);
-        setPendingFile(null);
-      }, 400);
-    } catch {
-      clearInterval(tick);
-      setError('Something went wrong — please try again');
-      setUploading(false);
+      }
+    } else {
+      try {
+        setUploadPct(60);
+        const res  = await fetch(`/api/trips/${tripId}/files`, { method: 'POST', body: fd });
+        const data = await res.json();
+        if (!res.ok) { setError(data.error ?? 'Failed'); setUploading(false); return; }
+        setUploadPct(100);
+        setFiles(prev => [data.file, ...prev]);
+        setTimeout(() => { setDialogOpen(false); setUploading(false); setUploadPct(0); }, 300);
+      } catch {
+        setError('Something went wrong — please try again');
+        setUploading(false);
+      }
     }
   };
 
@@ -403,9 +619,10 @@ export default function FilesTab({ tripId }: FilesTabProps) {
   const typeOrder: string[] = ALL_TYPES.map(t => t.value);
   const sortedKeys = [...grouped.keys()].sort((a, b) => typeOrder.indexOf(a) - typeOrder.indexOf(b));
 
-  const canSubmit = mode === 'link'
-    ? !!linkForm.name.trim() && !!linkForm.url.trim()
-    : !!pendingFile && !!fileForm.name.trim();
+  const canSubmit =
+    mode === 'contact' ? !!contactForm.name.trim() && (!!contactForm.phone.trim() || !!contactForm.email.trim()) :
+    mode === 'link'    ? !!linkForm.name.trim() && !!linkForm.url.trim() :
+                         !!pendingFile && !!fileForm.name.trim();
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
@@ -414,13 +631,16 @@ export default function FilesTab({ tripId }: FilesTabProps) {
       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 1.5 }}>
         <Box>
           <Typography variant="h6" fontWeight={800} sx={{ fontSize: { xs: '1.05rem', sm: '1.15rem' } }}>
-            Files & Links
+            Resources
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mt: 0.25 }}>
             {files.length === 0 ? 'No resources yet' : `${files.length} item${files.length !== 1 ? 's' : ''}`}
           </Typography>
         </Box>
-        <Box sx={{ display: 'flex', gap: 1 }}>
+        <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+          <Button variant="outlined" startIcon={<PersonIcon />} onClick={() => openDialog('contact')} sx={{ fontWeight: 700 }}>
+            Add contact
+          </Button>
           <Button variant="outlined" startIcon={<LinkIcon />} onClick={() => openDialog('link')} sx={{ fontWeight: 700 }}>
             Save link
           </Button>
@@ -441,10 +661,10 @@ export default function FilesTab({ tripId }: FilesTabProps) {
           <Box sx={{ textAlign: 'center', mb: 3 }}>
             <FolderOpenIcon sx={{ fontSize: 52, color: 'text.disabled', mb: 1.5 }} />
             <Typography variant="body1" fontWeight={700} color="text.secondary" gutterBottom>
-              No files or links yet
+              No resources yet
             </Typography>
-            <Typography variant="body2" color="text.disabled" sx={{ maxWidth: 360, mx: 'auto' }}>
-              Upload boarding passes, tickets and documents, or save links to event websites, venues and useful info.
+            <Typography variant="body2" color="text.disabled" sx={{ maxWidth: 380, mx: 'auto' }}>
+              Upload boarding passes and documents, save links to event websites and venues, or add key contacts — artists, venue managers, and more.
             </Typography>
           </Box>
           <DropZone onFile={f => { setMode('file'); handleFileSelected(f); }} />
@@ -477,7 +697,10 @@ export default function FilesTab({ tripId }: FilesTabProps) {
                 {group.map((file, i) => (
                   <Box key={file._id}>
                     {i > 0 && <Divider />}
-                    <ResourceCard file={file} onDelete={handleDelete} />
+                    {file.resourceType === 'contact'
+                      ? <ContactCard file={file} onDelete={handleDelete} />
+                      : <ResourceCard file={file} onDelete={handleDelete} />
+                    }
                   </Box>
                 ))}
               </Paper>
@@ -493,7 +716,7 @@ export default function FilesTab({ tripId }: FilesTabProps) {
         maxWidth="sm" fullWidth fullScreen={mobile}
       >
         <DialogTitle fontWeight={700} sx={{ fontSize: { xs: '1.15rem', sm: '1.2rem' } }}>
-          {mode === 'link' ? 'Save a link' : 'Upload a file'}
+          {mode === 'contact' ? 'Add a contact' : mode === 'link' ? 'Save a link' : 'Upload a file'}
         </DialogTitle>
 
         <DialogContent>
@@ -561,11 +784,49 @@ export default function FilesTab({ tripId }: FilesTabProps) {
               </>
             )}
 
+            {/* ── Contact mode ── */}
+            {mode === 'contact' && (
+              <>
+                <TextField
+                  label="Name" value={contactForm.name} autoFocus fullWidth disabled={uploading}
+                  onChange={e => setContactForm(p => ({ ...p, name: e.target.value }))}
+                  placeholder="e.g. Sarah Kavanagh"
+                />
+                <FormControl fullWidth disabled={uploading}>
+                  <InputLabel>Role</InputLabel>
+                  <Select value={contactForm.type} label="Role" onChange={e => setContactForm(p => ({ ...p, type: e.target.value as ContactTypeValue }))}>
+                    {CONTACT_TYPES.map(({ value, label }) => <MenuItem key={value} value={value}>{label}</MenuItem>)}
+                  </Select>
+                </FormControl>
+                <TextField
+                  label="Phone number" value={contactForm.phone} fullWidth disabled={uploading}
+                  onChange={e => setContactForm(p => ({ ...p, phone: e.target.value }))}
+                  placeholder="+353 87 123 4567"
+                  type="tel"
+                  InputProps={{
+                    startAdornment: <PhoneIcon sx={{ fontSize: 18, color: 'text.disabled', mr: 1 }} />,
+                  }}
+                />
+                <TextField
+                  label="Email address" value={contactForm.email} fullWidth disabled={uploading}
+                  onChange={e => setContactForm(p => ({ ...p, email: e.target.value }))}
+                  placeholder="sarah@venue.ie"
+                  type="email"
+                  InputProps={{
+                    startAdornment: <EmailIcon sx={{ fontSize: 18, color: 'text.disabled', mr: 1 }} />,
+                  }}
+                />
+                <TextField label="Notes (optional)" value={contactForm.notes} fullWidth multiline rows={2} disabled={uploading}
+                  onChange={e => setContactForm(p => ({ ...p, notes: e.target.value }))}
+                  placeholder="e.g. Best reached after 10am" />
+              </>
+            )}
+
             {uploading && (
               <Box>
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.75 }}>
                   <Typography variant="caption" color="text.secondary" fontWeight={600}>
-                    {mode === 'link' ? 'Saving…' : 'Uploading…'}
+                    {mode === 'contact' ? 'Saving…' : mode === 'link' ? 'Saving…' : 'Uploading…'}
                   </Typography>
                   <Typography variant="caption" fontWeight={700}>{uploadPct}%</Typography>
                 </Box>
@@ -592,7 +853,7 @@ export default function FilesTab({ tripId }: FilesTabProps) {
           >
             {uploading
               ? <CircularProgress size={20} sx={{ color: 'white' }} />
-              : mode === 'link' ? 'Save link' : 'Upload'}
+              : mode === 'contact' ? 'Save contact' : mode === 'link' ? 'Save link' : 'Upload'}
           </Button>
         </DialogActions>
       </Dialog>
