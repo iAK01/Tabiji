@@ -9,7 +9,7 @@ const LocationSchema = new Schema({
   currency:      String,
   currencySymbol: String,
   electricalPlug: String,
-  iataCode:      String,  // nearest airport IATA — e.g. DUB, OTP, BRE
+  iataCode:      String,
 }, { _id: false });
 
 const TripSchema = new Schema({
@@ -26,13 +26,14 @@ const TripSchema = new Schema({
   coverPhotoUrl:    String,
   coverPhotoThumb:  String,
   coverPhotoCredit: String,
-  weather:   { type: Schema.Types.Mixed },
+  weather: { type: Schema.Types.Mixed },
   status: {
     type: String,
     enum: ['idea', 'planning', 'confirmed', 'active', 'completed', 'cancelled'],
     default: 'idea',
   },
   collaborators: [{ userId: Schema.Types.ObjectId, role: { type: String, enum: ['viewer', 'editor'] }, addedAt: Date }],
+  dismissedChecks: { type: [String], default: [] },
   deleted: { type: Boolean, default: false },
 }, { timestamps: true });
 

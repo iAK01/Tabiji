@@ -9,46 +9,74 @@ import {
   TextField, Select, MenuItem, FormControl, InputLabel,
   useMediaQuery, useTheme,
 } from '@mui/material';
-import ArrowBackIcon from '@mui/icons-material/ArrowBack';
-import FlightTakeoffIcon from '@mui/icons-material/FlightTakeoff';
-import EditIcon from '@mui/icons-material/Edit';
-import RefreshIcon from '@mui/icons-material/Refresh';
-import FlightIcon from '@mui/icons-material/Flight';
-import MapIcon from '@mui/icons-material/Map';
-import BackpackIcon from '@mui/icons-material/Backpack';
-import LightbulbIcon from '@mui/icons-material/Lightbulb';
-import WbSunnyIcon from '@mui/icons-material/WbSunny';
-import GridViewIcon from '@mui/icons-material/GridView';
-import FolderOpenIcon from '@mui/icons-material/FolderOpen';
-import LogisticsTab from '@/components/logistics/LogisticsTab';
-import ItineraryTab from '@/components/itinerary/ItineraryTab';
-import PackingTab from '@/components/packing/PackingTab';
-import IntelligenceTab from '@/components/intelligence/IntelligenceTab';
-import WeatherTab from '@/components/weather/WeatherTab';
-import TripOverview from '@/components/overview/TripOverview';
-import FilesTab from '@/components/files/FilesTab';
-
-import dynamic from 'next/dynamic';
+import ArrowBackIcon     from '@mui/icons-material/ArrowBack';
+import EditIcon          from '@mui/icons-material/Edit';
+import RefreshIcon       from '@mui/icons-material/Refresh';
+import FlightIcon        from '@mui/icons-material/Flight';
+import MapIcon           from '@mui/icons-material/Map';
+import BackpackIcon      from '@mui/icons-material/Backpack';
+import LightbulbIcon     from '@mui/icons-material/Lightbulb';
+import WbSunnyIcon       from '@mui/icons-material/WbSunny';
+import GridViewIcon      from '@mui/icons-material/GridView';
+import FolderOpenIcon    from '@mui/icons-material/FolderOpen';
+import LogisticsTab      from '@/components/logistics/LogisticsTab';
+import ItineraryTab      from '@/components/itinerary/ItineraryTab';
+import PackingTab        from '@/components/packing/PackingTab';
+import IntelligenceTab   from '@/components/intelligence/IntelligenceTab';
+import WeatherTab        from '@/components/weather/WeatherTab';
+import TripOverview      from '@/components/overview/TripOverview';
+import FilesTab          from '@/components/files/FilesTab';
+import dynamic           from 'next/dynamic';
 import { saveTripCache, getTripCache, queueAction } from '@/lib/offline/db';
 
 const MapTab = dynamic(() => import('@/components/map/MapTab'), { ssr: false });
 
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+interface WeatherDay {
+  date:          string;
+  label:         string;
+  condition:     string;
+  icon:          string;
+  tempAvg:       number;
+  tempMax:       number;
+  tempMin:       number;
+  chanceOfRain:  number;
+  precipMm:      number;
+  windKph:       number;
+  humidity:      number | null;
+  uvIndex:       number | null;
+  source:        string;
+}
 
 interface Trip {
-  _id: string;
-  name: string;
-  tripType: string;
-  status: string;
-  purpose: string;
-  origin: { city: string; country: string };
-  destination: { city: string; country: string };
-  startDate: string;
-  endDate: string;
-  nights: number;
-  coverPhotoUrl?: string;
-  coverPhotoThumb?: string;
+  _id:            string;
+  name:           string;
+  tripType:       string;
+  status:         string;
+  purpose:        string;
+  origin:         { city: string; country: string };
+  destination:    { city: string; country: string };
+  startDate:      string;
+  endDate:        string;
+  nights:         number;
+  coverPhotoUrl?:    string;
+  coverPhotoThumb?:  string;
   coverPhotoCredit?: string;
+  dismissedChecks?:  string[];
+  weather?: {
+    summary?:       string;
+    packingNotes?:  string[];
+    days?:          WeatherDay[];
+    currentWeather?: WeatherDay[];
+    homeComparison?: {
+      tempDeltaLabel?: string;
+      insights?: { icon: string; text: string }[];
+    };
+  };
 }
+
+// ─── Constants ────────────────────────────────────────────────────────────────
 
 const STATUS_COLOURS: Record<string, 'default' | 'primary' | 'secondary' | 'error' | 'warning' | 'success'> = {
   idea: 'default', planning: 'warning', confirmed: 'primary',
@@ -56,125 +84,100 @@ const STATUS_COLOURS: Record<string, 'default' | 'primary' | 'secondary' | 'erro
 };
 
 const TAB_CONFIG = [
-  { label: 'Overview',     Icon: GridViewIcon },
-  { label: 'Logistics',    Icon: FlightIcon },
-  { label: 'Itinerary',    Icon: MapIcon },
-  { label: 'Packing',      Icon: BackpackIcon },
-  { label: 'Context', Icon: LightbulbIcon },
-  { label: 'Weather',      Icon: WbSunnyIcon },
-  { label: 'Map',          Icon: MapIcon },
-  { label: 'Resources',        Icon: FolderOpenIcon },
+  { label: 'Overview',  Icon: GridViewIcon },
+  { label: 'Logistics', Icon: FlightIcon },
+  { label: 'Itinerary', Icon: MapIcon },
+  { label: 'Packing',   Icon: BackpackIcon },
+  { label: 'Context',   Icon: LightbulbIcon },
+  { label: 'Weather',   Icon: WbSunnyIcon },
+  { label: 'Map',       Icon: MapIcon },
+  { label: 'Resources', Icon: FolderOpenIcon },
 ];
 
-const QUICK_ACTIONS = [
-  { label: 'Flights & Hotels', tab: 1, Icon: FlightIcon },
-  { label: 'Itinerary',        tab: 2, Icon: MapIcon },
-  { label: 'Packing List',     tab: 3, Icon: BackpackIcon },
-  { label: 'Context',     tab: 4, Icon: LightbulbIcon },
-  { label: 'Weather',          tab: 5, Icon: WbSunnyIcon },
-  { label: 'Map',              tab: 6, Icon: MapIcon },
-  { label: 'Files',            tab: 7, Icon: FolderOpenIcon },
-];
+// ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function TripPage() {
-  const { id } = useParams();
-  const router = useRouter();
-  const theme = useTheme();
+  const { id }   = useParams();
+  const router   = useRouter();
+  const theme    = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
 
-  const [trip, setTrip] = useState<Trip | null>(null);
+  const [trip,      setTrip]      = useState<Trip | null>(null);
   const [activeTab, setActiveTab] = useState(0);
-  const [editOpen, setEditOpen] = useState(false);
-  const [editForm, setEditForm] = useState({
+  const [editOpen,  setEditOpen]  = useState(false);
+  const [editForm,  setEditForm]  = useState({
     name: '', tripType: '', purpose: '', startDate: '', endDate: '', status: '',
   });
 
-useEffect(() => {
-  async function loadTrip() {
-    try {
-      const res = await fetch(`/api/trips/${id}`);
-      const data = await res.json();
+  useEffect(() => {
+    async function loadTrip() {
+      try {
+        const res  = await fetch(`/api/trips/${id}`);
+        const data = await res.json();
+        setTrip(data.trip);
+        await saveTripCache(String(id), data.trip);
 
-      setTrip(data.trip);
-
-      await saveTripCache(String(id), data.trip);
-
-      if (!data.trip?.coverPhotoUrl && data.trip?.destination?.city) {
-        const photoRes = await fetch(`/api/trips/${data.trip._id}/cover-photo`, { method: 'POST' });
-        const photoData = await photoRes.json();
-        if (photoData.trip) {
-          setTrip(photoData.trip);
-          await saveTripCache(String(id), photoData.trip);
+        if (!data.trip?.coverPhotoUrl && data.trip?.destination?.city) {
+          const photoRes  = await fetch(`/api/trips/${data.trip._id}/cover-photo`, { method: 'POST' });
+          const photoData = await photoRes.json();
+          if (photoData.trip) {
+            setTrip(photoData.trip);
+            await saveTripCache(String(id), photoData.trip);
+          }
         }
+      } catch {
+        const cached = await getTripCache(String(id));
+        if (cached) setTrip(cached);
       }
-
-    } catch {
-      const cached = await getTripCache(String(id));
-      if (cached) setTrip(cached);
     }
-  }
-
-  loadTrip();
-}, [id]);
+    loadTrip();
+  }, [id]);
 
   const openEdit = () => {
     if (!trip) return;
     setEditForm({
-      name: trip.name, tripType: trip.tripType, purpose: trip.purpose || '',
+      name:      trip.name,
+      tripType:  trip.tripType,
+      purpose:   trip.purpose || '',
       startDate: trip.startDate?.split('T')[0] ?? '',
-      endDate: trip.endDate?.split('T')[0] ?? '',
-      status: trip.status,
+      endDate:   trip.endDate?.split('T')[0] ?? '',
+      status:    trip.status,
     });
     setEditOpen(true);
   };
 
-const saveEdit = async () => {
-  if (!trip) return;
+  const saveEdit = async () => {
+    if (!trip) return;
+    const nights =
+      editForm.startDate && editForm.endDate
+        ? Math.round((new Date(editForm.endDate).getTime() - new Date(editForm.startDate).getTime()) / 86400000)
+        : trip.nights;
+    const payload = { ...editForm, nights };
 
-  const nights =
-    editForm.startDate && editForm.endDate
-      ? Math.round(
-          (new Date(editForm.endDate).getTime() -
-            new Date(editForm.startDate).getTime()) /
-            86400000
-        )
-      : trip.nights;
-
-  const payload = { ...editForm, nights };
-
-  // ── OFFLINE ─────────────────────────────────────
-  if (!navigator.onLine) {
-    await queueAction({
-      type: 'UPDATE_TRIP',
-      tripId: trip._id,
-      payload,
-    });
-
-    if ('serviceWorker' in navigator && 'SyncManager' in window) {
-      const reg = await navigator.serviceWorker.ready;
-      await (reg as any).sync.register('tabiji-sync');
+    if (!navigator.onLine) {
+      await queueAction({ type: 'UPDATE_TRIP', tripId: trip._id, payload });
+      if ('serviceWorker' in navigator && 'SyncManager' in window) {
+        const reg = await navigator.serviceWorker.ready;
+        await (reg as any).sync.register('tabiji-sync');
+      }
+      setTrip({ ...trip, ...payload });
+      setEditOpen(false);
+      return;
     }
 
-    setTrip({ ...trip, ...payload });
+    const res  = await fetch(`/api/trips/${trip._id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    setTrip(data.trip);
     setEditOpen(false);
-    return;
-  }
-
-  // ── ONLINE ──────────────────────────────────────
-  const res = await fetch(`/api/trips/${trip._id}`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-
-  const data = await res.json();
-  setTrip(data.trip);
-  setEditOpen(false);
-};
+  };
 
   const refreshPhoto = async () => {
     if (!trip) return;
-    const res = await fetch(`/api/trips/${trip._id}/cover-photo`, { method: 'POST' });
+    const res  = await fetch(`/api/trips/${trip._id}/cover-photo`, { method: 'POST' });
     const data = await res.json();
     if (data.trip) setTrip(data.trip);
   };
@@ -189,80 +192,54 @@ const saveEdit = async () => {
     <Box sx={{ minHeight: '100vh', backgroundColor: 'background.default', pb: { xs: 6, sm: 0 } }}>
 
       {/* ── AppBar ── */}
-  <AppBar position="static" sx={{ backgroundColor: 'text.primary' }} elevation={0}>
-  <Toolbar sx={{ minHeight: { xs: 60, sm: 64 }, gap: 1 }}>
-
-    <IconButton color="inherit" onClick={() => router.push('/dashboard')}>
-      <ArrowBackIcon />
-    </IconButton>
-
-   <Box
-  component="img"
-  src="/Logo.jpeg"
-  alt="Logo"
-  onClick={() => router.push('/dashboard')}
-  sx={{
-    flexShrink: 0,
-    width: { xs: 48, sm: 112 },
-    height: { xs: 48, sm: 112 },
-    objectFit: 'contain',
-    cursor: 'pointer',
-  }}
-/>
-
-    <Typography
-      variant="h4"
-      fontWeight={700}
-      sx={{
-        flexGrow: 1,
-        fontSize: { xs: '1.2rem', sm: '2rem' },
-        overflow: 'hidden',
-        textOverflow: 'ellipsis',
-        whiteSpace: 'nowrap',
-      }}
-    >
-      {trip.name}
-    </Typography>
-
-          <Chip
-            label={trip.status}
-            color={STATUS_COLOURS[trip.status]}
-            size="small"
-            sx={{ fontWeight: 700, textTransform: 'capitalize' }}
-          />
-          <IconButton color="inherit" onClick={openEdit}>
-            <EditIcon />
+      <AppBar position="static" sx={{ backgroundColor: 'text.primary' }} elevation={0}>
+        <Toolbar sx={{ minHeight: { xs: 60, sm: 64 }, gap: 1 }}>
+          <IconButton color="inherit" onClick={() => router.push('/dashboard')}>
+            <ArrowBackIcon />
           </IconButton>
+          <Box
+            component="img"
+            src="/Logo.jpeg"
+            alt="Logo"
+            onClick={() => router.push('/dashboard')}
+            sx={{ flexShrink: 0, width: { xs: 48, sm: 112 }, height: { xs: 48, sm: 112 }, objectFit: 'contain', cursor: 'pointer' }}
+          />
+          <Typography
+            variant="h4" fontWeight={700}
+            sx={{ flexGrow: 1, fontSize: { xs: '1.2rem', sm: '2rem' }, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+          >
+            {trip.name}
+          </Typography>
+          <Chip label={trip.status} color={STATUS_COLOURS[trip.status]} size="small" sx={{ fontWeight: 700, textTransform: 'capitalize' }} />
+          <IconButton color="inherit" onClick={openEdit}><EditIcon /></IconButton>
         </Toolbar>
       </AppBar>
 
-      {/* ── Tabs ── icon on top + label, full width, tall on mobile ── */}
+      {/* ── Tabs ── */}
       <Box sx={{ backgroundColor: 'text.primary', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
         <Container maxWidth="lg" disableGutters>
-<Tabs
-  value={activeTab}
-  onChange={(_, val) => setActiveTab(val)}
-  textColor="inherit"
-  variant={isMobile ? "scrollable" : "fullWidth"}
-  scrollButtons={false}
-  TabIndicatorProps={{ style: { backgroundColor: '#C9521B', height: 3 } }}
-  sx={{
-    '& .MuiTab-root': {
-      minHeight: 64,                  // keeps touch target safe
-      minWidth: { xs: 80, sm: 120 },  // prevents crushing
-      flexDirection: 'column',
-      gap: 0.5,
-      fontSize: { xs: '0.7rem', sm: '0.75rem' },
-      fontWeight: 600,
-      textTransform: 'uppercase',
-      color: 'rgba(255,255,255,0.6)',
-      '&.Mui-selected': { color: 'white' },
-      '& svg': {
-        fontSize: { xs: '1.1rem', sm: '1.2rem' },
-      },
-    },
-  }}
->
+          <Tabs
+            value={activeTab}
+            onChange={(_, val) => setActiveTab(val)}
+            textColor="inherit"
+            variant={isMobile ? 'scrollable' : 'fullWidth'}
+            scrollButtons={false}
+            TabIndicatorProps={{ style: { backgroundColor: '#C9521B', height: 3 } }}
+            sx={{
+              '& .MuiTab-root': {
+                minHeight: 64,
+                minWidth: { xs: 80, sm: 120 },
+                flexDirection: 'column',
+                gap: 0.5,
+                fontSize: { xs: '0.7rem', sm: '0.75rem' },
+                fontWeight: 600,
+                textTransform: 'uppercase',
+                color: 'rgba(255,255,255,0.6)',
+                '&.Mui-selected': { color: 'white' },
+                '& svg': { fontSize: { xs: '1.1rem', sm: '1.2rem' } },
+              },
+            }}
+          >
             {TAB_CONFIG.map(({ label, Icon }) => (
               <Tab key={label} label={label} icon={<Icon />} iconPosition="top" />
             ))}
@@ -279,15 +256,9 @@ const saveEdit = async () => {
           backgroundPosition: 'center',
           position: 'relative',
         }}>
-          <Box sx={{
-            position: 'absolute', inset: 0,
-            background: 'linear-gradient(to bottom, rgba(0,0,0,0.05), rgba(0,0,0,0.62))',
-          }} />
+          <Box sx={{ position: 'absolute', inset: 0, background: 'linear-gradient(to bottom, rgba(0,0,0,0.05), rgba(0,0,0,0.62))' }} />
           <Box sx={{ position: 'absolute', bottom: 14, left: 16, right: 56 }}>
-            <Typography sx={{
-              color: 'white', fontWeight: 900, lineHeight: 1.2,
-              fontSize: { xs: '1.2rem', sm: '1.4rem' },
-            }}>
+            <Typography sx={{ color: 'white', fontWeight: 900, lineHeight: 1.2, fontSize: { xs: '1.2rem', sm: '1.4rem' } }}>
               {trip.destination?.city}, {trip.destination?.country}
             </Typography>
             {daysUntil !== null && daysUntil > 0 && (
@@ -296,18 +267,12 @@ const saveEdit = async () => {
               </Typography>
             )}
             {daysUntil === 0 && (
-              <Typography sx={{ color: 'white', fontWeight: 700, fontSize: '0.9rem', mt: 0.3 }}>
-                Today
-              </Typography>
+              <Typography sx={{ color: 'white', fontWeight: 700, fontSize: '0.9rem', mt: 0.3 }}>Today</Typography>
             )}
           </Box>
           <IconButton
             onClick={refreshPhoto}
-            sx={{
-              position: 'absolute', bottom: 10, right: 12,
-              color: 'white', backgroundColor: 'rgba(0,0,0,0.35)',
-              '&:hover': { backgroundColor: 'rgba(0,0,0,0.55)' }, p: 1,
-            }}
+            sx={{ position: 'absolute', bottom: 10, right: 12, color: 'white', backgroundColor: 'rgba(0,0,0,0.35)', '&:hover': { backgroundColor: 'rgba(0,0,0,0.55)' }, p: 1 }}
             size="small"
           >
             <RefreshIcon fontSize="small" />
@@ -315,13 +280,9 @@ const saveEdit = async () => {
         </Box>
       )}
 
-      {/* ── Content ── */}
+      {/* ── Tab content ── */}
       <Container maxWidth="lg" sx={{ py: { xs: 3, sm: 4 }, px: { xs: 2, sm: 3 } }}>
-
-        {activeTab === 0 && (
-          <TripOverview trip={trip} onNavigate={setActiveTab} />
-        )}
-
+        {activeTab === 0 && <TripOverview trip={trip} onNavigate={setActiveTab} />}
         {activeTab === 1 && <LogisticsTab tripId={trip._id} trip={trip} />}
         {activeTab === 2 && <ItineraryTab tripId={trip._id} startDate={trip.startDate} endDate={trip.endDate} />}
         {activeTab === 3 && <PackingTab tripId={trip._id} tripType={trip.tripType} nights={trip.nights} />}
@@ -329,14 +290,11 @@ const saveEdit = async () => {
         {activeTab === 5 && <WeatherTab tripId={trip._id} destinationCity={trip.destination?.city} />}
         {activeTab === 6 && <MapTab tripId={trip._id} trip={trip} />}
         {activeTab === 7 && <FilesTab tripId={trip._id} />}
-
       </Container>
 
       {/* ── Edit dialog ── */}
       <Dialog open={editOpen} onClose={() => setEditOpen(false)} maxWidth="sm" fullWidth fullScreen={isMobile}>
-        <DialogTitle fontWeight={700} sx={{ fontSize: { xs: '1.2rem', sm: '1.25rem' } }}>
-          Edit Trip
-        </DialogTitle>
+        <DialogTitle fontWeight={700} sx={{ fontSize: { xs: '1.2rem', sm: '1.25rem' } }}>Edit Trip</DialogTitle>
         <DialogContent>
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, pt: 1 }}>
             <TextField label="Trip name" value={editForm.name} onChange={e => setEditForm(p => ({ ...p, name: e.target.value }))} fullWidth />
@@ -358,7 +316,7 @@ const saveEdit = async () => {
             </FormControl>
             <Box sx={{ display: 'flex', gap: 2, flexDirection: { xs: 'column', sm: 'row' } }}>
               <TextField label="Departure date" type="date" value={editForm.startDate} onChange={e => setEditForm(p => ({ ...p, startDate: e.target.value }))} fullWidth InputLabelProps={{ shrink: true }} />
-              <TextField label="Return date" type="date" value={editForm.endDate} onChange={e => setEditForm(p => ({ ...p, endDate: e.target.value }))} fullWidth InputLabelProps={{ shrink: true }} />
+              <TextField label="Return date"    type="date" value={editForm.endDate}   onChange={e => setEditForm(p => ({ ...p, endDate: e.target.value }))}   fullWidth InputLabelProps={{ shrink: true }} />
             </Box>
             <TextField label="Purpose / notes" value={editForm.purpose} onChange={e => setEditForm(p => ({ ...p, purpose: e.target.value }))} fullWidth multiline rows={2} />
           </Box>

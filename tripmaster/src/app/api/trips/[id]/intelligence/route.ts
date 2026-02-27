@@ -5,9 +5,10 @@ import Trip from '@/lib/mongodb/models/Trip';
 import User from '@/lib/mongodb/models/User';
 import { getCountryMeta, getCountryName, COUNTRY_LIST } from '@/lib/data/countries';
 import { getPhrasesForCountry, ENGLISH_SPEAKING, ESSENTIAL_PHRASE_IDS } from '@/lib/data/phrases';
+import { countriesDatabase } from '@/lib/data/countries-database';
+import { getVisaRequirement, hasVisaDataForPassport } from '@/lib/data/visa-rules';
 
 // Resolve a country code from either a stored code or a country name string.
-// Existing trips won't have countryCode — this handles that gracefully.
 function resolveCountryCode(code?: string, name?: string): string | null {
   if (code) return code;
   if (!name) return null;
@@ -41,14 +42,18 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   const trip = await Trip.findOne({ _id: id, userId: user._id });
   if (!trip) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
-  const destCode = resolveCountryCode(trip.destination?.countryCode, trip.destination?.country);
+  const destCode   = resolveCountryCode(trip.destination?.countryCode, trip.destination?.country);
   if (!destCode) return NextResponse.json({ error: 'No destination country on trip' }, { status: 400 });
 
   const originCode = resolveCountryCode(user.homeLocation?.countryCode, user.homeLocation?.country);
-  const destMeta = getCountryMeta(destCode);
+  const destMeta   = getCountryMeta(destCode);
   const originMeta = originCode ? getCountryMeta(originCode) : null;
 
-  // ── ELECTRICAL ──────────────────────────────────────────────────────────
+  // Extended metadata from countries-database (tipping, water, payment, cultural)
+  const destExtended   = countriesDatabase.getCountryMetadata(destCode);
+  const originExtended = originCode ? countriesDatabase.getCountryMetadata(originCode) : null;
+
+  // ── ELECTRICAL ──────────────────────────────────────────────────────────────
   const electrical = originMeta ? (() => {
     const needsAdapter = originMeta.electricalPlug !== destMeta.electricalPlug;
     return {
@@ -62,7 +67,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     };
   })() : null;
 
-  // ── CURRENCY ────────────────────────────────────────────────────────────
+  // ── CURRENCY ────────────────────────────────────────────────────────────────
   const currency = originMeta ? (() => {
     const needsExchange = originMeta.currency !== destMeta.currency;
     return {
@@ -77,11 +82,11 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     };
   })() : null;
 
-  // ── LANGUAGE ────────────────────────────────────────────────────────────
+  // ── LANGUAGE ────────────────────────────────────────────────────────────────
   const language = (() => {
     const destIsEnglish = ENGLISH_SPEAKING.has(destCode);
-    const sameLanguage = destIsEnglish || (originMeta?.language === destMeta.language);
-    const phrases = getPhrasesForCountry(destCode);
+    const sameLanguage  = destIsEnglish || (originMeta?.language === destMeta.language);
+    const phrases       = getPhrasesForCountry(destCode);
     return {
       sameLanguage: !!sameLanguage,
       destinationLanguage: destMeta.language,
@@ -95,14 +100,14 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     };
   })();
 
-  // ── TIMEZONE ────────────────────────────────────────────────────────────
+  // ── TIMEZONE ────────────────────────────────────────────────────────────────
   const timezone = (() => {
-    const destOffset = getTimezoneOffset(destMeta.timezone);
+    const destOffset   = getTimezoneOffset(destMeta.timezone);
     const originOffset = originMeta ? getTimezoneOffset(originMeta.timezone) : destOffset;
-    const diff = destOffset - originOffset;
-    const absDiff = Math.abs(diff);
+    const diff         = destOffset - originOffset;
+    const absDiff      = Math.abs(diff);
     let jetlagRisk: 'none' | 'mild' | 'moderate' | 'significant' = 'none';
-    if (absDiff >= 8) jetlagRisk = 'significant';
+    if (absDiff >= 8)      jetlagRisk = 'significant';
     else if (absDiff >= 5) jetlagRisk = 'moderate';
     else if (absDiff >= 2) jetlagRisk = 'mild';
     return {
@@ -113,19 +118,19 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       jetlagRisk,
       direction: diff > 0 ? 'ahead' : diff < 0 ? 'behind' : 'same',
       message: absDiff === 0
-        ? 'Same timezone — no jet lag'
+        ? 'Same timezone — no adjustment needed'
         : `${getCountryName(destCode)} is ${absDiff} hour${absDiff !== 1 ? 's' : ''} ${diff > 0 ? 'ahead of' : 'behind'} home`,
     };
   })();
 
-  // ── EMERGENCY ───────────────────────────────────────────────────────────
+  // ── EMERGENCY ───────────────────────────────────────────────────────────────
   const emergency = {
-    number: destMeta.emergency,
+    number:  destMeta.emergency,
     country: getCountryName(destCode),
     message: `Emergency number in ${getCountryName(destCode)}: ${destMeta.emergency}`,
   };
 
-  // ── DRIVING ─────────────────────────────────────────────────────────────
+  // ── DRIVING ─────────────────────────────────────────────────────────────────
   const driving = originMeta ? (() => {
     const sameSide = originMeta.drivingSide === destMeta.drivingSide;
     return {
@@ -138,13 +143,13 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     };
   })() : null;
 
-  // ── PASSPORT ────────────────────────────────────────────────────────────
+  // ── PASSPORT ────────────────────────────────────────────────────────────────
   const passport = user.passport?.expiry ? (() => {
-    const expiry = new Date(user.passport.expiry);
-    const tripDate = trip.startDate ? new Date(trip.startDate) : new Date();
+    const expiry      = new Date(user.passport.expiry);
+    const tripDate    = trip.startDate ? new Date(trip.startDate) : new Date();
     const daysAtTravel = Math.floor((expiry.getTime() - tripDate.getTime()) / 86400000);
-    const isExpired = daysAtTravel < 0;
-    const isWarning = daysAtTravel < 180;
+    const isExpired   = daysAtTravel < 0;
+    const isWarning   = daysAtTravel < 180;
     return {
       expiry: user.passport.expiry,
       daysAtTravel,
@@ -158,6 +163,86 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     };
   })() : null;
 
+  // ── VISA ────────────────────────────────────────────────────────────────────
+  const visa = (() => {
+    if (!originCode) return null;
+
+    const hasData = hasVisaDataForPassport(originCode);
+    if (!hasData) {
+      return {
+        available: false,
+        message: `Visa data not yet available for your passport (${originCode}) — check your government travel advice.`,
+      };
+    }
+
+    const req = getVisaRequirement(originCode, destCode);
+    if (!req) {
+      return {
+        available: false,
+        message: `No visa data found for ${getCountryName(originCode)} → ${getCountryName(destCode)} — check your government travel advice.`,
+      };
+    }
+
+    const typeLabels: Record<string, string> = {
+      none:      'No visa required',
+      eta:       'eTA required',
+      esta:      'ESTA required',
+      evisa:     'e-Visa required',
+      voa:       'Visa on arrival',
+      visa:      'Visa required',
+    };
+
+    return {
+      available: true,
+      required:  req.required,
+      type:      req.type,
+      typeLabel: typeLabels[req.type] ?? req.type,
+      name:      req.name ?? null,
+      cost:      req.cost ?? null,
+      processingTime: req.processingTime ?? null,
+      applyUrl:  req.applyUrl ?? null,
+      maxStay:   req.maxStay,
+      notes:     req.notes,
+      message:   req.required
+        ? `${typeLabels[req.type] ?? 'Visa required'} — ${req.name ?? req.type}`
+        : `No visa required — stay up to ${req.maxStay}`,
+    };
+  })();
+
+  // ── TIPPING ─────────────────────────────────────────────────────────────────
+  const tipping = destExtended?.tipping ? {
+    culture:     destExtended.tipping.culture,
+    restaurants: destExtended.tipping.restaurants,
+    taxis:       destExtended.tipping.taxis,
+    hotels:      destExtended.tipping.hotels,
+    notes:       destExtended.tipping.notes,
+    message:     `Tipping is ${destExtended.tipping.culture} — ${destExtended.tipping.restaurants} at restaurants`,
+  } : null;
+
+  // ── WATER ───────────────────────────────────────────────────────────────────
+  const water = destExtended?.water ? {
+    drinkable: destExtended.water.drinkable,
+    notes:     destExtended.water.notes,
+    message:   destExtended.water.drinkable
+      ? `Tap water is safe to drink`
+      : `Do not drink tap water — use bottled water`,
+  } : null;
+
+  // ── PAYMENT ─────────────────────────────────────────────────────────────────
+  const payment = destExtended?.payment ? {
+    cashCulture: destExtended.payment.cashCulture,
+    contactless: destExtended.payment.contactless,
+    notes:       destExtended.payment.notes,
+    message:     destExtended.payment.notes,
+  } : null;
+
+  // ── CULTURAL ────────────────────────────────────────────────────────────────
+  const cultural = destExtended?.cultural ? {
+    dressCode: destExtended.cultural.dressCode,
+    notes:     destExtended.cultural.notes,
+    message:   destExtended.cultural.notes,
+  } : null;
+
   return NextResponse.json({
     intelligence: {
       destination: { country: getCountryName(destCode), countryCode: destCode, city: trip.destination?.city },
@@ -168,6 +253,11 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       emergency,
       driving,
       passport,
+      visa,
+      tipping,
+      water,
+      payment,
+      cultural,
     },
   });
 }
