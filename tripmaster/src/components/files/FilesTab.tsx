@@ -6,7 +6,7 @@ import {
   Dialog, DialogTitle, DialogContent, DialogActions,
   TextField, Select, MenuItem, FormControl, InputLabel,
   IconButton, Divider, LinearProgress, alpha, Fab,
-  useTheme, useMediaQuery, Menu,
+  useTheme, useMediaQuery, Menu, Autocomplete,
 } from '@mui/material';
 import AddIcon                from '@mui/icons-material/Add';
 import DeleteIcon             from '@mui/icons-material/Delete';
@@ -71,6 +71,14 @@ interface TripFile {
   createdAt: string;
 }
 
+// A linkable item built from logistics + itinerary data
+interface LinkableItem {
+  label:      string;   // Human-readable, also used for matching in notify route
+  collection: string;   // 'transportation' | 'accommodation' | 'venue' | 'itinerary'
+  entryId:    string;   // Index or stop _id
+  group:      string;   // Group header in dropdown
+}
+
 interface FilesTabProps { tripId: string; }
 
 type Mode = 'file' | 'link' | 'contact' | 'note';
@@ -128,38 +136,15 @@ type NoteTypeValue    = typeof NOTE_TYPES[number]['value'];
 const ALL_TYPES = [...FILE_TYPES, ...LINK_TYPES, ...CONTACT_TYPES, ...NOTE_TYPES];
 
 const TYPE_COLOUR: Record<string, string> = {
-  // Files
-  boarding_pass:         '#C9521B',
-  train_ticket:          '#0369a1',
-  hotel_confirmation:    '#5c35a0',
-  car_hire:              '#55702C',
-  event_brief:           '#1D2642',
-  visa:                  '#b45309',
-  insurance:             '#0891b2',
-  passport:              '#b45309',
-  // Links
-  event_website:         '#0891b2',
-  artist_lineup:         '#7c3aed',
-  venue:                 '#55702C',
-  booking_reference:     '#C9521B',
-  useful_info:           '#6b7280',
-  // Contacts
-  artist:                '#7c3aed',
-  venue_manager:         '#55702C',
-  event_manager:         '#1D2642',
-  tour_manager:          '#0369a1',
-  production:            '#374151',
-  promoter:              '#C9521B',
-  accommodation_contact: '#5c35a0',
-  transport_contact:     '#0891b2',
-  emergency_contact:     '#dc2626',
-  // Notes
-  general:               '#55702C',
-  observation:           '#0891b2',
-  reminder:              '#C9521B',
-  recommendation:        '#7c3aed',
-  // Shared
-  other:                 '#6b7280',
+  boarding_pass: '#C9521B', train_ticket: '#0369a1', hotel_confirmation: '#5c35a0',
+  car_hire: '#55702C', event_brief: '#1D2642', visa: '#b45309', insurance: '#0891b2',
+  passport: '#b45309', event_website: '#0891b2', artist_lineup: '#7c3aed',
+  venue: '#55702C', booking_reference: '#C9521B', useful_info: '#6b7280',
+  artist: '#7c3aed', venue_manager: '#55702C', event_manager: '#1D2642',
+  tour_manager: '#0369a1', production: '#374151', promoter: '#C9521B',
+  accommodation_contact: '#5c35a0', transport_contact: '#0891b2', emergency_contact: '#dc2626',
+  general: '#55702C', observation: '#0891b2', reminder: '#C9521B', recommendation: '#7c3aed',
+  other: '#6b7280',
 };
 
 const BLANK_FILE_FORM    = { name: '', type: 'other' as FileTypeValue,    notes: '' };
@@ -194,6 +179,89 @@ function groupByType(files: TripFile[]): Map<string, TripFile[]> {
     map.set(f.type, [...(map.get(f.type) ?? []), f]);
   }
   return map;
+}
+
+// Build human-readable label for a transport entry — must match what notify route searches
+function transportLabel(t: any): string {
+  const from  = t.departureLocation ?? '';
+  const to    = t.arrivalLocation   ?? '';
+  const route = from && to ? `${from} to ${to}` : (from || to);
+  switch (t.type) {
+    case 'flight':
+      return [t.details?.airline, t.details?.flightNumber, route].filter(Boolean).join(' · ');
+    case 'train':
+    case 'bus':
+    case 'ferry':
+      return [t.details?.operator, route].filter(Boolean).join(' · ');
+    case 'car_hire':
+      return [t.details?.rentalCompany, t.details?.pickupLocation ? `Pickup: ${t.details.pickupLocation}` : ''].filter(Boolean).join(' · ');
+    case 'taxi':
+    case 'private_transfer':
+      return route || 'Transfer';
+    default:
+      return route || t.type;
+  }
+}
+
+function transportEmoji(type: string): string {
+  const map: Record<string, string> = {
+    flight: '✈', train: '🚂', bus: '🚌', ferry: '⛴',
+    car_hire: '🚗', car: '🚗', taxi: '🚕', private_transfer: '🚐', bicycle: '🚲',
+  };
+  return map[type] ?? '🚌';
+}
+
+// Build the list of linkable items from logistics + itinerary data
+function buildLinkableItems(logistics: any, itinerary: any): LinkableItem[] {
+  const items: LinkableItem[] = [];
+
+  // Transport entries
+  for (let i = 0; i < (logistics?.transportation ?? []).length; i++) {
+    const t = logistics.transportation[i];
+    items.push({
+      label:      transportLabel(t),
+      collection: 'transportation',
+      entryId:    String(i),
+      group:      `${transportEmoji(t.type)} Transport`,
+    });
+  }
+
+  // Accommodation entries
+  for (let i = 0; i < (logistics?.accommodation ?? []).length; i++) {
+    const a = logistics.accommodation[i];
+    items.push({
+      label:      a.name ?? `Accommodation ${i + 1}`,
+      collection: 'accommodation',
+      entryId:    String(i),
+      group:      '🏨 Accommodation',
+    });
+  }
+
+  // Venues
+  for (let i = 0; i < (logistics?.venues ?? []).length; i++) {
+    const v = logistics.venues[i];
+    items.push({
+      label:      v.name ?? `Venue ${i + 1}`,
+      collection: 'venue',
+      entryId:    String(i),
+      group:      '🎟 Venues',
+    });
+  }
+
+  // Itinerary stops (skip logistics-synced transport stops)
+  for (const day of (itinerary?.days ?? [])) {
+    for (const stop of (day.stops ?? [])) {
+      if (stop.source === 'logistics' && stop.type === 'transport') continue;
+      items.push({
+        label:      stop.name,
+        collection: 'itinerary',
+        entryId:    stop._id?.toString() ?? `${day.date}-${stop.name}`,
+        group:      `📅 ${day.date?.split('T')[0] ?? 'Itinerary'}`,
+      });
+    }
+  }
+
+  return items;
 }
 
 // ─── Drop zone ────────────────────────────────────────────────────────────────
@@ -245,6 +313,49 @@ function DropZone({ onFile }: { onFile: (f: File) => void }) {
   );
 }
 
+// ─── Link To selector ─────────────────────────────────────────────────────────
+
+function LinkToSelector({
+  items,
+  value,
+  onChange,
+}: {
+  items:    LinkableItem[];
+  value:    LinkableItem | null;
+  onChange: (item: LinkableItem | null) => void;
+}) {
+  if (!items.length) return null;
+
+  return (
+    <Autocomplete
+      options={items}
+      groupBy={opt => opt.group}
+      getOptionLabel={opt => opt.label}
+      value={value}
+      onChange={(_, v) => onChange(v)}
+      isOptionEqualToValue={(a, b) => a.collection === b.collection && a.entryId === b.entryId}
+      renderInput={params => (
+        <TextField
+          {...params}
+          label="Link to trip item (optional)"
+          placeholder="Search transport, venues, itinerary stops..."
+          helperText="Link this resource to a specific event so it surfaces in notifications"
+        />
+      )}
+      renderGroup={params => (
+        <Box key={params.key}>
+          <Typography variant="caption" sx={{ px: 2, py: 0.5, display: 'block', fontWeight: 800, color: 'text.disabled', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: 0.5 }}>
+            {params.group}
+          </Typography>
+          {params.children}
+        </Box>
+      )}
+      clearOnEscape
+      fullWidth
+    />
+  );
+}
+
 // ─── Note card ────────────────────────────────────────────────────────────────
 
 function NoteCard({ file, onDelete, onEdit }: { file: TripFile; onDelete: (id: string) => void; onEdit: (file: TripFile) => void }) {
@@ -260,9 +371,7 @@ function NoteCard({ file, onDelete, onEdit }: { file: TripFile; onDelete: (id: s
         <Box sx={{ flexGrow: 1, minWidth: 0 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', mb: file.body ? 0.5 : 0 }}>
             {file.name && (
-              <Typography variant="body2" fontWeight={800} sx={{ fontSize: '0.9rem' }}>
-                {file.name}
-              </Typography>
+              <Typography variant="body2" fontWeight={800} sx={{ fontSize: '0.9rem' }}>{file.name}</Typography>
             )}
             {typeMeta && (
               <Chip label={typeMeta.label} size="small"
@@ -283,7 +392,7 @@ function NoteCard({ file, onDelete, onEdit }: { file: TripFile; onDelete: (id: s
             {file.linkedTo?.label && (
               <>
                 <Typography variant="caption" color="text.disabled" sx={{ fontSize: '0.72rem' }}>·</Typography>
-                <Typography variant="caption" sx={{ fontSize: '0.72rem', color, fontWeight: 600 }}>{file.linkedTo.label}</Typography>
+                <Chip label={file.linkedTo.label} size="small" sx={{ height: 16, fontSize: '0.65rem', fontWeight: 700, backgroundColor: alpha(color, 0.1), color }} />
               </>
             )}
           </Box>
@@ -325,8 +434,6 @@ function ContactCard({ file, onDelete, onEdit }: { file: TripFile; onDelete: (id
   const [confirmOpen, setConfirmOpen] = useState(false);
   const color    = TYPE_COLOUR[file.type] ?? '#6b7280';
   const typeMeta = CONTACT_TYPES.find(t => t.value === file.type);
-  const hasPhone = !!file.phone;
-  const hasEmail = !!file.email;
 
   return (
     <>
@@ -340,17 +447,17 @@ function ContactCard({ file, onDelete, onEdit }: { file: TripFile; onDelete: (id
             <Typography variant="body2" fontWeight={800} sx={{ fontSize: '0.9rem' }}>{file.name}</Typography>
             {typeMeta && <Chip label={typeMeta.label} size="small" sx={{ height: 18, fontSize: '0.68rem', fontWeight: 700, backgroundColor: alpha(color, 0.12), color }} />}
           </Box>
-          {(hasPhone || hasEmail) && (
+          {(file.phone || file.email) && (
             <Box sx={{ display: 'flex', gap: 1, mt: 1, flexWrap: 'wrap' }}>
-              {hasPhone && (
+              {file.phone && (
                 <Button component="a" href={`tel:${file.phone}`} size="small" startIcon={<PhoneIcon sx={{ fontSize: '0.95rem !important' }} />} variant="outlined"
                   sx={{ fontSize: '0.78rem', fontWeight: 700, py: 0.5, px: 1.25, borderColor: alpha(color, 0.35), color, '&:hover': { borderColor: color, backgroundColor: alpha(color, 0.06) }, minHeight: 32 }}>
                   {file.phone}
                 </Button>
               )}
-              {hasEmail && (
+              {file.email && (
                 <Button component="a" href={`mailto:${file.email}`} size="small" startIcon={<EmailIcon sx={{ fontSize: '0.95rem !important' }} />} variant="outlined"
-                  sx={{ fontSize: '0.78rem', fontWeight: 700, py: 0.5, px: 1.25, borderColor: alpha('#0891b2', 0.35), color: '#0891b2', '&:hover': { borderColor: '#0891b2', backgroundColor: alpha('#0891b2', 0.06) }, minHeight: 32, maxWidth: { xs: '100%', sm: 260 }, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  sx={{ fontSize: '0.78rem', fontWeight: 700, py: 0.5, px: 1.25, borderColor: alpha('#0891b2', 0.35), color: '#0891b2', '&:hover': { borderColor: '#0891b2', backgroundColor: alpha('#0891b2', 0.06) }, minHeight: 32 }}>
                   {file.email}
                 </Button>
               )}
@@ -363,7 +470,7 @@ function ContactCard({ file, onDelete, onEdit }: { file: TripFile; onDelete: (id
             {file.linkedTo?.label && (
               <>
                 <Typography variant="caption" color="text.disabled" sx={{ fontSize: '0.72rem' }}>·</Typography>
-                <Typography variant="caption" sx={{ fontSize: '0.72rem', color, fontWeight: 600 }}>{file.linkedTo.label}</Typography>
+                <Chip label={file.linkedTo.label} size="small" sx={{ height: 16, fontSize: '0.65rem', fontWeight: 700, backgroundColor: alpha(color, 0.1), color }} />
               </>
             )}
           </Box>
@@ -376,9 +483,9 @@ function ContactCard({ file, onDelete, onEdit }: { file: TripFile; onDelete: (id
 
       <Menu anchorEl={menuAnchor} open={Boolean(menuAnchor)} onClose={() => setMenuAnchor(null)}
         transformOrigin={{ horizontal: 'right', vertical: 'top' }} anchorOrigin={{ horizontal: 'right', vertical: 'bottom' }}>
-        {hasPhone && <MenuItem component="a" href={`tel:${file.phone}`} onClick={() => setMenuAnchor(null)} sx={{ gap: 1.5, fontSize: '0.875rem' }}><PhoneIcon fontSize="small" /> Call {file.phone}</MenuItem>}
-        {hasEmail && <MenuItem component="a" href={`mailto:${file.email}`} onClick={() => setMenuAnchor(null)} sx={{ gap: 1.5, fontSize: '0.875rem' }}><EmailIcon fontSize="small" /> Email</MenuItem>}
-        {(hasPhone || hasEmail) && <Divider />}
+        {file.phone && <MenuItem component="a" href={`tel:${file.phone}`} onClick={() => setMenuAnchor(null)} sx={{ gap: 1.5, fontSize: '0.875rem' }}><PhoneIcon fontSize="small" /> Call {file.phone}</MenuItem>}
+        {file.email && <MenuItem component="a" href={`mailto:${file.email}`} onClick={() => setMenuAnchor(null)} sx={{ gap: 1.5, fontSize: '0.875rem' }}><EmailIcon fontSize="small" /> Email</MenuItem>}
+        {(file.phone || file.email) && <Divider />}
         <MenuItem onClick={() => { setMenuAnchor(null); onEdit(file); }} sx={{ gap: 1.5, fontSize: '0.875rem' }}><EditIcon fontSize="small" /> Edit</MenuItem>
         <Divider />
         <MenuItem onClick={() => { setMenuAnchor(null); setConfirmOpen(true); }} sx={{ gap: 1.5, fontSize: '0.875rem', color: 'error.main' }}><DeleteIcon fontSize="small" /> Delete</MenuItem>
@@ -411,7 +518,7 @@ function ResourceCard({ file, onDelete, onEdit }: { file: TripFile; onDelete: (i
     <>
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, px: { xs: 2, sm: 2.5 }, py: { xs: 1.5, sm: 1.75 } }}>
         <Box sx={{ width: 3, alignSelf: 'stretch', borderRadius: 2, backgroundColor: color, flexShrink: 0 }} />
-        <Box sx={{ flexShrink: 0, display: 'flex', alignItems: 'center' }}>
+        <Box sx={{ flexShrink: 0 }}>
           {isLink ? <LinkIcon sx={{ fontSize: 20, color: '#0891b2' }} /> : <MimeIcon mimeType={file.mimeType} size={20} />}
         </Box>
         <Box sx={{ flexGrow: 1, minWidth: 0 }}>
@@ -428,7 +535,7 @@ function ResourceCard({ file, onDelete, onEdit }: { file: TripFile; onDelete: (i
             {file.linkedTo?.label && (
               <>
                 <Typography variant="caption" color="text.disabled" sx={{ fontSize: '0.72rem' }}>·</Typography>
-                <Typography variant="caption" sx={{ fontSize: '0.72rem', color, fontWeight: 600 }}>{file.linkedTo.label}</Typography>
+                <Chip label={file.linkedTo.label} size="small" sx={{ height: 16, fontSize: '0.65rem', fontWeight: 700, backgroundColor: alpha(color, 0.1), color }} />
               </>
             )}
           </Box>
@@ -475,25 +582,37 @@ export default function FilesTab({ tripId }: FilesTabProps) {
   const theme  = useTheme();
   const mobile = useMediaQuery(theme.breakpoints.down('sm'));
 
-  const [files,        setFiles]        = useState<TripFile[]>([]);
-  const [loading,      setLoading]      = useState(true);
-  const [uploading,    setUploading]    = useState(false);
-  const [uploadPct,    setUploadPct]    = useState(0);
-  const [dialogOpen,   setDialogOpen]   = useState(false);
-  const [mode,         setMode]         = useState<Mode>('file');
-  const [pendingFile,  setPendingFile]  = useState<File | null>(null);
-  const [fileForm,     setFileForm]     = useState({ ...BLANK_FILE_FORM });
-  const [linkForm,     setLinkForm]     = useState({ ...BLANK_LINK_FORM });
-  const [contactForm,  setContactForm]  = useState({ ...BLANK_CONTACT_FORM });
-  const [noteForm,     setNoteForm]     = useState({ ...BLANK_NOTE_FORM });
-  const [error,        setError]        = useState<string | null>(null);
-  const [editingFile,  setEditingFile]  = useState<TripFile | null>(null);
+  const [files,         setFiles]         = useState<TripFile[]>([]);
+  const [loading,       setLoading]       = useState(true);
+  const [linkableItems, setLinkableItems] = useState<LinkableItem[]>([]);
+  const [uploading,     setUploading]     = useState(false);
+  const [uploadPct,     setUploadPct]     = useState(0);
+  const [dialogOpen,    setDialogOpen]    = useState(false);
+  const [mode,          setMode]          = useState<Mode>('file');
+  const [pendingFile,   setPendingFile]   = useState<File | null>(null);
+  const [fileForm,      setFileForm]      = useState({ ...BLANK_FILE_FORM });
+  const [linkForm,      setLinkForm]      = useState({ ...BLANK_LINK_FORM });
+  const [contactForm,   setContactForm]   = useState({ ...BLANK_CONTACT_FORM });
+  const [noteForm,      setNoteForm]      = useState({ ...BLANK_NOTE_FORM });
+  const [linkedTo,      setLinkedTo]      = useState<LinkableItem | null>(null);
+  const [error,         setError]         = useState<string | null>(null);
+  const [editingFile,   setEditingFile]   = useState<TripFile | null>(null);
 
+  // Fetch files, logistics, and itinerary in parallel on mount
   useEffect(() => {
-    fetch(`/api/trips/${tripId}/files`)
-      .then(r => r.json())
-      .then(d => { setFiles(d.files ?? []); setLoading(false); })
-      .catch(() => setLoading(false));
+    Promise.all([
+      fetch(`/api/trips/${tripId}/files`).then(r => r.json()),
+      fetch(`/api/trips/${tripId}/logistics`).then(r => r.json()).catch(() => ({})),
+      fetch(`/api/trips/${tripId}/itinerary`).then(r => r.json()).catch(() => ({})),
+    ]).then(([filesData, logisticsData, itineraryData]) => {
+      setFiles(filesData.files ?? []);
+      const items = buildLinkableItems(
+        logisticsData.logistics ?? logisticsData,
+        itineraryData.itinerary ?? itineraryData
+      );
+      setLinkableItems(items);
+      setLoading(false);
+    }).catch(() => setLoading(false));
   }, [tripId]);
 
   const openDialog = (m: Mode) => {
@@ -503,6 +622,7 @@ export default function FilesTab({ tripId }: FilesTabProps) {
     setLinkForm({ ...BLANK_LINK_FORM });
     setContactForm({ ...BLANK_CONTACT_FORM });
     setNoteForm({ ...BLANK_NOTE_FORM });
+    setLinkedTo(null);
     setEditingFile(null);
     setError(null);
     setDialogOpen(true);
@@ -511,6 +631,13 @@ export default function FilesTab({ tripId }: FilesTabProps) {
   const openEdit = (file: TripFile) => {
     setEditingFile(file);
     setError(null);
+
+    // Restore linkedTo selection if the file has one
+    const existingLink = file.linkedTo?.label
+      ? linkableItems.find(i => i.label === file.linkedTo!.label) ?? null
+      : null;
+    setLinkedTo(existingLink);
+
     if (file.resourceType === 'note') {
       setMode('note');
       setNoteForm({ name: file.name ?? '', type: file.type as NoteTypeValue, body: file.body ?? '' });
@@ -542,6 +669,15 @@ export default function FilesTab({ tripId }: FilesTabProps) {
     setError(null);
 
     const fd = new FormData();
+
+    // Append linkedTo as JSON string — matches what the API expects
+    if (linkedTo) {
+      fd.append('linkedTo', JSON.stringify({
+        label:      linkedTo.label,
+        collection: linkedTo.collection,
+        entryId:    linkedTo.entryId,
+      }));
+    }
 
     if (mode === 'note') {
       if (!noteForm.body.trim()) { setError('Note content is required'); setUploading(false); return; }
@@ -599,7 +735,7 @@ export default function FilesTab({ tripId }: FilesTabProps) {
       }
       setTimeout(() => {
         setDialogOpen(false); setUploading(false); setUploadPct(0);
-        setPendingFile(null); setEditingFile(null);
+        setPendingFile(null); setEditingFile(null); setLinkedTo(null);
       }, 400);
     } catch {
       clearInterval(tick);
@@ -615,7 +751,7 @@ export default function FilesTab({ tripId }: FilesTabProps) {
 
   const grouped    = groupByType(files);
   const typeOrder  = ALL_TYPES.map(t => t.value);
-  const sortedKeys = [...grouped.keys()].sort((a, b) => typeOrder.indexOf(a as FileTypeValue | LinkTypeValue | ContactTypeValue | NoteTypeValue) - typeOrder.indexOf(b as FileTypeValue | LinkTypeValue | ContactTypeValue | NoteTypeValue));
+  const sortedKeys = [...grouped.keys()].sort((a, b) => typeOrder.indexOf(a as any) - typeOrder.indexOf(b as any));
 
   const canSubmit =
     mode === 'note'    ? !!noteForm.body.trim() :
@@ -648,18 +784,10 @@ export default function FilesTab({ tripId }: FilesTabProps) {
           </Typography>
         </Box>
         <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-          <Button variant="outlined" startIcon={<PersonIcon />} onClick={() => openDialog('contact')} sx={{ fontWeight: 700 }}>
-            Add contact
-          </Button>
-          <Button variant="outlined" startIcon={<LinkIcon />} onClick={() => openDialog('link')} sx={{ fontWeight: 700 }}>
-            Save link
-          </Button>
-          <Button variant="outlined" startIcon={<NoteAddIcon />} onClick={() => openDialog('note')} sx={{ fontWeight: 700 }}>
-            Add note
-          </Button>
-          <Button variant="contained" startIcon={<AddIcon />} onClick={() => openDialog('file')} sx={{ fontWeight: 700 }}>
-            Upload file
-          </Button>
+          <Button variant="outlined" startIcon={<PersonIcon />} onClick={() => openDialog('contact')} sx={{ fontWeight: 700 }}>Add contact</Button>
+          <Button variant="outlined" startIcon={<LinkIcon />} onClick={() => openDialog('link')} sx={{ fontWeight: 700 }}>Save link</Button>
+          <Button variant="outlined" startIcon={<NoteAddIcon />} onClick={() => openDialog('note')} sx={{ fontWeight: 700 }}>Add note</Button>
+          <Button variant="contained" startIcon={<AddIcon />} onClick={() => openDialog('file')} sx={{ fontWeight: 700 }}>Upload file</Button>
         </Box>
       </Box>
 
@@ -673,9 +801,7 @@ export default function FilesTab({ tripId }: FilesTabProps) {
         <Paper sx={{ p: { xs: 3, sm: 4 }, backgroundColor: 'background.paper' }}>
           <Box sx={{ textAlign: 'center', mb: 3 }}>
             <FolderOpenIcon sx={{ fontSize: 52, color: 'text.disabled', mb: 1.5 }} />
-            <Typography variant="body1" fontWeight={700} color="text.secondary" gutterBottom>
-              No resources yet
-            </Typography>
+            <Typography variant="body1" fontWeight={700} color="text.secondary" gutterBottom>No resources yet</Typography>
             <Typography variant="body2" color="text.disabled" sx={{ maxWidth: 380, mx: 'auto' }}>
               Upload boarding passes and documents, save links to event websites and venues, add key contacts, or jot a note.
             </Typography>
@@ -704,9 +830,9 @@ export default function FilesTab({ tripId }: FilesTabProps) {
                   <Box key={file._id}>
                     {i > 0 && <Divider />}
                     {file.resourceType === 'note'
-                      ? <NoteCard     file={file} onDelete={handleDelete} onEdit={openEdit} />
+                      ? <NoteCard    file={file} onDelete={handleDelete} onEdit={openEdit} />
                       : file.resourceType === 'contact'
-                      ? <ContactCard  file={file} onDelete={handleDelete} onEdit={openEdit} />
+                      ? <ContactCard file={file} onDelete={handleDelete} onEdit={openEdit} />
                       : <ResourceCard file={file} onDelete={handleDelete} onEdit={openEdit} />
                     }
                   </Box>
@@ -729,7 +855,7 @@ export default function FilesTab({ tripId }: FilesTabProps) {
       {/* ── Dialog ── */}
       <Dialog
         open={dialogOpen}
-        onClose={() => { if (!uploading) { setDialogOpen(false); setEditingFile(null); } }}
+        onClose={() => { if (!uploading) { setDialogOpen(false); setEditingFile(null); setLinkedTo(null); } }}
         maxWidth="sm" fullWidth fullScreen={mobile}
       >
         <DialogTitle fontWeight={700} sx={{ fontSize: { xs: '1.15rem', sm: '1.2rem' } }}>
@@ -758,6 +884,7 @@ export default function FilesTab({ tripId }: FilesTabProps) {
                   onChange={e => setNoteForm(p => ({ ...p, body: e.target.value }))}
                   placeholder="What's on your mind?"
                 />
+                <LinkToSelector items={linkableItems} value={linkedTo} onChange={setLinkedTo} />
               </>
             )}
 
@@ -786,7 +913,7 @@ export default function FilesTab({ tripId }: FilesTabProps) {
               <>
                 <TextField label="Display name" value={fileForm.name} autoFocus={!!pendingFile} fullWidth disabled={uploading}
                   onChange={e => setFileForm(p => ({ ...p, name: e.target.value }))}
-                  placeholder="e.g. Ryanair boarding pass DUB → BUH" />
+                  placeholder="e.g. Ryanair boarding pass DUB to BUH" />
                 <FormControl fullWidth disabled={uploading}>
                   <InputLabel>File type</InputLabel>
                   <Select value={fileForm.type} label="File type" onChange={e => setFileForm(p => ({ ...p, type: e.target.value as FileTypeValue }))}>
@@ -795,6 +922,7 @@ export default function FilesTab({ tripId }: FilesTabProps) {
                 </FormControl>
                 <TextField label="Notes (optional)" value={fileForm.notes} fullWidth multiline rows={2} disabled={uploading}
                   onChange={e => setFileForm(p => ({ ...p, notes: e.target.value }))} />
+                <LinkToSelector items={linkableItems} value={linkedTo} onChange={setLinkedTo} />
               </>
             )}
 
@@ -813,6 +941,7 @@ export default function FilesTab({ tripId }: FilesTabProps) {
                 </FormControl>
                 <TextField label="Notes (optional)" value={linkForm.notes} fullWidth multiline rows={2} disabled={uploading}
                   onChange={e => setLinkForm(p => ({ ...p, notes: e.target.value }))} />
+                <LinkToSelector items={linkableItems} value={linkedTo} onChange={setLinkedTo} />
               </>
             )}
 
@@ -835,6 +964,7 @@ export default function FilesTab({ tripId }: FilesTabProps) {
                   InputProps={{ startAdornment: <EmailIcon sx={{ fontSize: 18, color: 'text.disabled', mr: 1 }} /> }} />
                 <TextField label="Notes (optional)" value={contactForm.notes} fullWidth multiline rows={2} disabled={uploading}
                   onChange={e => setContactForm(p => ({ ...p, notes: e.target.value }))} placeholder="e.g. Best reached after 10am" />
+                <LinkToSelector items={linkableItems} value={linkedTo} onChange={setLinkedTo} />
               </>
             )}
 
@@ -842,7 +972,7 @@ export default function FilesTab({ tripId }: FilesTabProps) {
               <Box>
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.75 }}>
                   <Typography variant="caption" color="text.secondary" fontWeight={600}>
-                    {mode === 'file' ? 'Uploading…' : 'Saving…'}
+                    {mode === 'file' ? 'Uploading...' : 'Saving...'}
                   </Typography>
                   <Typography variant="caption" fontWeight={700}>{uploadPct}%</Typography>
                 </Box>
@@ -855,7 +985,7 @@ export default function FilesTab({ tripId }: FilesTabProps) {
         </DialogContent>
 
         <DialogActions sx={{ px: 3, pb: 3, gap: 1, flexDirection: { xs: 'column-reverse', sm: 'row' } }}>
-          <Button onClick={() => { setDialogOpen(false); setEditingFile(null); }} disabled={uploading} fullWidth={mobile} size="large">
+          <Button onClick={() => { setDialogOpen(false); setEditingFile(null); setLinkedTo(null); }} disabled={uploading} fullWidth={mobile} size="large">
             Cancel
           </Button>
           <Button variant="contained" onClick={handleUpload} disabled={!canSubmit || uploading} fullWidth={mobile} size="large" sx={{ fontWeight: 700 }}>
@@ -863,7 +993,6 @@ export default function FilesTab({ tripId }: FilesTabProps) {
           </Button>
         </DialogActions>
       </Dialog>
-
     </Box>
   );
 }

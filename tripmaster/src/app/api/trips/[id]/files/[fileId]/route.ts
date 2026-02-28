@@ -73,6 +73,13 @@ export async function PUT(
     // file — metadata only, no re-upload
     updates.notes = fd.get('notes') ?? '';
   }
+    // ── linkedTo — persist whether set or cleared ─────────────────────────────
+  const linkedToRaw = fd.get('linkedTo') as string | null;
+  if (linkedToRaw) {
+    try { updates.linkedTo = JSON.parse(linkedToRaw); } catch { }
+  } else {
+    updates.linkedTo = null; // user cleared the link
+  }
 
   const file = await TripFile.findByIdAndUpdate(fileId, updates, { new: true });
   return NextResponse.json({ file });

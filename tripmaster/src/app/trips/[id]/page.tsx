@@ -192,59 +192,139 @@ export default function TripPage() {
   return (
     <Box sx={{ minHeight: '100vh', backgroundColor: 'background.default', pb: { xs: 6, sm: 0 } }}>
 
-      {/* ── AppBar ── */}
-      <AppBar position="static" sx={{ backgroundColor: 'text.primary' }} elevation={0}>
-        <Toolbar sx={{ minHeight: { xs: 60, sm: 64 }, gap: 1 }}>
-          <IconButton color="inherit" onClick={() => router.push('/dashboard')}>
-            <ArrowBackIcon />
-          </IconButton>
-          <Box
-            component="img"
-            src="/Logo.jpeg"
-            alt="Logo"
-            onClick={() => router.push('/dashboard')}
-            sx={{ flexShrink: 0, width: { xs: 48, sm: 112 }, height: { xs: 48, sm: 112 }, objectFit: 'contain', cursor: 'pointer' }}
-          />
-          <Typography
-            variant="h4" fontWeight={700}
-            sx={{ flexGrow: 1, fontSize: { xs: '1.2rem', sm: '2rem' }, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-          >
-            {trip.name}
-          </Typography>
-          <Chip label={trip.status} color={STATUS_COLOURS[trip.status]} size="small" sx={{ fontWeight: 700, textTransform: 'capitalize' }} />
-          <IconButton color="inherit" onClick={openEdit}><EditIcon /></IconButton>
-        </Toolbar>
-      </AppBar>
+ {/* ── AppBar ── */}
+<AppBar position="static" elevation={0} sx={{ backgroundColor: 'text.primary' }}>
+  {/* ── Utility row: nav + status ── */}
+  <Toolbar sx={{ minHeight: 48, gap: 1, px: { xs: 1.5, sm: 2 } }}>
+    <IconButton color="inherit" onClick={() => router.push('/dashboard')} size="small">
+      <ArrowBackIcon fontSize="small" />
+    </IconButton>
+    <Box
+      component="img"
+      src="/Logo.jpeg"
+      alt="Logo"
+      onClick={() => router.push('/dashboard')}
+      sx={{ flexShrink: 0, width: 36, height: 36, objectFit: 'contain', cursor: 'pointer', opacity: 0.9 }}
+    />
+    <Box sx={{ flexGrow: 1 }} />
+    <Chip
+      label={trip.status}
+      color={STATUS_COLOURS[trip.status]}
+      size="small"
+      sx={{ fontWeight: 700, textTransform: 'capitalize' }}
+    />
+    <IconButton color="inherit" onClick={openEdit} size="small">
+      <EditIcon fontSize="small" />
+    </IconButton>
+  </Toolbar>
+
+{/* ── Hero name block ── */}
+<Box sx={{
+  px: { xs: 2.5, sm: 3.5 },
+  pt: 0.5,
+  pb: 3,
+  background: 'linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0.18) 100%)',
+}}>
+  <Typography sx={{
+    color: 'rgba(255,255,255,0.35)',
+    fontSize: { xs: '0.68rem', sm: '0.72rem' },
+    fontWeight: 800,
+    letterSpacing: 3,
+    textTransform: 'uppercase',
+    mb: 0.75,
+  }}>
+    {trip.destination?.city}{trip.destination?.country ? `, ${trip.destination.country}` : ''}
+  </Typography>
+
+  <Box sx={{ display: 'flex', alignItems: 'stretch', gap: 0 }}>
+    {/* Chiseled accent — thicker, taller, harder edge */}
+    <Box sx={{
+      width: 5,
+      alignSelf: 'stretch',
+      background: 'linear-gradient(180deg, #E8622A 0%, #A03D10 100%)',
+      borderRadius: '2px',
+      mr: 2.5,
+      flexShrink: 0,
+    }} />
+
+    <Typography sx={{
+      color: 'rgba(255,255,255,0.92)',
+      fontWeight: 900,
+      fontSize: { xs: '2.4rem', sm: '3.2rem', md: '3.8rem' },
+      lineHeight: 1.05,
+      letterSpacing: { xs: '-1px', sm: '-2px' },
+      // Chiseled: light catches top edge, dark drops below, ambient blur
+      textShadow: [
+        '0 1px 0 rgba(255,255,255,0.07)',   // top ridge catch
+        '0 -1px 0 rgba(0,0,0,0.5)',          // bottom carved depth
+        '0 4px 20px rgba(0,0,0,0.55)',       // ambient depth shadow
+        '0 1px 2px rgba(0,0,0,0.8)',         // tight dark underline
+      ].join(', '),
+      overflow: 'hidden',
+      textOverflow: 'ellipsis',
+      whiteSpace: 'nowrap',
+    }}>
+      {trip.name}
+    </Typography>
+  </Box>
+</Box>
+</AppBar>
 
       {/* ── Tabs ── */}
       <Box sx={{ backgroundColor: 'text.primary', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
         <Container maxWidth="lg" disableGutters>
-          <Tabs
-            value={activeTab}
-            onChange={(_, val) => setActiveTab(val)}
-            textColor="inherit"
-            variant={isMobile ? 'scrollable' : 'fullWidth'}
-            scrollButtons={false}
-            TabIndicatorProps={{ style: { backgroundColor: '#C9521B', height: 3 } }}
-            sx={{
-              '& .MuiTab-root': {
-                minHeight: 64,
-                minWidth: { xs: 80, sm: 120 },
-                flexDirection: 'column',
-                gap: 0.5,
-                fontSize: { xs: '0.7rem', sm: '0.75rem' },
-                fontWeight: 600,
-                textTransform: 'uppercase',
-                color: 'rgba(255,255,255,0.6)',
-                '&.Mui-selected': { color: 'white' },
-                '& svg': { fontSize: { xs: '1.1rem', sm: '1.2rem' } },
-              },
-            }}
-          >
-            {TAB_CONFIG.map(({ label, Icon }) => (
-              <Tab key={label} label={label} icon={<Icon />} iconPosition="top" />
-            ))}
-          </Tabs>
+<Tabs
+  value={activeTab}
+  onChange={(_, val) => setActiveTab(val)}
+  textColor="inherit"
+  variant={isMobile ? 'scrollable' : 'fullWidth'}
+  scrollButtons={false}
+  TabIndicatorProps={{ style: { backgroundColor: '#C9521B', height: 3, borderRadius: '3px 3px 0 0' } }}
+  sx={{
+    '& .MuiTab-root': {
+      minHeight: 64,
+      minWidth: { xs: 80, sm: 120 },
+      flexDirection: 'column',
+      gap: 0.5,
+      fontSize: { xs: '0.7rem', sm: '0.75rem' },
+      fontWeight: 700,
+      textTransform: 'uppercase',
+      letterSpacing: 0.8,
+      color: 'rgba(255,255,255,0.4)',
+      transition: 'all 0.18s ease',
+      position: 'relative',
+      overflow: 'hidden',
+      // Hover state — icon + label light up, subtle background wash
+      '&:hover': {
+        color: 'rgba(255,255,255,0.9)',
+        backgroundColor: 'rgba(255,255,255,0.06)',
+        '& svg': {
+          color: '#C9521B',
+          transform: 'translateY(-2px)',
+          filter: 'drop-shadow(0 0 6px rgba(201,82,27,0.7))',
+        },
+      },
+      // Selected state — full white, icon terracotta glowing
+      '&.Mui-selected': {
+        color: 'white',
+        fontWeight: 800,
+        '& svg': {
+          color: '#C9521B',
+          filter: 'drop-shadow(0 0 8px rgba(201,82,27,0.8))',
+        },
+      },
+      '& svg': {
+        fontSize: { xs: '1.15rem', sm: '1.25rem' },
+        transition: 'all 0.18s ease',
+        color: 'inherit',
+      },
+    },
+  }}
+>
+  {TAB_CONFIG.map(({ label, Icon }) => (
+    <Tab key={label} label={label} icon={<Icon />} iconPosition="top" />
+  ))}
+</Tabs>
         </Container>
       </Box>
 
