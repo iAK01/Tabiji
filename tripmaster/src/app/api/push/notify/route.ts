@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import webpush from 'web-push';
+import { DateTime } from 'luxon';
 import connectDB from '@/lib/mongodb/connection';
 import User from '@/lib/mongodb/models/User';
 import Trip from '@/lib/mongodb/models/Trip';
@@ -14,97 +15,214 @@ webpush.setVapidDetails(
   process.env.VAPID_PRIVATE_KEY!
 );
 
-// ─── Lead times (milliseconds) ────────────────────────────────────────────────
-const LEAD = {
-  flight:           3 * 60 * 60 * 1000,   // 3 hours
-  train:            45 * 60 * 1000,        // 45 minutes
-  bus:              45 * 60 * 1000,        // 45 minutes
-  ferry:            3 * 60 * 60 * 1000,    // 3 hours
-  private_transfer: 45 * 60 * 1000,        // 45 minutes
-  taxi:             30 * 60 * 1000,        // 30 minutes
-  car_hire:         45 * 60 * 1000,        // 45 minutes
-  car:              30 * 60 * 1000,        // 30 minutes
-  bicycle:          15 * 60 * 1000,        // 15 minutes
-  hotel:            45 * 60 * 1000,        // 45 minutes before itinerary check-in stop
+// ---- Lead times (ms) --------------------------------------------------------
+
+const NAV_LEAD: Record<string, number> = {
+  flight:           3 * 60 * 60 * 1000,
+  train:            60 * 60 * 1000,
+  ferry:            2 * 60 * 60 * 1000,
+  bus:              45 * 60 * 1000,
+  car_hire:         30 * 60 * 1000,
+  taxi:             20 * 60 * 1000,
+  private_transfer: 20 * 60 * 1000,
+  car:              0,
+  bicycle:          0,
+  hotel:            60 * 60 * 1000,
+  activity:         45 * 60 * 1000,
+  sightseeing:      45 * 60 * 1000,
+  meal:             30 * 60 * 1000,
+  breakfast:        30 * 60 * 1000,
+  meeting:          45 * 60 * 1000,
+  work:             45 * 60 * 1000,
+  other:            30 * 60 * 1000,
+  concert:          60 * 60 * 1000,
+  conference:       60 * 60 * 1000,
+  restaurant:       30 * 60 * 1000,
+  event:            45 * 60 * 1000,
+  sport:            60 * 60 * 1000,
 };
 
-// ─── Cron window ──────────────────────────────────────────────────────────────
-// A notification should fire if its trigger time (eventTime - lead) falls within
-// the past WINDOW_MS. Set to 10 minutes to cover a 5-minute cron with overlap.
-const WINDOW_MS = 7 * 24 * 60 * 60 * 1000; // 7 days for testing
+const DOC_LEAD: Record<string, number> = {
+  flight:           2.5 * 60 * 60 * 1000,
+  train:            20 * 60 * 1000,
+  ferry:            30 * 60 * 1000,
+  bus:              20 * 60 * 1000,
+  car_hire:         0,
+  concert:          30 * 60 * 1000,
+  conference:       30 * 60 * 1000,
+  event:            30 * 60 * 1000,
+  sport:            30 * 60 * 1000,
+  hotel:            0,
+  restaurant:       15 * 60 * 1000,
+  meeting:          15 * 60 * 1000,
+};
 
+const WINDOW_MS = 10 * 60 * 1000;
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+const TYPE_EMOJI: Record<string, string> = {
+  flight: 'Flight', train: 'Train', ferry: 'Ferry', bus: 'Bus',
+  car_hire: 'Car hire', taxi: 'Taxi', private_transfer: 'Transfer',
+  car: 'Drive', bicycle: 'Cycle',
+  hotel: 'Hotel', activity: 'Activity', sightseeing: 'Sightseeing',
+  meal: 'Meal', breakfast: 'Breakfast', meeting: 'Meeting',
+  work: 'Work', other: 'Event',
+  concert: 'Concert', conference: 'Conference', restaurant: 'Restaurant',
+  event: 'Event', sport: 'Event',
+};
 
-function stopToDatetime(dayDate: string, stop: any): Date | null {
-  const timeStr = stop.scheduledStart
-    ? stop.scheduledStart.includes('T')
-      ? stop.scheduledStart  // already ISO
-      : `${dayDate.split('T')[0]}T${stop.scheduledStart}:00`
-    : stop.time
-      ? `${dayDate.split('T')[0]}T${stop.time}:00`
-      : null;
-  if (!timeStr) return null;
-  const d = new Date(timeStr);
-  return isNaN(d.getTime()) ? null : d;
+// ---- Timezone-aware datetime parsing ----------------------------------------
+
+// Parse a datetime string that may or may not have a timezone suffix,
+// anchoring it to the destination timezone so "18:00" in Bucharest
+// means 18:00 EET, not 18:00 UTC.
+function parseInZone(datetimeStr: string, tz: string): DateTime | null {
+  if (!datetimeStr) return null;
+
+  // If the string already has a UTC offset or Z suffix, parse as-is
+  // then convert to destination zone for display — but treat the wall
+  // clock time as authoritative (the user typed 18:00 local time)
+  const hasOffset = /[Z+\-]\d{2}:?\d{2}$/.test(datetimeStr) || datetimeStr.endsWith('Z');
+
+  let dt: DateTime;
+  if (hasOffset) {
+    // Has explicit offset — respect it but re-interpret in destination zone
+    dt = DateTime.fromISO(datetimeStr, { zone: tz });
+  } else {
+    // No offset — treat as local destination time
+    dt = DateTime.fromISO(datetimeStr, { zone: tz });
+  }
+
+  return dt.isValid ? dt : null;
 }
 
-function isInWindow(eventTime: Date, leadMs: number, now: Date): boolean {
-  const triggerTime = new Date(eventTime.getTime() - leadMs);
-  const diff = now.getTime() - triggerTime.getTime();
+// Build a datetime from separate date string (YYYY-MM-DD) and time string (HH:MM)
+// anchored to the destination timezone
+function buildInZone(dateStr: string, timeStr: string, tz: string): DateTime | null {
+  if (!dateStr || !timeStr) return null;
+  const isoDate = dateStr.split('T')[0];
+  const isoTime = timeStr.length === 5 ? timeStr : timeStr.slice(0, 5);
+  const dt = DateTime.fromISO(`${isoDate}T${isoTime}:00`, { zone: tz });
+  return dt.isValid ? dt : null;
+}
+
+function stopToLuxon(dayDate: string, stop: any, tz: string): DateTime | null {
+  if (stop.scheduledStart) {
+    return parseInZone(stop.scheduledStart.includes('T') ? stop.scheduledStart : `${dayDate.split('T')[0]}T${stop.scheduledStart}`, tz);
+  }
+  if (stop.time) {
+    return buildInZone(dayDate, stop.time, tz);
+  }
+  return null;
+}
+
+function venueToLuxon(venue: any, tz: string): DateTime | null {
+  return buildInZone(venue.date, venue.time, tz);
+}
+
+// ---- Window check -----------------------------------------------------------
+// All comparisons done in milliseconds (UTC epoch) so timezone doesn't matter here
+
+function isInWindow(eventDt: DateTime, leadMs: number, nowMs: number): boolean {
+  const triggerMs = eventDt.toMillis() - leadMs;
+  const diff      = nowMs - triggerMs;
   return diff >= 0 && diff <= WINDOW_MS;
 }
 
-function transportLabel(t: any): string {
-  switch (t.type) {
-    case 'flight': {
-      const fn   = t.details?.flightNumber ?? '';
-      const from = t.departureLocation ?? '';
-      const to   = t.arrivalLocation   ?? '';
-      const al   = t.details?.airline   ?? '';
-      return [al, fn, from && to ? `${from} → ${to}` : (from || to)].filter(Boolean).join(' · ');
-    }
-    case 'train':
-    case 'bus':
-    case 'ferry': {
-      const op   = t.details?.operator ?? '';
-      const from = t.departureLocation ?? '';
-      const to   = t.arrivalLocation   ?? '';
-      return [op, from && to ? `${from} → ${to}` : (from || to)].filter(Boolean).join(' · ');
-    }
-    case 'car_hire':
-      return [t.details?.rentalCompany, t.details?.pickupLocation ? `Pickup: ${t.details.pickupLocation}` : ''].filter(Boolean).join(' · ');
-    case 'taxi':
-    case 'private_transfer': {
-      const from = t.departureLocation ?? '';
-      const to   = t.arrivalLocation   ?? '';
-      return from && to ? `${from} → ${to}` : (from || to || 'Transfer');
-    }
+// "Today" check in destination timezone — avoids UTC midnight flipping
+function isTodayInZone(eventDt: DateTime, nowDt: DateTime): boolean {
+  return eventDt.toISODate() === nowDt.toISODate();
+}
+
+// ---- Navigation -------------------------------------------------------------
+
+function buildNavUrl(
+  arrivalLocation: string,
+  arrivalCoordinates: any,
+  transportType: string,
+  navApp: string
+): string | null {
+  const isCoords   = arrivalCoordinates?.lat;
+  const dest       = isCoords
+    ? `${arrivalCoordinates.lat},${arrivalCoordinates.lng}`
+    : arrivalLocation;
+  if (!dest) return null;
+
+  const destEncoded = encodeURIComponent(dest);
+  const travelMode  = ['train', 'bus', 'ferry'].includes(transportType) ? 'transit' : 'driving';
+
+  switch (navApp) {
+    case 'apple_maps':
+      return isCoords
+        ? `https://maps.apple.com/?daddr=${dest}&dirflg=${travelMode === 'transit' ? 'r' : 'd'}`
+        : `https://maps.apple.com/?daddr=${destEncoded}&dirflg=${travelMode === 'transit' ? 'r' : 'd'}`;
+    case 'waze':
+      return isCoords
+        ? `https://waze.com/ul?ll=${dest}&navigate=yes`
+        : `https://waze.com/ul?q=${destEncoded}&navigate=yes`;
+    case 'google_maps':
     default:
-      return t.departureLocation ?? t.type ?? 'Transport';
+      return `https://www.google.com/maps/dir/?api=1&destination=${destEncoded}&travelmode=${travelMode}`;
   }
 }
 
-function transportEmoji(type: string): string {
-  const map: Record<string, string> = {
-    flight: '✈', train: '🚂', bus: '🚌', ferry: '⛴',
-    car_hire: '🚗', car: '🚗', taxi: '🚕', private_transfer: '🚐', bicycle: '🚲',
-  };
-  return map[type] ?? '🚌';
+function transportLabel(t: any): string {
+  const from  = t.departureLocation ?? '';
+  const to    = t.arrivalLocation   ?? '';
+  const route = from && to ? `${from} to ${to}` : (from || to);
+  switch (t.type) {
+    case 'flight':
+      return [t.details?.airline, t.details?.flightNumber, route].filter(Boolean).join(' - ');
+    case 'train':
+    case 'bus':
+    case 'ferry':
+      return [t.details?.operator, route].filter(Boolean).join(' - ');
+    case 'car_hire':
+      return [t.details?.rentalCompany, t.details?.pickupLocation ? `Pickup: ${t.details.pickupLocation}` : ''].filter(Boolean).join(' - ');
+    case 'taxi':
+    case 'private_transfer':
+      return route || 'Transfer';
+    default:
+      return route || t.type;
+  }
 }
 
-function leadLabel(type: string): string {
-  const ms = LEAD[type as keyof typeof LEAD] ?? LEAD.train;
-  const mins = ms / 60000;
-  return mins >= 60 ? `${mins / 60} hour${mins / 60 !== 1 ? 's' : ''}` : `${mins} minutes`;
+function leadLabel(ms: number): string {
+  const mins = Math.round(ms / 60000);
+  if (mins === 0) return 'now';
+  return mins >= 60 ? `${Math.round(mins / 60)} hour${Math.round(mins / 60) !== 1 ? 's' : ''}` : `${mins} minutes`;
 }
 
-async function sendToUser(
-  userId: string,
-  subscriptions: any[],
-  payload: object,
-  invalidEndpoints: string[]
-) {
+// ---- File matching ----------------------------------------------------------
+
+function findLinkedFiles(files: any[], searchTerms: string[]): any[] {
+  const terms = searchTerms.filter(Boolean).map(s => s.toLowerCase());
+  return files.filter(f => {
+    if (!f.linkedTo?.label) return false;
+    const label = f.linkedTo.label.toLowerCase();
+    return terms.some(t => label.includes(t) || t.includes(label));
+  });
+}
+
+function summariseFiles(linked: any[]): string | null {
+  if (!linked.length) return null;
+  return linked.map(f => {
+    switch (f.type) {
+      case 'boarding_pass':        return 'Boarding pass';
+      case 'train_ticket':         return 'Train ticket';
+      case 'booking_confirmation': return 'Booking confirmation';
+      case 'visa':                 return 'Visa';
+      case 'insurance':            return 'Insurance';
+      case 'link':                 return f.name ?? 'Link';
+      case 'note':                 return f.name ?? 'Note';
+      case 'contact':              return f.name ?? 'Contact';
+      default:                     return f.name ?? 'Document';
+    }
+  }).join(', ');
+}
+
+// ---- Push -------------------------------------------------------------------
+
+async function sendPush(subscriptions: any[], payload: object, invalidEndpoints: string[]) {
   const str = JSON.stringify(payload);
   await Promise.allSettled(
     subscriptions.map(async (sub) => {
@@ -119,14 +237,20 @@ async function sendToUser(
   );
 }
 
-// ─── POST /api/push/notify ────────────────────────────────────────────────────
-// Called by the cron scheduler every 5 minutes.
-// Checks all active trips for upcoming itinerary stops and logistics events,
-// sends push notifications at the appropriate lead time, and logs each send
-// to prevent duplicates.
-export async function POST(req: Request) {
+async function logAndSend(
+  userId: string, tripId: string, key: string, type: string,
+  subscriptions: any[], payload: object, invalidEndpoints: string[]
+): Promise<boolean> {
+  const found = await PushNotificationLog.findOne({ userId, tripId, key, notificationType: type });
+  if (found) return false;
+  await sendPush(subscriptions, payload, invalidEndpoints);
+  await PushNotificationLog.create({ userId, tripId, key, notificationType: type });
+  return true;
+}
 
-  // Validate cron secret — prevents anyone from triggering this publicly
+// ---- POST /api/push/notify --------------------------------------------------
+
+export async function POST(req: Request) {
   const secret = req.headers.get('x-cron-secret');
   if (secret !== process.env.CRON_SECRET) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
@@ -134,184 +258,245 @@ export async function POST(req: Request) {
 
   await connectDB();
 
-  const now = new Date();
+  // nowMs is UTC epoch milliseconds — timezone-agnostic reference point
+  const nowMs = Date.now();
 
-  // ── 1. Find all active trips ──────────────────────────────────────────────
   const activeTrips = await Trip.find({ status: 'active', deleted: false });
   if (!activeTrips.length) return NextResponse.json({ sent: 0 });
 
   let totalSent = 0;
 
   for (const trip of activeTrips) {
-    const tripId   = trip._id.toString();
-    const userId   = trip.userId.toString();
+    const tripId = trip._id.toString();
+    const userId = trip.userId.toString();
 
-    // ── 2. Load user + subscriptions ───────────────────────────────────────
+    // Destination timezone — fall back to UTC if not set
+    // This is what makes Bucharest fire at the right time
+    const tz = trip.destination?.timezone ?? 'UTC';
+
+    // "Now" expressed in the destination timezone for date comparisons
+    const nowDt = DateTime.now().setZone(tz);
+
     const user = await User.findById(userId);
     if (!user?.pushSubscriptions?.length) continue;
 
+    const subs             = user.pushSubscriptions;
     const invalidEndpoints: string[] = [];
+    const drivingNavApp    = user.preferences?.navigationApps?.driving  ?? 'google_maps';
+    const transitNavApp    = user.preferences?.navigationApps?.transit  ?? 'google_maps';
 
-    // ── 3. Load itinerary, logistics, files ────────────────────────────────
     const [itinerary, logistics, files] = await Promise.all([
       TripItinerary.findOne({ tripId }),
       TripLogistics.findOne({ tripId }),
       TripFile.find({ tripId }),
     ]);
 
-    // ── 4. Build a lookup: transport type → boarding pass / ticket file ────
-    // Files linked to a transport entry via linkedTo.collection = 'transport'
-    const boardingPassByLabel: Record<string, any> = {};
-    for (const file of files) {
-      if (
-        file.resourceType === 'file' &&
-        ['boarding_pass', 'train_ticket'].includes(file.type) &&
-        file.linkedTo?.label
-      ) {
-        boardingPassByLabel[file.linkedTo.label.toLowerCase()] = file;
-      }
-    }
+    const allFiles: any[] = files ?? [];
 
-    // ── 5. Check itinerary stops ────────────────────────────────────────────
-    const days: any[] = itinerary?.days ?? [];
+    // =========================================================================
+    // 1. LOGISTICS TRANSPORT
+    // =========================================================================
 
-    for (const day of days) {
-      const stops: any[] = day.stops ?? [];
-
-      for (const stop of stops) {
-        // Only care about stops with a scheduled time
-        const eventTime = stopToDatetime(day.date, stop);
-        if (!eventTime) continue;
-
-        // Only hotel check-in stops get a lead-time notification from itinerary
-        // Everything else (flights etc.) comes from logistics transport entries
-        if (stop.type !== 'hotel') continue;
-
-        const lead   = LEAD.hotel;
-        if (!isInWindow(eventTime, lead, now)) continue;
-
-        const key  = stop._id?.toString() ?? `${day.date}-${stop.name}`;
-        const type = 'hotel_45m';
-
-        // De-duplicate
-        const alreadySent = await PushNotificationLog.findOne({ userId, tripId, key, notificationType: type });
-        if (alreadySent) continue;
-
-        const timeStr = eventTime.toLocaleTimeString('en-IE', { hour: '2-digit', minute: '2-digit' });
-        const payload = {
-          title: `🏨 Check-in in ${leadLabel('hotel')}`,
-          body:  `${stop.name}${stop.address ? ` · ${stop.address}` : ''} · Scheduled ${timeStr}`,
-          url:   `/trips/${tripId}?tab=1`,  // Logistics tab
-          tag:   `hotel-${key}`,
-        };
-
-        await sendToUser(userId, user.pushSubscriptions, payload, invalidEndpoints);
-        await PushNotificationLog.create({ userId, tripId, key, notificationType: type });
-        totalSent++;
-      }
-    }
-
-    // ── 6. Check logistics transport ──────────────────────────────────────
-    const transportation: any[] = logistics?.transportation ?? [];
-
-    for (let i = 0; i < transportation.length; i++) {
-      const t = transportation[i];
+    for (let i = 0; i < (logistics?.transportation ?? []).length; i++) {
+      const t = logistics.transportation[i];
       if (!t.departureTime) continue;
 
-      const eventTime = new Date(t.departureTime);
-      if (isNaN(eventTime.getTime())) continue;
+      // Parse departure time in destination timezone
+      const eventDt = parseInZone(t.departureTime, tz);
+      if (!eventDt) continue;
 
-      const lead = LEAD[t.type as keyof typeof LEAD] ?? LEAD.train;
-      if (!isInWindow(eventTime, lead, now)) continue;
+      const navLead = NAV_LEAD[t.type] ?? 0;
+      const docLead = DOC_LEAD[t.type] ?? null;
+      const label   = transportLabel(t);
+      const kind    = TYPE_EMOJI[t.type] ?? 'Transport';
+      const depTime = eventDt.toFormat('HH:mm');
+      const ref     = t.confirmationNumber ? ` - Ref: ${t.confirmationNumber}` : '';
+      const tripUrl = `/trips/${tripId}?tab=1`;
 
-      const key  = `transport-${i}`;
-      const type = `${t.type}_notify`;
+      // ── NAV ─────────────────────────────────────────────────────────────
+      if (navLead > 0 && isInWindow(eventDt, navLead, nowMs)) {
+        const navApp = ['train', 'bus', 'ferry'].includes(t.type) ? transitNavApp : drivingNavApp;
+        const navUrl = t.arrivalLocation
+          ? buildNavUrl(t.arrivalLocation, t.arrivalCoordinates, t.type, navApp)
+          : null;
 
-      // De-duplicate
-      const alreadySent = await PushNotificationLog.findOne({ userId, tripId, key, notificationType: type });
-      if (alreadySent) continue;
-
-      const emoji     = transportEmoji(t.type);
-      const label     = transportLabel(t);
-      const depTime   = eventTime.toLocaleTimeString('en-IE', { hour: '2-digit', minute: '2-digit' });
-      const ref       = t.confirmationNumber ? ` · Ref: ${t.confirmationNumber}` : '';
-
-      // Look for a boarding pass / ticket in files
-      // Match by flight number, route label, or operator
-      let boardingPassUrl: string | null = null;
-      const searchTerms = [
-        t.details?.flightNumber,
-        t.details?.operator,
-        `${t.departureLocation} → ${t.arrivalLocation}`,
-      ].filter(Boolean).map((s: string) => s.toLowerCase());
-
-      for (const [bpLabel, bpFile] of Object.entries(boardingPassByLabel)) {
-        if (searchTerms.some(term => bpLabel.includes(term) || term.includes(bpLabel))) {
-          boardingPassUrl = bpFile.gcsUrl ?? null;
-          break;
-        }
+        const sent = await logAndSend(userId, tripId, `transport-${i}`, `${t.type}_nav`, subs, {
+          title:              `${kind}: ${label} in ${leadLabel(navLead)}`,
+          body:               [`Departs ${depTime}${ref}`, 'Tap for navigation'].join('\n'),
+          url:                navUrl ?? tripUrl,
+          tag:                `transport-nav-${i}`,
+          requireInteraction: t.type === 'flight',
+        }, invalidEndpoints);
+        if (sent) totalSent++;
       }
 
-      const body = [
-        `${label} · Departs ${depTime}${ref}`,
-        boardingPassUrl ? '📄 Boarding pass attached — tap to open' : null,
-      ].filter(Boolean).join('\n');
+      // ── DOC ─────────────────────────────────────────────────────────────
+      if (docLead !== null && isInWindow(eventDt, docLead, nowMs)) {
+        const linked      = findLinkedFiles(allFiles, [t.details?.flightNumber, t.details?.operator, `${t.departureLocation} to ${t.arrivalLocation}`, t.arrivalLocation]);
+        const fileSummary = summariseFiles(linked);
+        const docUrl      = linked[0]?.gcsUrl ?? linked[0]?.linkUrl ?? tripUrl;
 
-      const payload = {
-        title:              `${emoji} ${t.type === 'flight' ? 'Flight' : transportLabel(t).split(' · ')[0]} in ${leadLabel(t.type)}`,
-        body,
-        url:                boardingPassUrl ? `/trips/${tripId}?tab=7` : `/trips/${tripId}?tab=1`,
-        tag:                `transport-${key}`,
-        requireInteraction: t.type === 'flight',   // Flight notifications stay until dismissed
-      };
-
-      await sendToUser(userId, user.pushSubscriptions, payload, invalidEndpoints);
-      await PushNotificationLog.create({ userId, tripId, key, notificationType: type });
-      totalSent++;
+        const sent = await logAndSend(userId, tripId, `transport-${i}`, `${t.type}_doc`, subs, {
+          title:              `${kind}: ${label} - Your documents`,
+          body:               fileSummary
+            ? `${fileSummary} - tap to open\nDeparts ${depTime}${ref}`
+            : `Check your Resources for this trip\nDeparts ${depTime}${ref}`,
+          url:                fileSummary ? docUrl : `/trips/${tripId}?tab=7`,
+          tag:                `transport-doc-${i}`,
+          requireInteraction: t.type === 'flight',
+        }, invalidEndpoints);
+        if (sent) totalSent++;
+      }
     }
 
-    // ── 7. Check accommodation check-in (from logistics) ──────────────────
-    // This catches accommodation with explicit checkIn datetimes in logistics,
-    // complementing the itinerary-based hotel stop check above.
-    const accommodation: any[] = logistics?.accommodation ?? [];
+    // =========================================================================
+    // 2. LOGISTICS ACCOMMODATION
+    // =========================================================================
 
-    for (let i = 0; i < accommodation.length; i++) {
-      const a = accommodation[i];
+    for (let i = 0; i < (logistics?.accommodation ?? []).length; i++) {
+      const a = logistics.accommodation[i];
       if (!a.checkIn) continue;
 
-      const eventTime = new Date(a.checkIn);
-      if (isNaN(eventTime.getTime())) continue;
+      const eventDt = parseInZone(a.checkIn, tz);
+      if (!eventDt) continue;
 
-      // Only fire if checkIn is today and within window
-      const todayStr    = now.toISOString().split('T')[0];
-      const checkInDate = eventTime.toISOString().split('T')[0];
-      if (checkInDate !== todayStr) continue;
+      // Only fire on the actual check-in day — compared in destination timezone
+      if (!isTodayInZone(eventDt, nowDt)) continue;
 
-      if (!isInWindow(eventTime, LEAD.hotel, now)) continue;
+      const timeStr = eventDt.toFormat('HH:mm');
+      const ref     = a.confirmationNumber ? ` - Ref: ${a.confirmationNumber}` : '';
+      const tripUrl = `/trips/${tripId}?tab=1`;
 
-      const key  = `accom-${i}`;
-      const type = 'accom_checkin_45m';
+      // ── NAV ─────────────────────────────────────────────────────────────
+      if (isInWindow(eventDt, NAV_LEAD.hotel, nowMs)) {
+        const navUrl = a.address ? buildNavUrl(a.address, null, 'car', drivingNavApp) : null;
+        const sent = await logAndSend(userId, tripId, `accom-${i}`, 'accom_nav', subs, {
+          title: `Hotel: Check-in in ${leadLabel(NAV_LEAD.hotel)}`,
+          body:  [`${a.name}${a.address ? ' - ' + a.address : ''} - ${timeStr}`, 'Tap for navigation'].join('\n'),
+          url:   navUrl ?? tripUrl,
+          tag:   `accom-nav-${i}`,
+        }, invalidEndpoints);
+        if (sent) totalSent++;
+      }
 
-      const alreadySent = await PushNotificationLog.findOne({ userId, tripId, key, notificationType: type });
-      if (alreadySent) continue;
+      // ── DOC ─────────────────────────────────────────────────────────────
+      if (isInWindow(eventDt, DOC_LEAD.hotel, nowMs)) {
+        const linked      = findLinkedFiles(allFiles, [a.name, a.address]);
+        const fileSummary = summariseFiles(linked);
+        const docUrl      = linked[0]?.gcsUrl ?? linked[0]?.linkUrl ?? tripUrl;
 
-      const timeStr = eventTime.toLocaleTimeString('en-IE', { hour: '2-digit', minute: '2-digit' });
-      const ref     = a.confirmationNumber ? ` · Ref: ${a.confirmationNumber}` : '';
-
-      const payload = {
-        title: `🏨 Check-in in 45 minutes`,
-        body:  `${a.name}${a.address ? ` · ${a.address}` : ''} · Check-in ${timeStr}${ref}`,
-        url:   `/trips/${tripId}?tab=1`,
-        tag:   `accom-${key}`,
-        requireInteraction: false,
-      };
-
-      await sendToUser(userId, user.pushSubscriptions, payload, invalidEndpoints);
-      await PushNotificationLog.create({ userId, tripId, key, notificationType: type });
-      totalSent++;
+        const sent = await logAndSend(userId, tripId, `accom-${i}`, 'accom_doc', subs, {
+          title: `Hotel: ${a.name} - Check-in now`,
+          body:  fileSummary
+            ? `${fileSummary} - tap to open${ref}`
+            : `Check your Resources for booking details${ref}`,
+          url:   fileSummary ? docUrl : `/trips/${tripId}?tab=7`,
+          tag:   `accom-doc-${i}`,
+        }, invalidEndpoints);
+        if (sent) totalSent++;
+      }
     }
 
-    // ── 8. Clean up expired subscriptions ─────────────────────────────────
+    // =========================================================================
+    // 3. ITINERARY STOPS
+    // =========================================================================
+
+    for (const day of (itinerary?.days ?? [])) {
+      for (const stop of (day.stops ?? [])) {
+        if (stop.source === 'logistics' && stop.type === 'transport') continue;
+
+        const eventDt = stopToLuxon(day.date, stop, tz);
+        if (!eventDt) continue;
+
+        const navLead = NAV_LEAD[stop.type] ?? 30 * 60 * 1000;
+        const docLead = DOC_LEAD[stop.type] ?? null;
+        const kind    = TYPE_EMOJI[stop.type] ?? 'Event';
+        const timeStr = eventDt.toFormat('HH:mm');
+        const key     = stop._id?.toString() ?? `${day.date}-${stop.name}`;
+        const tripUrl = `/trips/${tripId}?tab=2`;
+
+        // ── NAV ─────────────────────────────────────────────────────────
+        if (navLead > 0 && isInWindow(eventDt, navLead, nowMs) && stop.address) {
+          const navUrl = buildNavUrl(stop.address, stop.coordinates, stop.type, drivingNavApp);
+          const sent = await logAndSend(userId, tripId, key, `${stop.type}_nav`, subs, {
+            title: `${kind}: ${stop.name} in ${leadLabel(navLead)}`,
+            body:  [`${stop.address} - ${timeStr}`, 'Tap for navigation'].join('\n'),
+            url:   navUrl ?? tripUrl,
+            tag:   `stop-nav-${key}`,
+          }, invalidEndpoints);
+          if (sent) totalSent++;
+        }
+
+        // ── DOC ─────────────────────────────────────────────────────────
+        if (docLead !== null && isInWindow(eventDt, docLead, nowMs)) {
+          const linked      = findLinkedFiles(allFiles, [stop.name, stop.address]);
+          const fileSummary = summariseFiles(linked);
+          const docUrl      = linked[0]?.gcsUrl ?? linked[0]?.linkUrl ?? tripUrl;
+
+          const sent = await logAndSend(userId, tripId, key, `${stop.type}_doc`, subs, {
+            title: `${kind}: ${stop.name} - Your documents`,
+            body:  fileSummary
+              ? `${fileSummary} - tap to open\n${timeStr}`
+              : `Check your Resources for this trip\n${timeStr}`,
+            url:   fileSummary ? docUrl : `/trips/${tripId}?tab=7`,
+            tag:   `stop-doc-${key}`,
+          }, invalidEndpoints);
+          if (sent) totalSent++;
+        }
+      }
+    }
+
+    // =========================================================================
+    // 4. VENUES
+    // =========================================================================
+
+    for (let i = 0; i < (logistics?.venues ?? []).length; i++) {
+      const v = logistics.venues[i];
+
+      const eventDt = venueToLuxon(v, tz);
+      if (!eventDt) continue;
+
+      const navLead = NAV_LEAD[v.type] ?? NAV_LEAD.event;
+      const docLead = DOC_LEAD[v.type] ?? DOC_LEAD.event;
+      const kind    = TYPE_EMOJI[v.type] ?? 'Event';
+      const timeStr = eventDt.toFormat('HH:mm');
+      const key     = `venue-${i}`;
+      const tripUrl = `/trips/${tripId}?tab=1`;
+
+      // ── NAV ─────────────────────────────────────────────────────────────
+      if (navLead > 0 && isInWindow(eventDt, navLead, nowMs) && v.address) {
+        const navUrl = buildNavUrl(v.address, v.coordinates, 'car', drivingNavApp);
+        const sent = await logAndSend(userId, tripId, key, `${v.type}_nav`, subs, {
+          title: `${kind}: ${v.name} in ${leadLabel(navLead)}`,
+          body:  [`${v.address} - ${timeStr}`, 'Tap for navigation'].join('\n'),
+          url:   navUrl ?? tripUrl,
+          tag:   `venue-nav-${i}`,
+        }, invalidEndpoints);
+        if (sent) totalSent++;
+      }
+
+      // ── DOC ─────────────────────────────────────────────────────────────
+      if (docLead !== null && isInWindow(eventDt, docLead, nowMs)) {
+        const linked      = findLinkedFiles(allFiles, [v.name, v.address, v.website]);
+        const fileSummary = summariseFiles(linked);
+        const docUrl      = linked[0]?.gcsUrl ?? linked[0]?.linkUrl ?? v.website ?? tripUrl;
+        const hint        = fileSummary
+          ? `${fileSummary} - tap to open`
+          : v.website
+            ? 'Tap to open venue website'
+            : 'Check your Resources for this event';
+
+        const sent = await logAndSend(userId, tripId, key, `${v.type}_doc`, subs, {
+          title: `${kind}: ${v.name} - Starting soon`,
+          body:  [hint, timeStr].join('\n'),
+          url:   docUrl,
+          tag:   `venue-doc-${i}`,
+        }, invalidEndpoints);
+        if (sent) totalSent++;
+      }
+    }
+
+    // Clean up expired subscriptions
     if (invalidEndpoints.length) {
       await User.findByIdAndUpdate(userId, {
         $pull: { pushSubscriptions: { endpoint: { $in: invalidEndpoints } } },
@@ -319,5 +504,5 @@ export async function POST(req: Request) {
     }
   }
 
-  return NextResponse.json({ sent: totalSent, checkedAt: now.toISOString() });
+  return NextResponse.json({ sent: totalSent, checkedAt: new Date().toISOString() });
 }
