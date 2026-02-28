@@ -26,6 +26,11 @@ import ExpandMoreIcon       from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon       from '@mui/icons-material/ExpandLess';
 import ContentCopyIcon      from '@mui/icons-material/ContentCopy';
 import RecordVoiceOverIcon  from '@mui/icons-material/RecordVoiceOver';
+import ExploreIcon          from '@mui/icons-material/Explore';
+import AutoAwesomeIcon      from '@mui/icons-material/AutoAwesome';
+import EventIcon            from '@mui/icons-material/Event';
+import LocationCityIcon     from '@mui/icons-material/LocationCity';
+import RefreshIcon          from '@mui/icons-material/Refresh';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -86,17 +91,17 @@ interface Intelligence {
     message:       string;
   } | null;
   visa: {
-    available:      boolean;
-    required?:      boolean;
-    type?:          string;
-    typeLabel?:     string;
-    name?:          string | null;
-    cost?:          string | null;
+    available:       boolean;
+    required?:       boolean;
+    type?:           string;
+    typeLabel?:      string;
+    name?:           string | null;
+    cost?:           string | null;
     processingTime?: string | null;
-    applyUrl?:      string | null;
-    maxStay?:       string;
-    notes?:         string;
-    message:        string;
+    applyUrl?:       string | null;
+    maxStay?:        string;
+    notes?:          string;
+    message:         string;
   } | null;
   tipping: {
     culture:     string;
@@ -124,7 +129,71 @@ interface Intelligence {
   } | null;
 }
 
+// ─── Culture / Discover types ─────────────────────────────────────────────────
+
+interface CultureHighlight {
+  name:        string;
+  description: string;
+  type:        string;
+  tip?:        string;
+  free?:       boolean;
+  address?:    string;
+}
+
+interface CultureBriefing {
+  destination:   string;
+  highlights:    CultureHighlight[];
+  neighbourhood: { name: string; description: string; address?: string } | null;
+  practicalNote: string;
+  generatedAt:   string;
+}
+
+interface FreeDay {
+  date:         Date | string;
+  label:        string;
+  includes:     string[];
+  excludes:     string[];
+  dateUnknown?: boolean;
+}
+
+interface StandingAccess {
+  label:             string;
+  touristsEligible?: boolean;
+  details?:          string;
+}
+
+interface FreeAccess {
+  freeDays:  FreeDay[];
+  standing:  StandingAccess[];
+  summary?:  string | null;
+  tip?:      string | null;
+}
+
+interface CultureData {
+  briefing:    CultureBriefing | null;
+  freeAccess:  FreeAccess | null;
+  generatedAt: string | null;
+}
+
 interface Props { tripId: string; }
+
+// ─── Highlight type maps ──────────────────────────────────────────────────────
+
+const TYPE_COLOURS: Record<string, string> = {
+  museum:        '#1D2642',
+  gallery:       '#2d4a1e',
+  landmark:      '#7a4a10',
+  neighbourhood: '#3d3035',
+  experience:    '#1a3d3d',
+  food:          '#5a2020',
+  music:         '#2a1a4a',
+  other:         '#333',
+};
+
+const TYPE_LABELS: Record<string, string> = {
+  museum: '🏛', gallery: '🖼', landmark: '📍',
+  neighbourhood: '🚶', experience: '✨', food: '🍽', music: '🎵', other: '★',
+};
 
 // ─── Status pill for the top strip ───────────────────────────────────────────
 
@@ -179,14 +248,19 @@ function StatusPill({
 
 // ─── Section heading ──────────────────────────────────────────────────────────
 
-function SectionHeading({ icon, children }: { icon: React.ReactNode; children: React.ReactNode }) {
+function SectionHeading({ icon, children, action }: {
+  icon:     React.ReactNode;
+  children: React.ReactNode;
+  action?:  React.ReactNode;
+}) {
   return (
     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5 }}>
       <Box sx={{ color: '#55702C', display: 'flex' }}>{icon}</Box>
       <Typography variant="subtitle2" fontWeight={800}
-        sx={{ fontSize: '0.82rem', textTransform: 'uppercase', letterSpacing: 0.5, color: 'text.secondary' }}>
+        sx={{ fontSize: '0.82rem', textTransform: 'uppercase', letterSpacing: 0.5, color: 'text.secondary', flexGrow: 1 }}>
         {children}
       </Typography>
+      {action}
     </Box>
   );
 }
@@ -238,17 +312,12 @@ function PhraseCard({ phrase }: { phrase: Phrase }) {
       p: 1.75, border: '1px solid', borderColor: 'divider',
       display: 'flex', flexDirection: 'column', gap: 0.5,
     }}>
-      {/* English — small label */}
       <Typography variant="caption" color="text.disabled" sx={{ fontSize: '0.7rem', fontWeight: 600 }}>
         {phrase.english}
       </Typography>
-
-      {/* Local — dominant */}
       <Typography fontWeight={800} sx={{ fontSize: '1.1rem', lineHeight: 1.2 }}>
         {phrase.local}
       </Typography>
-
-      {/* Phonetic — tap to copy */}
       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
           <RecordVoiceOverIcon sx={{ fontSize: '0.85rem', color: 'primary.main' }} />
@@ -262,8 +331,6 @@ function PhraseCard({ phrase }: { phrase: Phrase }) {
           </IconButton>
         </Tooltip>
       </Box>
-
-      {/* Context */}
       <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.72rem', lineHeight: 1.3 }}>
         {phrase.context}
       </Typography>
@@ -302,9 +369,7 @@ function formatDay(timezone: string): string {
   }).format(new Date());
 }
 
-function TimezoneCard({ timezone }: {
-  timezone: Intelligence['timezone'];
-}) {
+function TimezoneCard({ timezone }: { timezone: Intelligence['timezone'] }) {
   const [tick, setTick] = useState(0);
 
   useEffect(() => {
@@ -312,16 +377,15 @@ function TimezoneCard({ timezone }: {
     return () => clearInterval(id);
   }, []);
 
-  // Use the browser's local timezone as "home" — most accurate for the device in hand
-  const browserTz   = Intl.DateTimeFormat().resolvedOptions().timeZone;
-  const destTz      = timezone.destinationTimezone;
-  const isSame      = browserTz === destTz || timezone.absDifference === 0;
+  const browserTz  = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const destTz     = timezone.destinationTimezone;
+  const isSame     = browserTz === destTz || timezone.absDifference === 0;
 
-  const homeTime    = formatTime(browserTz);
-  const destTime    = formatTime(destTz);
-  const homeDay     = formatDay(browserTz);
-  const destDay     = formatDay(destTz);
-  const dayDiffers  = homeDay !== destDay;
+  const homeTime   = formatTime(browserTz);
+  const destTime   = formatTime(destTz);
+  const homeDay    = formatDay(browserTz);
+  const destDay    = formatDay(destTz);
+  const dayDiffers = homeDay !== destDay;
 
   return (
     <Box>
@@ -329,9 +393,7 @@ function TimezoneCard({ timezone }: {
         Timezone
       </SectionHeading>
       <Paper elevation={0} sx={{ p: 2, border: '1px solid', borderColor: 'divider' }}>
-
         {isSame ? (
-          /* Same timezone — single clock */
           <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1.5 }}>
             <Typography fontWeight={900} sx={{ fontSize: '2rem', lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>
               {homeTime}
@@ -342,10 +404,7 @@ function TimezoneCard({ timezone }: {
             </Box>
           </Box>
         ) : (
-          /* Different timezones — two clocks side by side */
           <Box sx={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr', gap: 1.5, alignItems: 'center' }}>
-
-            {/* Home */}
             <Box>
               <Typography variant="caption" color="text.secondary"
                 sx={{ fontSize: '0.68rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, display: 'block', mb: 0.4 }}>
@@ -362,24 +421,22 @@ function TimezoneCard({ timezone }: {
                 {browserTz}
               </Typography>
             </Box>
-
-            {/* Delta */}
             <Box sx={{ textAlign: 'center', px: 0.5 }}>
               <Typography variant="body2" fontWeight={800}
                 sx={{ fontSize: '0.85rem', color: 'text.disabled', lineHeight: 1 }}>
                 {timezone.hoursDifference > 0 ? '+' : ''}{timezone.hoursDifference}h
               </Typography>
             </Box>
-
-            {/* Destination */}
             <Box sx={{ textAlign: 'right' }}>
               <Typography variant="caption" color="text.secondary"
                 sx={{ fontSize: '0.68rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, display: 'block', mb: 0.4 }}>
                 There
               </Typography>
               <Typography fontWeight={900}
-                sx={{ fontSize: { xs: '1.6rem', sm: '1.9rem' }, lineHeight: 1, fontVariantNumeric: 'tabular-nums', letterSpacing: '-0.02em',
-                  color: timezone.jetlagRisk === 'significant' ? 'error.main' : timezone.jetlagRisk === 'moderate' ? 'warning.dark' : 'text.primary' }}>
+                sx={{
+                  fontSize: { xs: '1.6rem', sm: '1.9rem' }, lineHeight: 1, fontVariantNumeric: 'tabular-nums', letterSpacing: '-0.02em',
+                  color: timezone.jetlagRisk === 'significant' ? 'error.main' : timezone.jetlagRisk === 'moderate' ? 'warning.dark' : 'text.primary',
+                }}>
                 {destTime}
               </Typography>
               <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.72rem', display: 'block', mt: 0.3 }}>
@@ -394,8 +451,6 @@ function TimezoneCard({ timezone }: {
             </Box>
           </Box>
         )}
-
-        {/* Jet lag chip */}
         {timezone.jetlagRisk !== 'none' && (
           <Box sx={{ mt: 1.5, pt: 1.5, borderTop: '1px solid', borderColor: 'divider' }}>
             <Chip
@@ -414,14 +469,285 @@ function TimezoneCard({ timezone }: {
   );
 }
 
+// ─── Discover section ─────────────────────────────────────────────────────────
+
+function DiscoverSection({ tripId }: { tripId: string }) {
+  const [culture,    setCulture]    = useState<CultureData | null>(null);
+  const [generating, setGenerating] = useState(false);
+  const [error,      setError]      = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch(`/api/trips/${tripId}/culture`)
+      .then(r => r.json())
+      .then(d => setCulture(d.culture ?? null))
+      .catch(() => {});
+  }, [tripId]);
+
+  const generate = async () => {
+    setGenerating(true);
+    setError(null);
+    try {
+      const res  = await fetch(`/api/trips/${tripId}/culture`, { method: 'POST' });
+      const data = await res.json();
+      if (data.error) setError(data.error);
+      else setCulture(data.culture);
+    } catch {
+      setError('Failed to generate — check your connection');
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  const hasBriefing    = culture?.briefing;
+  const freeDays       = culture?.freeAccess?.freeDays?.filter((e: any) => !e.dateUnknown) ?? [];
+  const standingAccess = culture?.freeAccess?.standing ?? [];
+  const freeAccessTip  = culture?.freeAccess?.tip ?? null;
+
+  return (
+    <Box>
+      {/* Date-matched free days */}
+      {freeDays.length > 0 && (
+        <Box sx={{ mb: 2.5 }}>
+          {freeDays.map((day: any, i: number) => (
+            <Paper key={i} elevation={0} sx={{
+              p: 2, mb: 1,
+              border: '2px solid rgba(201,82,27,0.4)',
+              backgroundColor: 'rgba(201,82,27,0.04)',
+              borderRadius: 2,
+            }}>
+              <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1, mb: 0.75 }}>
+                <EventIcon sx={{ fontSize: '1rem', color: '#C9521B', flexShrink: 0, mt: 0.15 }} />
+                <Typography fontWeight={800} sx={{ fontSize: '0.88rem', color: '#C9521B', lineHeight: 1.3 }}>
+                  {day.label}
+                </Typography>
+              </Box>
+              {day.includes?.length > 0 && (
+                <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
+                  {day.includes.slice(0, 4).map((inc: string) => (
+                    <Chip key={inc} label={inc} size="small" sx={{ height: 20, fontSize: '0.68rem', fontWeight: 600 }} />
+                  ))}
+                </Box>
+              )}
+            </Paper>
+          ))}
+        </Box>
+      )}
+
+      {/* Standing free access */}
+      {(standingAccess.length > 0 || freeAccessTip) && (
+        <Paper elevation={0} sx={{
+          p: 1.75, mb: 2.5,
+          border: '1px solid rgba(85,112,44,0.35)',
+          backgroundColor: 'rgba(85,112,44,0.04)',
+          borderRadius: 2,
+        }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, mb: 0.75 }}>
+            <Typography sx={{ fontSize: '0.9rem' }}>🎟</Typography>
+            <Typography fontWeight={800} sx={{ fontSize: '0.82rem', textTransform: 'uppercase', letterSpacing: 0.5, color: '#55702C' }}>
+              Free cultural access
+            </Typography>
+          </Box>
+          {standingAccess.map((item: any, i: number) => (
+            <Box key={i} sx={{ mb: i < standingAccess.length - 1 ? 1.25 : 0 }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 0.25 }}>
+                {item.touristsEligible === false && (
+                  <Typography variant="caption" sx={{ fontSize: '0.65rem', color: 'warning.dark' }}>⚠️ Residents only</Typography>
+                )}
+                <Typography fontWeight={700} sx={{ fontSize: '0.82rem' }}>{item.title}</Typography>
+              </Box>
+              <Typography variant="body2" color="text.secondary" sx={{ fontSize: '0.8rem', lineHeight: 1.45 }}>
+                {item.description}
+              </Typography>
+              {item.when && (
+                <Typography variant="caption" sx={{ fontSize: '0.72rem', color: '#55702C', display: 'block', mt: 0.3 }}>
+                  🕐 {item.when}
+                </Typography>
+              )}
+              {item.caveat && (
+                <Typography variant="caption" sx={{ fontSize: '0.72rem', color: 'warning.dark', display: 'block', mt: 0.25, fontStyle: 'italic' }}>
+                  ⚠️ {item.caveat}
+                </Typography>
+              )}
+            </Box>
+          ))}
+          {freeAccessTip && (
+            <Typography variant="caption" sx={{ fontSize: '0.75rem', color: '#55702C', display: 'block', mt: 0.5, fontStyle: 'italic' }}>
+              💡 {freeAccessTip}
+            </Typography>
+          )}
+        </Paper>
+      )}
+
+      {/* AI briefing heading */}
+      <SectionHeading
+        icon={<ExploreIcon sx={{ fontSize: '1rem' }} />}
+        action={hasBriefing ? (
+          <Tooltip title="Regenerate briefing">
+            <IconButton size="small" onClick={generate} disabled={generating} sx={{ p: 0.5 }}>
+              <RefreshIcon sx={{ fontSize: '0.9rem' }} />
+            </IconButton>
+          </Tooltip>
+        ) : null}
+      >
+        Discover
+      </SectionHeading>
+
+      {error && (
+        <Alert severity="error" sx={{ mb: 1.5, py: 0.5 }}>
+          <Typography variant="body2" sx={{ fontSize: '0.82rem' }}>{error}</Typography>
+        </Alert>
+      )}
+
+      {/* Empty state */}
+      {!hasBriefing && !generating && (
+        <Paper elevation={0} sx={{
+          p: 3, border: '1px dashed', borderColor: 'divider', borderRadius: 2,
+          display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1.5, textAlign: 'center',
+        }}>
+          <AutoAwesomeIcon sx={{ fontSize: '2rem', color: 'text.disabled' }} />
+          <Box>
+            <Typography fontWeight={700} sx={{ fontSize: '0.9rem', mb: 0.4 }}>Cultural briefing</Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ fontSize: '0.82rem', maxWidth: 280 }}>
+              Get curated highlights, a neighbourhood to explore, and a practical local tip — generated for this specific trip.
+            </Typography>
+          </Box>
+          <Button
+            variant="contained" size="small"
+            startIcon={<AutoAwesomeIcon sx={{ fontSize: '0.9rem !important' }} />}
+            onClick={generate}
+            sx={{ fontWeight: 700, fontSize: '0.82rem', backgroundColor: '#1D2642', '&:hover': { backgroundColor: '#2a3660' } }}
+          >
+            Generate briefing
+          </Button>
+        </Paper>
+      )}
+
+      {/* Generating spinner */}
+      {generating && (
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, py: 3, justifyContent: 'center' }}>
+          <CircularProgress size={20} />
+          <Typography variant="body2" color="text.secondary" sx={{ fontSize: '0.85rem' }}>
+            Thinking about {culture?.briefing?.destination ?? 'your destination'}…
+          </Typography>
+        </Box>
+      )}
+
+      {/* Briefing */}
+      {hasBriefing && !generating && (
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+          {culture!.briefing!.highlights.map((h, i) => (
+            <Paper key={i} elevation={0} sx={{
+              overflow: 'hidden', border: '1px solid', borderColor: 'divider',
+              borderRadius: 1.5, display: 'flex',
+            }}>
+              <Box sx={{ width: 4, flexShrink: 0, backgroundColor: TYPE_COLOURS[h.type] ?? '#333' }} />
+              <Box sx={{ p: 1.75, flexGrow: 1, minWidth: 0 }}>
+                <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 0.75 }}>
+                  <Typography sx={{ fontSize: '0.9rem', flexShrink: 0 }}>{TYPE_LABELS[h.type] ?? '★'}</Typography>
+                  <Box sx={{ minWidth: 0, flexGrow: 1 }}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, flexWrap: 'wrap' }}>
+                      <Typography fontWeight={800} sx={{ fontSize: '0.9rem', lineHeight: 1.2 }}>{h.name}</Typography>
+                      {h.free && (
+                        <Chip label="Free" size="small" color="success" variant="outlined"
+                          sx={{ height: 18, fontSize: '0.65rem', fontWeight: 700 }} />
+                      )}
+                    </Box>
+                    <Typography variant="body2" color="text.secondary" sx={{ fontSize: '0.82rem', lineHeight: 1.45, mt: 0.4 }}>
+                      {h.description}
+                    </Typography>
+                    {h.address && (
+                      <Box
+                        component="a"
+                        href={`https://maps.apple.com/?q=${encodeURIComponent(h.address)}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        sx={{
+                          display: 'inline-flex', alignItems: 'center', gap: 0.4, mt: 0.5,
+                          fontSize: '0.72rem', color: 'text.disabled', textDecoration: 'none',
+                          '&:hover': { color: '#55702C' },
+                        }}
+                      >
+                        <Box component="span" sx={{ fontSize: '0.7rem' }}>📍</Box>
+                        {h.address}
+                      </Box>
+                    )}
+                    {h.tip && (
+                      <Typography variant="caption" sx={{ fontSize: '0.75rem', color: '#55702C', display: 'block', mt: 0.5, fontStyle: 'italic' }}>
+                        💡 {h.tip}
+                      </Typography>
+                    )}
+                  </Box>
+                </Box>
+              </Box>
+            </Paper>
+          ))}
+
+          {culture!.briefing!.neighbourhood && (
+            <Paper elevation={0} sx={{
+              p: 2, border: '1px solid', borderColor: 'rgba(29,38,66,0.3)',
+              backgroundColor: 'rgba(29,38,66,0.04)', borderRadius: 1.5,
+            }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, mb: 0.75 }}>
+                <LocationCityIcon sx={{ fontSize: '1rem', color: '#1D2642' }} />
+                <Typography fontWeight={800} sx={{ fontSize: '0.82rem', textTransform: 'uppercase', letterSpacing: 0.5, color: '#1D2642' }}>
+                  Walk this neighbourhood
+                </Typography>
+              </Box>
+              <Typography fontWeight={800} sx={{ fontSize: '0.95rem', mb: 0.4 }}>
+                {culture!.briefing!.neighbourhood.name}
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ fontSize: '0.84rem', lineHeight: 1.5 }}>
+                {culture!.briefing!.neighbourhood.description}
+              </Typography>
+              {culture!.briefing!.neighbourhood.address && (
+                <Box
+                  component="a"
+                  href={`https://maps.apple.com/?q=${encodeURIComponent(culture!.briefing!.neighbourhood.address)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  sx={{
+                    display: 'inline-flex', alignItems: 'center', gap: 0.4, mt: 0.75,
+                    fontSize: '0.72rem', color: 'text.disabled', textDecoration: 'none',
+                    '&:hover': { color: '#1D2642' },
+                  }}
+                >
+                  <Box component="span" sx={{ fontSize: '0.7rem' }}>📍</Box>
+                  {culture!.briefing!.neighbourhood.address}
+                </Box>
+              )}
+            </Paper>
+          )}
+
+          {culture!.briefing!.practicalNote && (
+            <Paper elevation={0} sx={{
+              px: 2, py: 1.5, border: '1px solid', borderColor: 'divider',
+              backgroundColor: 'rgba(0,0,0,0.02)', borderRadius: 1.5,
+              display: 'flex', gap: 1, alignItems: 'flex-start',
+            }}>
+              <Typography sx={{ fontSize: '1rem', flexShrink: 0 }}>💡</Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ fontSize: '0.84rem', lineHeight: 1.5 }}>
+                {culture!.briefing!.practicalNote}
+              </Typography>
+            </Paper>
+          )}
+
+          <Typography variant="caption" color="text.disabled" sx={{ fontSize: '0.68rem', textAlign: 'right' }}>
+            Generated {new Date(culture!.briefing!.generatedAt).toLocaleDateString('en-IE', { day: 'numeric', month: 'short', year: 'numeric' })}
+          </Typography>
+        </Box>
+      )}
+    </Box>
+  );
+}
+
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function IntelligenceTab({ tripId }: Props) {
-  const [intel,       setIntel]       = useState<Intelligence | null>(null);
-  const [loading,     setLoading]     = useState(true);
-  const [error,       setError]       = useState<string | null>(null);
+  const [intel,          setIntel]          = useState<Intelligence | null>(null);
+  const [loading,        setLoading]        = useState(true);
+  const [error,          setError]          = useState<string | null>(null);
   const [activeCategory, setActiveCategory] = useState(0);
-  const [showChecks,  setShowChecks]  = useState(false);
+  const [showChecks,     setShowChecks]     = useState(false);
 
   useEffect(() => {
     fetch(`/api/trips/${tripId}/intelligence`)
@@ -524,7 +850,6 @@ export default function IntelligenceTab({ tripId }: Props) {
             gap: 1,
           }}
         >
-          {/* Visa */}
           {visa && (
             <StatusPill
               icon={<ArticleIcon sx={{ fontSize: '1rem' }} />}
@@ -533,8 +858,6 @@ export default function IntelligenceTab({ tripId }: Props) {
               value={visa.required === false ? `Free · ${visa.maxStay}` : visa.typeLabel}
             />
           )}
-
-          {/* Passport */}
           {passport && (
             <StatusPill
               icon={<BadgeIcon sx={{ fontSize: '1rem' }} />}
@@ -543,8 +866,6 @@ export default function IntelligenceTab({ tripId }: Props) {
               value={passport.isExpired ? 'EXPIRED' : passport.isWarning ? `${passport.daysAtTravel}d left` : 'Valid'}
             />
           )}
-
-          {/* Water */}
           {water && (
             <StatusPill
               icon={<WaterDropIcon sx={{ fontSize: '1rem' }} />}
@@ -553,8 +874,6 @@ export default function IntelligenceTab({ tripId }: Props) {
               value={water.drinkable ? 'Tap safe' : 'Bottled only'}
             />
           )}
-
-          {/* Currency */}
           {currency && (
             <StatusPill
               icon={<CurrencyExchangeIcon sx={{ fontSize: '1rem' }} />}
@@ -563,8 +882,6 @@ export default function IntelligenceTab({ tripId }: Props) {
               value={currency.needsExchange ? `${currency.originCurrency} → ${currency.destinationCurrency}` : `${currency.destinationCurrency} ✓`}
             />
           )}
-
-          {/* Electrical */}
           {electrical && (
             <StatusPill
               icon={<PowerIcon sx={{ fontSize: '1rem' }} />}
@@ -573,16 +890,12 @@ export default function IntelligenceTab({ tripId }: Props) {
               value={electrical.needsAdapter ? `${electrical.originPlug} → ${electrical.destinationPlug}` : 'No adapter'}
             />
           )}
-
-          {/* Timezone */}
           <StatusPill
             icon={<AccessTimeIcon sx={{ fontSize: '1rem' }} />}
             label="Timezone"
             status={tzStatus}
             value={timezone.absDifference === 0 ? 'Same' : `${timezone.absDifference > 0 ? '+' : ''}${timezone.hoursDifference}h`}
           />
-
-          {/* Driving */}
           {driving && (
             <StatusPill
               icon={<DirectionsCarIcon sx={{ fontSize: '1rem' }} />}
@@ -591,8 +904,6 @@ export default function IntelligenceTab({ tripId }: Props) {
               value={driving.sameAshome ? `${driving.destinationSide} ✓` : `${driving.destinationSide} side`}
             />
           )}
-
-          {/* Tipping */}
           {tipping && (
             <StatusPill
               icon={<RestaurantIcon sx={{ fontSize: '1rem' }} />}
@@ -602,8 +913,6 @@ export default function IntelligenceTab({ tripId }: Props) {
               value={tipping.culture.charAt(0).toUpperCase() + tipping.culture.slice(1)}
             />
           )}
-
-          {/* Emergency */}
           <StatusPill
             icon={<LocalHospitalIcon sx={{ fontSize: '1rem' }} />}
             label="Emergency"
@@ -612,6 +921,11 @@ export default function IntelligenceTab({ tripId }: Props) {
           />
         </Box>
       </Box>
+
+      <Divider />
+
+      {/* ── DISCOVER ── */}
+      <DiscoverSection tripId={tripId} />
 
       <Divider />
 
@@ -657,7 +971,6 @@ export default function IntelligenceTab({ tripId }: Props) {
                   <Chip label={visa.name} size="small" sx={{ height: 20, fontSize: '0.7rem', fontWeight: 700 }} />
                 )}
               </Box>
-
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.75 }}>
                 {visa.cost && (
                   <Box sx={{ display: 'flex', gap: 1.5 }}>
@@ -678,22 +991,17 @@ export default function IntelligenceTab({ tripId }: Props) {
                   </Box>
                 )}
               </Box>
-
               {visa.notes && (
                 <Typography variant="body2" color="text.secondary"
                   sx={{ fontSize: '0.82rem', mt: 1.25, pt: 1.25, borderTop: '1px solid', borderColor: 'divider', lineHeight: 1.4 }}>
                   {visa.notes}
                 </Typography>
               )}
-
               {visa.applyUrl && (
                 <Button
-                  variant="outlined"
-                  size="small"
+                  variant="outlined" size="small"
                   endIcon={<OpenInNewIcon sx={{ fontSize: '0.85rem !important' }} />}
-                  href={visa.applyUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
+                  href={visa.applyUrl} target="_blank" rel="noopener noreferrer"
                   sx={{ mt: 1.5, fontSize: '0.8rem', fontWeight: 700 }}
                 >
                   Apply online
@@ -711,7 +1019,6 @@ export default function IntelligenceTab({ tripId }: Props) {
         </SectionHeading>
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.25 }}>
 
-          {/* Tipping */}
           {tipping && (
             <DetailCard
               icon={<RestaurantIcon sx={{ fontSize: '1rem' }} />}
@@ -744,7 +1051,6 @@ export default function IntelligenceTab({ tripId }: Props) {
             </DetailCard>
           )}
 
-          {/* Water */}
           {water && (
             <DetailCard
               icon={<WaterDropIcon sx={{ fontSize: '1rem' }} />}
@@ -757,7 +1063,6 @@ export default function IntelligenceTab({ tripId }: Props) {
             </DetailCard>
           )}
 
-          {/* Payment */}
           {payment && (
             <DetailCard
               icon={<PaymentsIcon sx={{ fontSize: '1rem' }} />}
@@ -773,9 +1078,7 @@ export default function IntelligenceTab({ tripId }: Props) {
                 {payment.contactless && (
                   <Chip
                     label="Contactless accepted"
-                    size="small"
-                    color="success"
-                    variant="outlined"
+                    size="small" color="success" variant="outlined"
                     sx={{ height: 20, fontSize: '0.72rem', fontWeight: 700 }}
                   />
                 )}
@@ -786,7 +1089,6 @@ export default function IntelligenceTab({ tripId }: Props) {
             </DetailCard>
           )}
 
-          {/* Cultural */}
           {cultural && (
             <DetailCard
               icon={<CheckroomIcon sx={{ fontSize: '1rem' }} />}
@@ -807,7 +1109,6 @@ export default function IntelligenceTab({ tripId }: Props) {
               </Typography>
             </DetailCard>
           )}
-
         </Box>
       </Box>
 
@@ -858,9 +1159,7 @@ export default function IntelligenceTab({ tripId }: Props) {
               {emergency.country}
             </Typography>
             <Button
-              variant="outlined"
-              size="small"
-              color="error"
+              variant="outlined" size="small" color="error"
               href={`tel:${emergency.number}`}
               sx={{ mt: 0.5, fontSize: '0.75rem', fontWeight: 700, py: 0.25 }}
             >
@@ -897,7 +1196,6 @@ export default function IntelligenceTab({ tripId }: Props) {
           </Alert>
         ) : language.phrasesAvailable ? (
           <Box>
-            {/* Category filter chips */}
             <Box sx={{ display: 'flex', gap: 0.75, flexWrap: 'wrap', mb: 2 }}>
               {PHRASE_CATEGORIES.map((cat, i) => (
                 <Chip
@@ -906,21 +1204,15 @@ export default function IntelligenceTab({ tripId }: Props) {
                   size="small"
                   onClick={() => setActiveCategory(i)}
                   sx={{
-                    height: 28,
-                    fontSize: '0.78rem',
-                    fontWeight: 700,
-                    cursor: 'pointer',
+                    height: 28, fontSize: '0.78rem', fontWeight: 700, cursor: 'pointer',
                     backgroundColor: activeCategory === i ? '#55702C' : 'transparent',
                     color: activeCategory === i ? '#fff' : 'text.secondary',
-                    border: '1px solid',
-                    borderColor: activeCategory === i ? '#55702C' : 'divider',
+                    border: '1px solid', borderColor: activeCategory === i ? '#55702C' : 'divider',
                     '&:hover': { backgroundColor: activeCategory === i ? '#3d5218' : 'action.hover' },
                   }}
                 />
               ))}
             </Box>
-
-            {/* Phrase grid */}
             <Grid container spacing={1.25}>
               {displayedPhrases.length === 0 ? (
                 <Grid size={12}>

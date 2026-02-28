@@ -27,6 +27,10 @@ const TripSchema = new Schema({
   coverPhotoThumb:  String,
   coverPhotoCredit: String,
   weather: { type: Schema.Types.Mixed },
+  culture: {
+  briefing:    { type: Object, default: null },
+  generatedAt: { type: Date,   default: null },
+},
   status: {
     type: String,
     enum: ['idea', 'planning', 'confirmed', 'active', 'completed', 'cancelled'],

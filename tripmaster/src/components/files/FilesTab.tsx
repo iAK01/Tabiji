@@ -762,13 +762,13 @@ export default function FilesTab({ tripId }: FilesTabProps) {
   const dialogTitle =
     editingFile
       ? mode === 'note' ? 'Edit note' : mode === 'contact' ? 'Edit contact' : mode === 'link' ? 'Edit link' : 'Edit file details'
-      : mode === 'note' ? 'Add a note' : mode === 'contact' ? 'Add a contact' : mode === 'link' ? 'Save a link' : 'Upload a file';
+      : mode === 'note' ? 'Add a note' : mode === 'contact' ? 'Add a contact' : mode === 'link' ? 'Add a link' : 'Upload a file';
 
   const submitLabel =
     uploading          ? <CircularProgress size={20} sx={{ color: 'white' }} /> :
     mode === 'note'    ? (editingFile ? 'Save note' : 'Add note') :
-    mode === 'contact' ? 'Save contact' :
-    mode === 'link'    ? 'Save link' : 'Upload';
+    mode === 'contact' ? (editingFile ? 'Save contact' : 'Add contact') :
+    mode === 'link'    ? (editingFile ? 'Save link' : 'Add link') : (editingFile ? 'Save file' : 'Upload file');
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, pb: 10 }}>
@@ -785,7 +785,7 @@ export default function FilesTab({ tripId }: FilesTabProps) {
         </Box>
         <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
           <Button variant="outlined" startIcon={<PersonIcon />} onClick={() => openDialog('contact')} sx={{ fontWeight: 700 }}>Add contact</Button>
-          <Button variant="outlined" startIcon={<LinkIcon />} onClick={() => openDialog('link')} sx={{ fontWeight: 700 }}>Save link</Button>
+          <Button variant="outlined" startIcon={<LinkIcon />} onClick={() => openDialog('link')} sx={{ fontWeight: 700 }}>Add link</Button>
           <Button variant="outlined" startIcon={<NoteAddIcon />} onClick={() => openDialog('note')} sx={{ fontWeight: 700 }}>Add note</Button>
           <Button variant="contained" startIcon={<AddIcon />} onClick={() => openDialog('file')} sx={{ fontWeight: 700 }}>Upload file</Button>
         </Box>
