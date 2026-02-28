@@ -25,6 +25,7 @@ const UserSchema = new Schema({
     expiry: Date,
     number: String,
   },
+  pushSubscriptions: [{ type: Schema.Types.Mixed }],
 
   preferences: {
     units: { type: String, enum: ['metric', 'imperial'], default: 'metric' },

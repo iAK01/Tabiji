@@ -21,6 +21,7 @@ import MyLocationIcon from '@mui/icons-material/MyLocation';
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
 import { COUNTRY_LIST, getCountryMeta } from '@/lib/data/countries';
 import AirportSearch from '@/components/ui/AirportSearch';
+import PushNotificationSetup from '@/components/notifications/PushNotificationSetup';
 import { Airport } from '@/lib/data/airports';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -287,9 +288,10 @@ export default function ProfilePage() {
               <Typography variant="body1">{profile.name}</Typography>
               <Typography variant="body2" color="text.secondary">{profile.email}</Typography>
             </Paper>
-
+  <PushNotificationSetup />
             <Paper sx={{ p: 3 }}>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
+               
                 <HomeIcon color="primary" />
                 <Typography variant="subtitle1" fontWeight={700}>Home</Typography>
               </Box>
