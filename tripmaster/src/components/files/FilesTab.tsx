@@ -5,7 +5,7 @@ import {
   Box, Typography, Paper, Button, Chip, CircularProgress,
   Dialog, DialogTitle, DialogContent, DialogActions,
   TextField, Select, MenuItem, FormControl, InputLabel,
-  IconButton, Divider, LinearProgress, alpha,
+  IconButton, Divider, LinearProgress, alpha, Fab,
   useTheme, useMediaQuery, Menu,
 } from '@mui/material';
 import AddIcon                from '@mui/icons-material/Add';
@@ -35,13 +35,16 @@ import ConfirmationNumberIcon from '@mui/icons-material/ConfirmationNumber';
 import PersonIcon             from '@mui/icons-material/Person';
 import PhoneIcon              from '@mui/icons-material/Phone';
 import EmailIcon              from '@mui/icons-material/Email';
-import SupportAgentIcon       from '@mui/icons-material/SupportAgent';
-import BusinessIcon           from '@mui/icons-material/Business';
 import CampaignIcon           from '@mui/icons-material/Campaign';
 import EngineeringIcon        from '@mui/icons-material/Engineering';
 import DirectionsBusIcon      from '@mui/icons-material/DirectionsBus';
 import LocalHospitalIcon      from '@mui/icons-material/LocalHospital';
 import GroupIcon              from '@mui/icons-material/Group';
+import NoteAddIcon            from '@mui/icons-material/NoteAdd';
+import NotesIcon              from '@mui/icons-material/Notes';
+import LightbulbIcon          from '@mui/icons-material/Lightbulb';
+import AlarmIcon              from '@mui/icons-material/Alarm';
+import StarIcon               from '@mui/icons-material/Star';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -53,7 +56,7 @@ interface LinkedTo {
 
 interface TripFile {
   _id: string;
-  resourceType: 'file' | 'link' | 'contact';
+  resourceType: 'file' | 'link' | 'contact' | 'note';
   name: string;
   type: string;
   gcsUrl?: string;
@@ -62,6 +65,7 @@ interface TripFile {
   size?: number;
   phone?: string;
   email?: string;
+  body?: string;
   notes?: string;
   linkedTo?: LinkedTo;
   createdAt: string;
@@ -69,7 +73,7 @@ interface TripFile {
 
 interface FilesTabProps { tripId: string; }
 
-type Mode = 'file' | 'link' | 'contact';
+type Mode = 'file' | 'link' | 'contact' | 'note';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -97,23 +101,31 @@ const LINK_TYPES = [
 ] as const;
 
 const CONTACT_TYPES = [
-  { value: 'artist',               label: 'Artist',              Icon: MusicNoteIcon },
-  { value: 'venue_manager',        label: 'Venue Manager',       Icon: LocationOnIcon },
-  { value: 'event_manager',        label: 'Event Manager',       Icon: EventIcon },
-  { value: 'tour_manager',         label: 'Tour Manager',        Icon: GroupIcon },
-  { value: 'production',           label: 'Production',          Icon: EngineeringIcon },
-  { value: 'promoter',             label: 'Promoter',            Icon: CampaignIcon },
-  { value: 'accommodation_contact',label: 'Accommodation',       Icon: HotelIcon },
-  { value: 'transport_contact',    label: 'Transport',           Icon: DirectionsBusIcon },
-  { value: 'emergency_contact',    label: 'Emergency',           Icon: LocalHospitalIcon },
-  { value: 'other',                label: 'Other',               Icon: PersonIcon },
+  { value: 'artist',                label: 'Artist',         Icon: MusicNoteIcon },
+  { value: 'venue_manager',         label: 'Venue Manager',  Icon: LocationOnIcon },
+  { value: 'event_manager',         label: 'Event Manager',  Icon: EventIcon },
+  { value: 'tour_manager',          label: 'Tour Manager',   Icon: GroupIcon },
+  { value: 'production',            label: 'Production',     Icon: EngineeringIcon },
+  { value: 'promoter',              label: 'Promoter',       Icon: CampaignIcon },
+  { value: 'accommodation_contact', label: 'Accommodation',  Icon: HotelIcon },
+  { value: 'transport_contact',     label: 'Transport',      Icon: DirectionsBusIcon },
+  { value: 'emergency_contact',     label: 'Emergency',      Icon: LocalHospitalIcon },
+  { value: 'other',                 label: 'Other',          Icon: PersonIcon },
+] as const;
+
+const NOTE_TYPES = [
+  { value: 'general',        label: 'General',        Icon: NotesIcon },
+  { value: 'observation',    label: 'Observation',    Icon: LightbulbIcon },
+  { value: 'reminder',       label: 'Reminder',       Icon: AlarmIcon },
+  { value: 'recommendation', label: 'Recommendation', Icon: StarIcon },
 ] as const;
 
 type FileTypeValue    = typeof FILE_TYPES[number]['value'];
 type LinkTypeValue    = typeof LINK_TYPES[number]['value'];
 type ContactTypeValue = typeof CONTACT_TYPES[number]['value'];
+type NoteTypeValue    = typeof NOTE_TYPES[number]['value'];
 
-const ALL_TYPES = [...FILE_TYPES, ...LINK_TYPES, ...CONTACT_TYPES];
+const ALL_TYPES = [...FILE_TYPES, ...LINK_TYPES, ...CONTACT_TYPES, ...NOTE_TYPES];
 
 const TYPE_COLOUR: Record<string, string> = {
   // Files
@@ -141,6 +153,11 @@ const TYPE_COLOUR: Record<string, string> = {
   accommodation_contact: '#5c35a0',
   transport_contact:     '#0891b2',
   emergency_contact:     '#dc2626',
+  // Notes
+  general:               '#55702C',
+  observation:           '#0891b2',
+  reminder:              '#C9521B',
+  recommendation:        '#7c3aed',
   // Shared
   other:                 '#6b7280',
 };
@@ -148,7 +165,7 @@ const TYPE_COLOUR: Record<string, string> = {
 const BLANK_FILE_FORM    = { name: '', type: 'other' as FileTypeValue,    notes: '' };
 const BLANK_LINK_FORM    = { name: '', type: 'event_website' as LinkTypeValue, url: '', notes: '' };
 const BLANK_CONTACT_FORM = { name: '', type: 'other' as ContactTypeValue, phone: '', email: '', notes: '' };
-
+const BLANK_NOTE_FORM    = { name: '', type: 'general' as NoteTypeValue,  body: '' };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -228,93 +245,117 @@ function DropZone({ onFile }: { onFile: (f: File) => void }) {
   );
 }
 
+// ─── Note card ────────────────────────────────────────────────────────────────
+
+function NoteCard({ file, onDelete, onEdit }: { file: TripFile; onDelete: (id: string) => void; onEdit: (file: TripFile) => void }) {
+  const [menuAnchor,  setMenuAnchor]  = useState<null | HTMLElement>(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const color    = TYPE_COLOUR[file.type] ?? '#55702C';
+  const typeMeta = NOTE_TYPES.find(t => t.value === file.type);
+
+  return (
+    <>
+      <Box sx={{ px: { xs: 2, sm: 2.5 }, py: { xs: 1.75, sm: 2 }, display: 'flex', gap: 1.5 }}>
+        <Box sx={{ width: 3, alignSelf: 'stretch', borderRadius: 2, backgroundColor: color, flexShrink: 0 }} />
+        <Box sx={{ flexGrow: 1, minWidth: 0 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', mb: file.body ? 0.5 : 0 }}>
+            {file.name && (
+              <Typography variant="body2" fontWeight={800} sx={{ fontSize: '0.9rem' }}>
+                {file.name}
+              </Typography>
+            )}
+            {typeMeta && (
+              <Chip label={typeMeta.label} size="small"
+                sx={{ height: 18, fontSize: '0.68rem', fontWeight: 700, backgroundColor: alpha(color, 0.12), color }} />
+            )}
+          </Box>
+          {file.body && (
+            <Typography variant="body2" color="text.primary" sx={{ fontSize: '0.875rem', lineHeight: 1.55, whiteSpace: 'pre-wrap' }}>
+              {file.body}
+            </Typography>
+          )}
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, mt: 0.75, flexWrap: 'wrap' }}>
+            <Typography variant="caption" color="text.disabled" sx={{ fontSize: '0.72rem' }}>
+              {new Date(file.createdAt).toLocaleDateString('en-IE', { day: 'numeric', month: 'short', year: 'numeric' })}
+              {' · '}
+              {new Date(file.createdAt).toLocaleTimeString('en-IE', { hour: '2-digit', minute: '2-digit' })}
+            </Typography>
+            {file.linkedTo?.label && (
+              <>
+                <Typography variant="caption" color="text.disabled" sx={{ fontSize: '0.72rem' }}>·</Typography>
+                <Typography variant="caption" sx={{ fontSize: '0.72rem', color, fontWeight: 600 }}>{file.linkedTo.label}</Typography>
+              </>
+            )}
+          </Box>
+        </Box>
+        <IconButton size="small" onClick={e => { e.stopPropagation(); setMenuAnchor(e.currentTarget); }} sx={{ flexShrink: 0, alignSelf: 'flex-start', mt: 0.25 }}>
+          <MoreVertIcon fontSize="small" />
+        </IconButton>
+      </Box>
+
+      <Menu anchorEl={menuAnchor} open={Boolean(menuAnchor)} onClose={() => setMenuAnchor(null)}
+        transformOrigin={{ horizontal: 'right', vertical: 'top' }} anchorOrigin={{ horizontal: 'right', vertical: 'bottom' }}>
+        <MenuItem onClick={() => { setMenuAnchor(null); onEdit(file); }} sx={{ gap: 1.5, fontSize: '0.875rem' }}>
+          <EditIcon fontSize="small" /> Edit
+        </MenuItem>
+        <Divider />
+        <MenuItem onClick={() => { setMenuAnchor(null); setConfirmOpen(true); }} sx={{ gap: 1.5, fontSize: '0.875rem', color: 'error.main' }}>
+          <DeleteIcon fontSize="small" /> Delete
+        </MenuItem>
+      </Menu>
+
+      <Dialog open={confirmOpen} onClose={() => setConfirmOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle fontWeight={700} sx={{ fontSize: '1.1rem' }}>Delete note?</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary">This note will be permanently deleted. This cannot be undone.</Typography>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2.5, gap: 1 }}>
+          <Button onClick={() => setConfirmOpen(false)}>Cancel</Button>
+          <Button variant="contained" color="error" onClick={() => { setConfirmOpen(false); onDelete(file._id); }}>Delete</Button>
+        </DialogActions>
+      </Dialog>
+    </>
+  );
+}
+
 // ─── Contact card ─────────────────────────────────────────────────────────────
 
 function ContactCard({ file, onDelete, onEdit }: { file: TripFile; onDelete: (id: string) => void; onEdit: (file: TripFile) => void }) {
   const [menuAnchor,  setMenuAnchor]  = useState<null | HTMLElement>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
-  const color     = TYPE_COLOUR[file.type] ?? '#6b7280';
-  const typeMeta  = CONTACT_TYPES.find(t => t.value === file.type);
-  const hasPhone  = !!file.phone;
-  const hasEmail  = !!file.email;
-
+  const color    = TYPE_COLOUR[file.type] ?? '#6b7280';
+  const typeMeta = CONTACT_TYPES.find(t => t.value === file.type);
+  const hasPhone = !!file.phone;
+  const hasEmail = !!file.email;
 
   return (
     <>
       <Box sx={{ px: { xs: 2, sm: 2.5 }, py: { xs: 1.75, sm: 2 }, display: 'flex', gap: 1.5 }}>
-
-        {/* colour accent bar */}
         <Box sx={{ width: 3, alignSelf: 'stretch', borderRadius: 2, backgroundColor: color, flexShrink: 0 }} />
-
-        {/* avatar */}
-        <Box sx={{
-          width: 40, height: 40, borderRadius: '50%', flexShrink: 0,
-          backgroundColor: alpha(color, 0.12),
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-        }}>
+        <Box sx={{ width: 40, height: 40, borderRadius: '50%', flexShrink: 0, backgroundColor: alpha(color, 0.12), display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <TypeIcon type={file.type} size={20} />
         </Box>
-
-        {/* details */}
         <Box sx={{ flexGrow: 1, minWidth: 0 }}>
-
-          {/* name + role */}
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-            <Typography variant="body2" fontWeight={800} sx={{ fontSize: '0.9rem' }}>
-              {file.name}
-            </Typography>
-            {typeMeta && (
-              <Chip
-                label={typeMeta.label} size="small"
-                sx={{ height: 18, fontSize: '0.68rem', fontWeight: 700,
-                      backgroundColor: alpha(color, 0.12), color }}
-              />
-            )}
+            <Typography variant="body2" fontWeight={800} sx={{ fontSize: '0.9rem' }}>{file.name}</Typography>
+            {typeMeta && <Chip label={typeMeta.label} size="small" sx={{ height: 18, fontSize: '0.68rem', fontWeight: 700, backgroundColor: alpha(color, 0.12), color }} />}
           </Box>
-
-          {/* contact actions */}
           {(hasPhone || hasEmail) && (
             <Box sx={{ display: 'flex', gap: 1, mt: 1, flexWrap: 'wrap' }}>
               {hasPhone && (
-                <Button
-                  component="a"
-                  href={`tel:${file.phone}`}
-                  size="small"
-                  startIcon={<PhoneIcon sx={{ fontSize: '0.95rem !important' }} />}
-                  variant="outlined"
-                  sx={{
-                    fontSize: '0.78rem', fontWeight: 700, py: 0.5, px: 1.25,
-                    borderColor: alpha(color, 0.35), color,
-                    '&:hover': { borderColor: color, backgroundColor: alpha(color, 0.06) },
-                    minHeight: 32,
-                  }}
-                >
+                <Button component="a" href={`tel:${file.phone}`} size="small" startIcon={<PhoneIcon sx={{ fontSize: '0.95rem !important' }} />} variant="outlined"
+                  sx={{ fontSize: '0.78rem', fontWeight: 700, py: 0.5, px: 1.25, borderColor: alpha(color, 0.35), color, '&:hover': { borderColor: color, backgroundColor: alpha(color, 0.06) }, minHeight: 32 }}>
                   {file.phone}
                 </Button>
               )}
               {hasEmail && (
-                <Button
-                  component="a"
-                  href={`mailto:${file.email}`}
-                  size="small"
-                  startIcon={<EmailIcon sx={{ fontSize: '0.95rem !important' }} />}
-                  variant="outlined"
-                  sx={{
-                    fontSize: '0.78rem', fontWeight: 700, py: 0.5, px: 1.25,
-                    borderColor: alpha('#0891b2', 0.35), color: '#0891b2',
-                    '&:hover': { borderColor: '#0891b2', backgroundColor: alpha('#0891b2', 0.06) },
-                    minHeight: 32,
-                    maxWidth: { xs: '100%', sm: 260 },
-                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                  }}
-                >
+                <Button component="a" href={`mailto:${file.email}`} size="small" startIcon={<EmailIcon sx={{ fontSize: '0.95rem !important' }} />} variant="outlined"
+                  sx={{ fontSize: '0.78rem', fontWeight: 700, py: 0.5, px: 1.25, borderColor: alpha('#0891b2', 0.35), color: '#0891b2', '&:hover': { borderColor: '#0891b2', backgroundColor: alpha('#0891b2', 0.06) }, minHeight: 32, maxWidth: { xs: '100%', sm: 260 }, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {file.email}
                 </Button>
               )}
             </Box>
           )}
-
-          {/* meta row */}
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, mt: 0.75, flexWrap: 'wrap' }}>
             <Typography variant="caption" color="text.disabled" sx={{ fontSize: '0.72rem' }}>
               {new Date(file.createdAt).toLocaleDateString('en-IE', { day: 'numeric', month: 'short', year: 'numeric' })}
@@ -322,68 +363,35 @@ function ContactCard({ file, onDelete, onEdit }: { file: TripFile; onDelete: (id
             {file.linkedTo?.label && (
               <>
                 <Typography variant="caption" color="text.disabled" sx={{ fontSize: '0.72rem' }}>·</Typography>
-                <Typography variant="caption" sx={{ fontSize: '0.72rem', color, fontWeight: 600 }}>
-                  {file.linkedTo.label}
-                </Typography>
+                <Typography variant="caption" sx={{ fontSize: '0.72rem', color, fontWeight: 600 }}>{file.linkedTo.label}</Typography>
               </>
             )}
           </Box>
-
-          {file.notes && (
-            <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.72rem', mt: 0.25, display: 'block' }}>
-              {file.notes}
-            </Typography>
-          )}
+          {file.notes && <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.72rem', mt: 0.25, display: 'block' }}>{file.notes}</Typography>}
         </Box>
-
-        {/* overflow menu */}
         <IconButton size="small" onClick={e => { e.stopPropagation(); setMenuAnchor(e.currentTarget); }} sx={{ flexShrink: 0, alignSelf: 'flex-start', mt: 0.25 }}>
           <MoreVertIcon fontSize="small" />
         </IconButton>
       </Box>
 
-      <Menu
-        anchorEl={menuAnchor}
-        open={Boolean(menuAnchor)}
-        onClose={() => setMenuAnchor(null)}
-        transformOrigin={{ horizontal: 'right', vertical: 'top' }}
-        anchorOrigin={{ horizontal: 'right', vertical: 'bottom' }}
-      >
-        {hasPhone && (
-          <MenuItem component="a" href={`tel:${file.phone}`} onClick={() => setMenuAnchor(null)} sx={{ gap: 1.5, fontSize: '0.875rem' }}>
-            <PhoneIcon fontSize="small" /> Call {file.phone}
-          </MenuItem>
-        )}
-        {hasEmail && (
-          <MenuItem component="a" href={`mailto:${file.email}`} onClick={() => setMenuAnchor(null)} sx={{ gap: 1.5, fontSize: '0.875rem' }}>
-            <EmailIcon fontSize="small" /> Email
-          </MenuItem>
-        )}
+      <Menu anchorEl={menuAnchor} open={Boolean(menuAnchor)} onClose={() => setMenuAnchor(null)}
+        transformOrigin={{ horizontal: 'right', vertical: 'top' }} anchorOrigin={{ horizontal: 'right', vertical: 'bottom' }}>
+        {hasPhone && <MenuItem component="a" href={`tel:${file.phone}`} onClick={() => setMenuAnchor(null)} sx={{ gap: 1.5, fontSize: '0.875rem' }}><PhoneIcon fontSize="small" /> Call {file.phone}</MenuItem>}
+        {hasEmail && <MenuItem component="a" href={`mailto:${file.email}`} onClick={() => setMenuAnchor(null)} sx={{ gap: 1.5, fontSize: '0.875rem' }}><EmailIcon fontSize="small" /> Email</MenuItem>}
         {(hasPhone || hasEmail) && <Divider />}
-        <MenuItem onClick={() => { setMenuAnchor(null); onEdit(file); }} sx={{ gap: 1.5, fontSize: '0.875rem' }}>
-  <EditIcon fontSize="small" /> Edit
-</MenuItem>
-<Divider />
-        <MenuItem
-          onClick={() => { setMenuAnchor(null); setConfirmOpen(true); }}
-          sx={{ gap: 1.5, fontSize: '0.875rem', color: 'error.main' }}
-        >
-          <DeleteIcon fontSize="small" /> Delete
-        </MenuItem>
+        <MenuItem onClick={() => { setMenuAnchor(null); onEdit(file); }} sx={{ gap: 1.5, fontSize: '0.875rem' }}><EditIcon fontSize="small" /> Edit</MenuItem>
+        <Divider />
+        <MenuItem onClick={() => { setMenuAnchor(null); setConfirmOpen(true); }} sx={{ gap: 1.5, fontSize: '0.875rem', color: 'error.main' }}><DeleteIcon fontSize="small" /> Delete</MenuItem>
       </Menu>
 
       <Dialog open={confirmOpen} onClose={() => setConfirmOpen(false)} maxWidth="xs" fullWidth>
         <DialogTitle fontWeight={700} sx={{ fontSize: '1.1rem' }}>Remove contact?</DialogTitle>
         <DialogContent>
-          <Typography variant="body2" color="text.secondary">
-            <strong>{file.name}</strong> will be permanently removed. This cannot be undone.
-          </Typography>
+          <Typography variant="body2" color="text.secondary"><strong>{file.name}</strong> will be permanently removed. This cannot be undone.</Typography>
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 2.5, gap: 1 }}>
           <Button onClick={() => setConfirmOpen(false)}>Cancel</Button>
-          <Button variant="contained" color="error" onClick={() => { setConfirmOpen(false); onDelete(file._id); }}>
-            Remove
-          </Button>
+          <Button variant="contained" color="error" onClick={() => { setConfirmOpen(false); onDelete(file._id); }}>Remove</Button>
         </DialogActions>
       </Dialog>
     </>
@@ -403,31 +411,16 @@ function ResourceCard({ file, onDelete, onEdit }: { file: TripFile; onDelete: (i
     <>
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, px: { xs: 2, sm: 2.5 }, py: { xs: 1.5, sm: 1.75 } }}>
         <Box sx={{ width: 3, alignSelf: 'stretch', borderRadius: 2, backgroundColor: color, flexShrink: 0 }} />
-
         <Box sx={{ flexShrink: 0, display: 'flex', alignItems: 'center' }}>
-          {isLink
-            ? <LinkIcon sx={{ fontSize: 20, color: '#0891b2' }} />
-            : <MimeIcon mimeType={file.mimeType} size={20} />}
+          {isLink ? <LinkIcon sx={{ fontSize: 20, color: '#0891b2' }} /> : <MimeIcon mimeType={file.mimeType} size={20} />}
         </Box>
-
         <Box sx={{ flexGrow: 1, minWidth: 0 }}>
-          <Typography
-            variant="body2" fontWeight={700}
-            sx={{ fontSize: { xs: '0.88rem', sm: '0.875rem' }, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-          >
+          <Typography variant="body2" fontWeight={700} sx={{ fontSize: { xs: '0.88rem', sm: '0.875rem' }, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {file.name}
           </Typography>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, mt: 0.25, flexWrap: 'wrap' }}>
-            {isLink && file.linkUrl && (
-              <Typography variant="caption" color="text.disabled" sx={{ fontSize: '0.7rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 220 }}>
-                {file.linkUrl}
-              </Typography>
-            )}
-            {!isLink && file.size && (
-              <Typography variant="caption" color="text.disabled" sx={{ fontSize: '0.72rem' }}>
-                {formatBytes(file.size)}
-              </Typography>
-            )}
+            {isLink && file.linkUrl && <Typography variant="caption" color="text.disabled" sx={{ fontSize: '0.7rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 220 }}>{file.linkUrl}</Typography>}
+            {!isLink && file.size && <Typography variant="caption" color="text.disabled" sx={{ fontSize: '0.72rem' }}>{formatBytes(file.size)}</Typography>}
             <Typography variant="caption" color="text.disabled" sx={{ fontSize: '0.72rem' }}>·</Typography>
             <Typography variant="caption" color="text.disabled" sx={{ fontSize: '0.72rem' }}>
               {new Date(file.createdAt).toLocaleDateString('en-IE', { day: 'numeric', month: 'short', year: 'numeric' })}
@@ -435,79 +428,41 @@ function ResourceCard({ file, onDelete, onEdit }: { file: TripFile; onDelete: (i
             {file.linkedTo?.label && (
               <>
                 <Typography variant="caption" color="text.disabled" sx={{ fontSize: '0.72rem' }}>·</Typography>
-                <Typography variant="caption" sx={{ fontSize: '0.72rem', color, fontWeight: 600 }}>
-                  {file.linkedTo.label}
-                </Typography>
+                <Typography variant="caption" sx={{ fontSize: '0.72rem', color, fontWeight: 600 }}>{file.linkedTo.label}</Typography>
               </>
             )}
           </Box>
-          {file.notes && (
-            <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.72rem', mt: 0.25, display: 'block' }}>
-              {file.notes}
-            </Typography>
-          )}
+          {file.notes && <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.72rem', mt: 0.25, display: 'block' }}>{file.notes}</Typography>}
         </Box>
-
         <IconButton size="small" onClick={e => { e.stopPropagation(); setMenuAnchor(e.currentTarget); }} sx={{ flexShrink: 0 }}>
           <MoreVertIcon fontSize="small" />
         </IconButton>
       </Box>
 
-      <Menu
-        anchorEl={menuAnchor}
-        open={Boolean(menuAnchor)}
-        onClose={() => setMenuAnchor(null)}
-        transformOrigin={{ horizontal: 'right', vertical: 'top' }}
-        anchorOrigin={{ horizontal: 'right', vertical: 'bottom' }}
-      >
-        <MenuItem
-          component="a"
-          href={actionUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          onClick={() => setMenuAnchor(null)}
-          sx={{ gap: 1.5, fontSize: '0.875rem' }}
-        >
+      <Menu anchorEl={menuAnchor} open={Boolean(menuAnchor)} onClose={() => setMenuAnchor(null)}
+        transformOrigin={{ horizontal: 'right', vertical: 'top' }} anchorOrigin={{ horizontal: 'right', vertical: 'bottom' }}>
+        <MenuItem component="a" href={actionUrl} target="_blank" rel="noopener noreferrer" onClick={() => setMenuAnchor(null)} sx={{ gap: 1.5, fontSize: '0.875rem' }}>
           <OpenInNewIcon fontSize="small" /> {isLink ? 'Open link' : 'Open'}
         </MenuItem>
         {!isLink && (
-          <MenuItem
-            component="a"
-            href={actionUrl}
-            download={file.name}
-            onClick={() => setMenuAnchor(null)}
-            sx={{ gap: 1.5, fontSize: '0.875rem' }}
-          >
+          <MenuItem component="a" href={actionUrl} download={file.name} onClick={() => setMenuAnchor(null)} sx={{ gap: 1.5, fontSize: '0.875rem' }}>
             <DownloadIcon fontSize="small" /> Download
           </MenuItem>
         )}
         <Divider />
-        <MenuItem onClick={() => { setMenuAnchor(null); onEdit(file); }} sx={{ gap: 1.5, fontSize: '0.875rem' }}>
-  <EditIcon fontSize="small" /> Edit
-</MenuItem>
-<Divider />
-        <MenuItem
-          onClick={() => { setMenuAnchor(null); setConfirmOpen(true); }}
-          sx={{ gap: 1.5, fontSize: '0.875rem', color: 'error.main' }}
-        >
-          <DeleteIcon fontSize="small" /> Delete
-        </MenuItem>
+        <MenuItem onClick={() => { setMenuAnchor(null); onEdit(file); }} sx={{ gap: 1.5, fontSize: '0.875rem' }}><EditIcon fontSize="small" /> Edit</MenuItem>
+        <Divider />
+        <MenuItem onClick={() => { setMenuAnchor(null); setConfirmOpen(true); }} sx={{ gap: 1.5, fontSize: '0.875rem', color: 'error.main' }}><DeleteIcon fontSize="small" /> Delete</MenuItem>
       </Menu>
 
       <Dialog open={confirmOpen} onClose={() => setConfirmOpen(false)} maxWidth="xs" fullWidth>
-        <DialogTitle fontWeight={700} sx={{ fontSize: '1.1rem' }}>
-          {isLink ? 'Remove link?' : 'Delete file?'}
-        </DialogTitle>
+        <DialogTitle fontWeight={700} sx={{ fontSize: '1.1rem' }}>{isLink ? 'Remove link?' : 'Delete file?'}</DialogTitle>
         <DialogContent>
-          <Typography variant="body2" color="text.secondary">
-            <strong>{file.name}</strong> will be permanently removed. This cannot be undone.
-          </Typography>
+          <Typography variant="body2" color="text.secondary"><strong>{file.name}</strong> will be permanently removed. This cannot be undone.</Typography>
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 2.5, gap: 1 }}>
           <Button onClick={() => setConfirmOpen(false)}>Cancel</Button>
-          <Button variant="contained" color="error" onClick={() => { setConfirmOpen(false); onDelete(file._id); }}>
-            {isLink ? 'Remove' : 'Delete'}
-          </Button>
+          <Button variant="contained" color="error" onClick={() => { setConfirmOpen(false); onDelete(file._id); }}>{isLink ? 'Remove' : 'Delete'}</Button>
         </DialogActions>
       </Dialog>
     </>
@@ -530,9 +485,9 @@ export default function FilesTab({ tripId }: FilesTabProps) {
   const [fileForm,     setFileForm]     = useState({ ...BLANK_FILE_FORM });
   const [linkForm,     setLinkForm]     = useState({ ...BLANK_LINK_FORM });
   const [contactForm,  setContactForm]  = useState({ ...BLANK_CONTACT_FORM });
+  const [noteForm,     setNoteForm]     = useState({ ...BLANK_NOTE_FORM });
   const [error,        setError]        = useState<string | null>(null);
-  const [editingFile, setEditingFile] = useState<TripFile | null>(null);
-
+  const [editingFile,  setEditingFile]  = useState<TripFile | null>(null);
 
   useEffect(() => {
     fetch(`/api/trips/${tripId}/files`)
@@ -547,26 +502,31 @@ export default function FilesTab({ tripId }: FilesTabProps) {
     setFileForm({ ...BLANK_FILE_FORM });
     setLinkForm({ ...BLANK_LINK_FORM });
     setContactForm({ ...BLANK_CONTACT_FORM });
+    setNoteForm({ ...BLANK_NOTE_FORM });
+    setEditingFile(null);
     setError(null);
     setDialogOpen(true);
   };
 
   const openEdit = (file: TripFile) => {
-  setEditingFile(file);
-  setError(null);
-  if (file.resourceType === 'contact') {
-    setMode('contact');
-    setContactForm({ name: file.name, type: file.type as ContactTypeValue, phone: file.phone ?? '', email: file.email ?? '', notes: file.notes ?? '' });
-  } else if (file.resourceType === 'link') {
-    setMode('link');
-    setLinkForm({ name: file.name, type: file.type as LinkTypeValue, url: file.linkUrl ?? '', notes: file.notes ?? '' });
-  } else {
-    setMode('file');
-    setFileForm({ name: file.name, type: file.type as FileTypeValue, notes: file.notes ?? '' });
-    setPendingFile(null); // can't re-upload, just editing metadata
-  }
-  setDialogOpen(true);
-};
+    setEditingFile(file);
+    setError(null);
+    if (file.resourceType === 'note') {
+      setMode('note');
+      setNoteForm({ name: file.name ?? '', type: file.type as NoteTypeValue, body: file.body ?? '' });
+    } else if (file.resourceType === 'contact') {
+      setMode('contact');
+      setContactForm({ name: file.name, type: file.type as ContactTypeValue, phone: file.phone ?? '', email: file.email ?? '', notes: file.notes ?? '' });
+    } else if (file.resourceType === 'link') {
+      setMode('link');
+      setLinkForm({ name: file.name, type: file.type as LinkTypeValue, url: file.linkUrl ?? '', notes: file.notes ?? '' });
+    } else {
+      setMode('file');
+      setFileForm({ name: file.name, type: file.type as FileTypeValue, notes: file.notes ?? '' });
+      setPendingFile(null);
+    }
+    setDialogOpen(true);
+  };
 
   const handleFileSelected = (file: File) => {
     setPendingFile(file);
@@ -576,72 +536,77 @@ export default function FilesTab({ tripId }: FilesTabProps) {
     if (!dialogOpen) setDialogOpen(true);
   };
 
-const handleUpload = async () => {
-  setUploading(true);
-  setUploadPct(0);
-  setError(null);
+  const handleUpload = async () => {
+    setUploading(true);
+    setUploadPct(0);
+    setError(null);
 
-  const fd = new FormData();
+    const fd = new FormData();
 
-  if (mode === 'contact') {
-    if (!contactForm.name) { setError('Name is required'); setUploading(false); return; }
-    if (!contactForm.phone && !contactForm.email) { setError('At least one of phone or email is required'); setUploading(false); return; }
-    fd.append('resourceType', 'contact');
-    fd.append('name',  contactForm.name.trim());
-    fd.append('type',  contactForm.type);
-    fd.append('phone', contactForm.phone.trim());
-    fd.append('email', contactForm.email.trim());
-    fd.append('notes', contactForm.notes);
-  } else if (mode === 'link') {
-    if (!linkForm.url || !linkForm.name) { setError('Name and URL are required'); setUploading(false); return; }
-    fd.append('resourceType', 'link');
-    fd.append('name',    linkForm.name.trim());
-    fd.append('type',    linkForm.type);
-    fd.append('linkUrl', linkForm.url.trim());
-    fd.append('notes',   linkForm.notes);
-  } else {
-    if (editingFile) {
-      // Editing file metadata only — no re-upload
-      fd.append('resourceType', 'file');
-      fd.append('name',  fileForm.name.trim());
-      fd.append('type',  fileForm.type);
-      fd.append('notes', fileForm.notes);
+    if (mode === 'note') {
+      if (!noteForm.body.trim()) { setError('Note content is required'); setUploading(false); return; }
+      fd.append('resourceType', 'note');
+      fd.append('name',  noteForm.name.trim());
+      fd.append('type',  noteForm.type);
+      fd.append('body',  noteForm.body.trim());
+    } else if (mode === 'contact') {
+      if (!contactForm.name) { setError('Name is required'); setUploading(false); return; }
+      if (!contactForm.phone && !contactForm.email) { setError('At least one of phone or email is required'); setUploading(false); return; }
+      fd.append('resourceType', 'contact');
+      fd.append('name',  contactForm.name.trim());
+      fd.append('type',  contactForm.type);
+      fd.append('phone', contactForm.phone.trim());
+      fd.append('email', contactForm.email.trim());
+      fd.append('notes', contactForm.notes);
+    } else if (mode === 'link') {
+      if (!linkForm.url || !linkForm.name) { setError('Name and URL are required'); setUploading(false); return; }
+      fd.append('resourceType', 'link');
+      fd.append('name',    linkForm.name.trim());
+      fd.append('type',    linkForm.type);
+      fd.append('linkUrl', linkForm.url.trim());
+      fd.append('notes',   linkForm.notes);
     } else {
-      if (!pendingFile || !fileForm.name) { setError('File and name are required'); setUploading(false); return; }
-      fd.append('resourceType', 'file');
-      fd.append('file',  pendingFile);
-      fd.append('name',  fileForm.name.trim());
-      fd.append('type',  fileForm.type);
-      fd.append('notes', fileForm.notes);
+      if (editingFile) {
+        fd.append('resourceType', 'file');
+        fd.append('name',  fileForm.name.trim());
+        fd.append('type',  fileForm.type);
+        fd.append('notes', fileForm.notes);
+      } else {
+        if (!pendingFile || !fileForm.name) { setError('File and name are required'); setUploading(false); return; }
+        fd.append('resourceType', 'file');
+        fd.append('file',  pendingFile);
+        fd.append('name',  fileForm.name.trim());
+        fd.append('type',  fileForm.type);
+        fd.append('notes', fileForm.notes);
+      }
     }
-  }
 
-  const isEdit = !!editingFile;
-  const url    = isEdit ? `/api/trips/${tripId}/files/${editingFile!._id}` : `/api/trips/${tripId}/files`;
-  const method = isEdit ? 'PUT' : 'POST';
+    const isEdit = !!editingFile;
+    const url    = isEdit ? `/api/trips/${tripId}/files/${editingFile!._id}` : `/api/trips/${tripId}/files`;
+    const method = isEdit ? 'PUT' : 'POST';
 
-  const tick = setInterval(() => setUploadPct(p => Math.min(p + 12, 85)), 300);
-  try {
-    const res  = await fetch(url, { method, body: fd });
-    const data = await res.json();
-    clearInterval(tick);
-    if (!res.ok) { setError(data.error ?? 'Failed'); setUploading(false); return; }
-    setUploadPct(100);
-    if (isEdit) {
-      setFiles(prev => prev.map(f => f._id === editingFile!._id ? data.file : f));
-    } else {
-      setFiles(prev => [data.file, ...prev]);
+    const tick = setInterval(() => setUploadPct(p => Math.min(p + 12, 85)), 300);
+    try {
+      const res  = await fetch(url, { method, body: fd });
+      const data = await res.json();
+      clearInterval(tick);
+      if (!res.ok) { setError(data.error ?? 'Failed'); setUploading(false); return; }
+      setUploadPct(100);
+      if (isEdit) {
+        setFiles(prev => prev.map(f => f._id === editingFile!._id ? data.file : f));
+      } else {
+        setFiles(prev => [data.file, ...prev]);
+      }
+      setTimeout(() => {
+        setDialogOpen(false); setUploading(false); setUploadPct(0);
+        setPendingFile(null); setEditingFile(null);
+      }, 400);
+    } catch {
+      clearInterval(tick);
+      setError('Something went wrong — please try again');
+      setUploading(false);
     }
-    setTimeout(() => {
-      setDialogOpen(false); setUploading(false); setUploadPct(0);
-      setPendingFile(null); setEditingFile(null);
-    }, 400);
-  } catch {
-    clearInterval(tick);
-    setError('Something went wrong — please try again');
-    setUploading(false);
-  }
-};
+  };
 
   const handleDelete = async (fileId: string) => {
     await fetch(`/api/trips/${tripId}/files/${fileId}`, { method: 'DELETE' });
@@ -649,16 +614,28 @@ const handleUpload = async () => {
   };
 
   const grouped    = groupByType(files);
-  const typeOrder: string[] = ALL_TYPES.map(t => t.value);
-  const sortedKeys = [...grouped.keys()].sort((a, b) => typeOrder.indexOf(a) - typeOrder.indexOf(b));
+  const typeOrder  = ALL_TYPES.map(t => t.value);
+  const sortedKeys = [...grouped.keys()].sort((a, b) => typeOrder.indexOf(a as FileTypeValue | LinkTypeValue | ContactTypeValue | NoteTypeValue) - typeOrder.indexOf(b as FileTypeValue | LinkTypeValue | ContactTypeValue | NoteTypeValue));
 
- const canSubmit =
+  const canSubmit =
+    mode === 'note'    ? !!noteForm.body.trim() :
     mode === 'contact' ? !!contactForm.name.trim() && (!!contactForm.phone.trim() || !!contactForm.email.trim()) :
     mode === 'link'    ? !!linkForm.name.trim() && !!linkForm.url.trim() :
                          (!!editingFile || !!pendingFile) && !!fileForm.name.trim();
 
+  const dialogTitle =
+    editingFile
+      ? mode === 'note' ? 'Edit note' : mode === 'contact' ? 'Edit contact' : mode === 'link' ? 'Edit link' : 'Edit file details'
+      : mode === 'note' ? 'Add a note' : mode === 'contact' ? 'Add a contact' : mode === 'link' ? 'Save a link' : 'Upload a file';
+
+  const submitLabel =
+    uploading          ? <CircularProgress size={20} sx={{ color: 'white' }} /> :
+    mode === 'note'    ? (editingFile ? 'Save note' : 'Add note') :
+    mode === 'contact' ? 'Save contact' :
+    mode === 'link'    ? 'Save link' : 'Upload';
+
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
+    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, pb: 10 }}>
 
       {/* ── Header ── */}
       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 1.5 }}>
@@ -676,6 +653,9 @@ const handleUpload = async () => {
           </Button>
           <Button variant="outlined" startIcon={<LinkIcon />} onClick={() => openDialog('link')} sx={{ fontWeight: 700 }}>
             Save link
+          </Button>
+          <Button variant="outlined" startIcon={<NoteAddIcon />} onClick={() => openDialog('note')} sx={{ fontWeight: 700 }}>
+            Add note
           </Button>
           <Button variant="contained" startIcon={<AddIcon />} onClick={() => openDialog('file')} sx={{ fontWeight: 700 }}>
             Upload file
@@ -697,7 +677,7 @@ const handleUpload = async () => {
               No resources yet
             </Typography>
             <Typography variant="body2" color="text.disabled" sx={{ maxWidth: 380, mx: 'auto' }}>
-              Upload boarding passes and documents, save links to event websites and venues, or add key contacts — artists, venue managers, and more.
+              Upload boarding passes and documents, save links to event websites and venues, add key contacts, or jot a note.
             </Typography>
           </Box>
           <DropZone onFile={f => { setMode('file'); handleFileSelected(f); }} />
@@ -713,15 +693,8 @@ const handleUpload = async () => {
             const color    = TYPE_COLOUR[type] ?? '#6b7280';
             return (
               <Paper key={type} sx={{ backgroundColor: 'background.paper', overflow: 'hidden' }}>
-                <Box sx={{
-                  px: { xs: 2, sm: 2.5 }, py: 1.5,
-                  display: 'flex', alignItems: 'center', gap: 1.25,
-                  borderBottom: '1px solid', borderColor: 'divider',
-                  backgroundColor: alpha(color, 0.04),
-                }}>
-                  <Box sx={{ color, display: 'flex' }}>
-                    <TypeIcon type={type} size={17} />
-                  </Box>
+                <Box sx={{ px: { xs: 2, sm: 2.5 }, py: 1.5, display: 'flex', alignItems: 'center', gap: 1.25, borderBottom: '1px solid', borderColor: 'divider', backgroundColor: alpha(color, 0.04) }}>
+                  <Box sx={{ color, display: 'flex' }}><TypeIcon type={type} size={17} /></Box>
                   <Typography variant="subtitle2" fontWeight={800} sx={{ fontSize: '0.82rem', letterSpacing: 0.3, textTransform: 'uppercase', color }}>
                     {typeMeta?.label ?? type}
                   </Typography>
@@ -730,8 +703,10 @@ const handleUpload = async () => {
                 {group.map((file, i) => (
                   <Box key={file._id}>
                     {i > 0 && <Divider />}
-                    {file.resourceType === 'contact'
-                      ? <ContactCard file={file} onDelete={handleDelete} onEdit={openEdit} />
+                    {file.resourceType === 'note'
+                      ? <NoteCard     file={file} onDelete={handleDelete} onEdit={openEdit} />
+                      : file.resourceType === 'contact'
+                      ? <ContactCard  file={file} onDelete={handleDelete} onEdit={openEdit} />
                       : <ResourceCard file={file} onDelete={handleDelete} onEdit={openEdit} />
                     }
                   </Box>
@@ -742,57 +717,76 @@ const handleUpload = async () => {
         </>
       )}
 
+      {/* ── Quick-capture FAB ── */}
+      <Fab
+        size="medium"
+        onClick={() => openDialog('note')}
+        sx={{ position: 'fixed', bottom: 24, right: 24, backgroundColor: '#55702C', color: 'white', '&:hover': { backgroundColor: '#455f24' }, zIndex: 1200 }}
+      >
+        <NoteAddIcon />
+      </Fab>
+
       {/* ── Dialog ── */}
       <Dialog
         open={dialogOpen}
-       onClose={() => { if (!uploading) { setDialogOpen(false); setEditingFile(null); } }}
+        onClose={() => { if (!uploading) { setDialogOpen(false); setEditingFile(null); } }}
         maxWidth="sm" fullWidth fullScreen={mobile}
       >
         <DialogTitle fontWeight={700} sx={{ fontSize: { xs: '1.15rem', sm: '1.2rem' } }}>
-          {editingFile
-  ? mode === 'contact' ? 'Edit contact' : mode === 'link' ? 'Edit link' : 'Edit file details'
-  : mode === 'contact' ? 'Add a contact' : mode === 'link' ? 'Save a link' : 'Upload a file'}
+          {dialogTitle}
         </DialogTitle>
 
         <DialogContent>
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, pt: 1 }}>
 
+            {/* ── Note mode ── */}
+            {mode === 'note' && (
+              <>
+                <TextField
+                  label="Title (optional)" value={noteForm.name} autoFocus fullWidth disabled={uploading}
+                  onChange={e => setNoteForm(p => ({ ...p, name: e.target.value }))}
+                  placeholder="e.g. Amazing support act, must check out"
+                />
+                <FormControl fullWidth disabled={uploading}>
+                  <InputLabel>Note type</InputLabel>
+                  <Select value={noteForm.type} label="Note type" onChange={e => setNoteForm(p => ({ ...p, type: e.target.value as NoteTypeValue }))}>
+                    {NOTE_TYPES.map(({ value, label }) => <MenuItem key={value} value={value}>{label}</MenuItem>)}
+                  </Select>
+                </FormControl>
+                <TextField
+                  label="Note" value={noteForm.body} fullWidth multiline rows={5} disabled={uploading}
+                  onChange={e => setNoteForm(p => ({ ...p, body: e.target.value }))}
+                  placeholder="What's on your mind?"
+                />
+              </>
+            )}
+
             {/* ── File mode ── */}
             {mode === 'file' && !pendingFile && !editingFile && <DropZone onFile={handleFileSelected} />}
-{mode === 'file' && editingFile && (
-  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, p: 1.5, borderRadius: 1.5,
-    backgroundColor: alpha('#55702C', 0.06), border: '1px solid', borderColor: alpha('#55702C', 0.2) }}>
-    <MimeIcon mimeType={editingFile.mimeType} size={22} />
-    <Box sx={{ flexGrow: 1, minWidth: 0 }}>
-      <Typography variant="body2" fontWeight={700}>{editingFile.name}</Typography>
-      <Typography variant="caption" color="text.secondary">Editing metadata only — file cannot be replaced</Typography>
-    </Box>
-  </Box>
-)}
-
+            {mode === 'file' && editingFile && (
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, p: 1.5, borderRadius: 1.5, backgroundColor: alpha('#55702C', 0.06), border: '1px solid', borderColor: alpha('#55702C', 0.2) }}>
+                <MimeIcon mimeType={editingFile.mimeType} size={22} />
+                <Box sx={{ flexGrow: 1, minWidth: 0 }}>
+                  <Typography variant="body2" fontWeight={700}>{editingFile.name}</Typography>
+                  <Typography variant="caption" color="text.secondary">Editing metadata only — file cannot be replaced</Typography>
+                </Box>
+              </Box>
+            )}
             {mode === 'file' && pendingFile && (
-              <Box sx={{
-                display: 'flex', alignItems: 'center', gap: 1.5, p: 1.5, borderRadius: 1.5,
-                backgroundColor: alpha('#55702C', 0.06), border: '1px solid', borderColor: alpha('#55702C', 0.2),
-              }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, p: 1.5, borderRadius: 1.5, backgroundColor: alpha('#55702C', 0.06), border: '1px solid', borderColor: alpha('#55702C', 0.2) }}>
                 <MimeIcon mimeType={pendingFile.type} size={22} />
                 <Box sx={{ flexGrow: 1, minWidth: 0 }}>
-                  <Typography variant="body2" fontWeight={700} sx={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {pendingFile.name}
-                  </Typography>
+                  <Typography variant="body2" fontWeight={700} sx={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{pendingFile.name}</Typography>
                   <Typography variant="caption" color="text.secondary">{formatBytes(pendingFile.size)}</Typography>
                 </Box>
                 {!uploading && <IconButton size="small" onClick={() => setPendingFile(null)}><DeleteIcon fontSize="small" /></IconButton>}
               </Box>
             )}
-
-            {mode === 'file' && pendingFile && (
+            {mode === 'file' && (pendingFile || editingFile) && (
               <>
-                <TextField
-                  label="Display name" value={fileForm.name} autoFocus fullWidth disabled={uploading}
+                <TextField label="Display name" value={fileForm.name} autoFocus={!!pendingFile} fullWidth disabled={uploading}
                   onChange={e => setFileForm(p => ({ ...p, name: e.target.value }))}
-                  placeholder="e.g. Ryanair boarding pass DUB → BUH"
-                />
+                  placeholder="e.g. Ryanair boarding pass DUB → BUH" />
                 <FormControl fullWidth disabled={uploading}>
                   <InputLabel>File type</InputLabel>
                   <Select value={fileForm.type} label="File type" onChange={e => setFileForm(p => ({ ...p, type: e.target.value as FileTypeValue }))}>
@@ -807,17 +801,10 @@ const handleUpload = async () => {
             {/* ── Link mode ── */}
             {mode === 'link' && (
               <>
-                <TextField
-                  label="URL" value={linkForm.url} autoFocus fullWidth disabled={uploading}
-                  onChange={e => setLinkForm(p => ({ ...p, url: e.target.value }))}
-                  placeholder="https://..."
-                  type="url"
-                />
-                <TextField
-                  label="Display name" value={linkForm.name} fullWidth disabled={uploading}
-                  onChange={e => setLinkForm(p => ({ ...p, name: e.target.value }))}
-                  placeholder="e.g. Interland Festival Programme"
-                />
+                <TextField label="URL" value={linkForm.url} autoFocus fullWidth disabled={uploading}
+                  onChange={e => setLinkForm(p => ({ ...p, url: e.target.value }))} placeholder="https://..." type="url" />
+                <TextField label="Display name" value={linkForm.name} fullWidth disabled={uploading}
+                  onChange={e => setLinkForm(p => ({ ...p, name: e.target.value }))} placeholder="e.g. Interland Festival Programme" />
                 <FormControl fullWidth disabled={uploading}>
                   <InputLabel>Link type</InputLabel>
                   <Select value={linkForm.type} label="Link type" onChange={e => setLinkForm(p => ({ ...p, type: e.target.value as LinkTypeValue }))}>
@@ -832,38 +819,22 @@ const handleUpload = async () => {
             {/* ── Contact mode ── */}
             {mode === 'contact' && (
               <>
-                <TextField
-                  label="Name" value={contactForm.name} autoFocus fullWidth disabled={uploading}
-                  onChange={e => setContactForm(p => ({ ...p, name: e.target.value }))}
-                  placeholder="e.g. Sarah Kavanagh"
-                />
+                <TextField label="Name" value={contactForm.name} autoFocus fullWidth disabled={uploading}
+                  onChange={e => setContactForm(p => ({ ...p, name: e.target.value }))} placeholder="e.g. Sarah Kavanagh" />
                 <FormControl fullWidth disabled={uploading}>
                   <InputLabel>Role</InputLabel>
                   <Select value={contactForm.type} label="Role" onChange={e => setContactForm(p => ({ ...p, type: e.target.value as ContactTypeValue }))}>
                     {CONTACT_TYPES.map(({ value, label }) => <MenuItem key={value} value={value}>{label}</MenuItem>)}
                   </Select>
                 </FormControl>
-                <TextField
-                  label="Phone number" value={contactForm.phone} fullWidth disabled={uploading}
-                  onChange={e => setContactForm(p => ({ ...p, phone: e.target.value }))}
-                  placeholder="+353 87 123 4567"
-                  type="tel"
-                  InputProps={{
-                    startAdornment: <PhoneIcon sx={{ fontSize: 18, color: 'text.disabled', mr: 1 }} />,
-                  }}
-                />
-                <TextField
-                  label="Email address" value={contactForm.email} fullWidth disabled={uploading}
-                  onChange={e => setContactForm(p => ({ ...p, email: e.target.value }))}
-                  placeholder="sarah@venue.ie"
-                  type="email"
-                  InputProps={{
-                    startAdornment: <EmailIcon sx={{ fontSize: 18, color: 'text.disabled', mr: 1 }} />,
-                  }}
-                />
+                <TextField label="Phone number" value={contactForm.phone} fullWidth disabled={uploading}
+                  onChange={e => setContactForm(p => ({ ...p, phone: e.target.value }))} placeholder="+353 87 123 4567" type="tel"
+                  InputProps={{ startAdornment: <PhoneIcon sx={{ fontSize: 18, color: 'text.disabled', mr: 1 }} /> }} />
+                <TextField label="Email address" value={contactForm.email} fullWidth disabled={uploading}
+                  onChange={e => setContactForm(p => ({ ...p, email: e.target.value }))} placeholder="sarah@venue.ie" type="email"
+                  InputProps={{ startAdornment: <EmailIcon sx={{ fontSize: 18, color: 'text.disabled', mr: 1 }} /> }} />
                 <TextField label="Notes (optional)" value={contactForm.notes} fullWidth multiline rows={2} disabled={uploading}
-                  onChange={e => setContactForm(p => ({ ...p, notes: e.target.value }))}
-                  placeholder="e.g. Best reached after 10am" />
+                  onChange={e => setContactForm(p => ({ ...p, notes: e.target.value }))} placeholder="e.g. Best reached after 10am" />
               </>
             )}
 
@@ -871,15 +842,11 @@ const handleUpload = async () => {
               <Box>
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.75 }}>
                   <Typography variant="caption" color="text.secondary" fontWeight={600}>
-                    {mode === 'contact' ? 'Saving…' : mode === 'link' ? 'Saving…' : 'Uploading…'}
+                    {mode === 'file' ? 'Uploading…' : 'Saving…'}
                   </Typography>
                   <Typography variant="caption" fontWeight={700}>{uploadPct}%</Typography>
                 </Box>
-                <LinearProgress variant="determinate" value={uploadPct} sx={{
-                  height: 6, borderRadius: 3,
-                  backgroundColor: alpha('#55702C', 0.15),
-                  '& .MuiLinearProgress-bar': { borderRadius: 3, backgroundColor: '#55702C' },
-                }} />
+                <LinearProgress variant="determinate" value={uploadPct} sx={{ height: 6, borderRadius: 3, backgroundColor: alpha('#55702C', 0.15), '& .MuiLinearProgress-bar': { borderRadius: 3, backgroundColor: '#55702C' } }} />
               </Box>
             )}
 
@@ -888,18 +855,11 @@ const handleUpload = async () => {
         </DialogContent>
 
         <DialogActions sx={{ px: 3, pb: 3, gap: 1, flexDirection: { xs: 'column-reverse', sm: 'row' } }}>
-          <Button onClick={() => { setDialogOpen(false); setEditingFile(null); }}
- disabled={uploading} fullWidth={mobile} size="large">
+          <Button onClick={() => { setDialogOpen(false); setEditingFile(null); }} disabled={uploading} fullWidth={mobile} size="large">
             Cancel
           </Button>
-          <Button
-            variant="contained" onClick={handleUpload}
-            disabled={!canSubmit || uploading}
-            fullWidth={mobile} size="large" sx={{ fontWeight: 700 }}
-          >
-            {uploading
-              ? <CircularProgress size={20} sx={{ color: 'white' }} />
-              : mode === 'contact' ? 'Save contact' : mode === 'link' ? 'Save link' : 'Upload'}
+          <Button variant="contained" onClick={handleUpload} disabled={!canSubmit || uploading} fullWidth={mobile} size="large" sx={{ fontWeight: 700 }}>
+            {submitLabel}
           </Button>
         </DialogActions>
       </Dialog>

@@ -21,6 +21,8 @@ import LinkIcon              from '@mui/icons-material/Link';
 import PersonIcon            from '@mui/icons-material/Person';
 import CheckCircleIcon       from '@mui/icons-material/CheckCircle';
 import WarningAmberIcon      from '@mui/icons-material/WarningAmber';
+import WhatsAppIcon          from '@mui/icons-material/WhatsApp';
+import SmsIcon               from '@mui/icons-material/Sms';
 import RadioButtonUncheckedIcon from '@mui/icons-material/RadioButtonUnchecked';
 import BlockIcon             from '@mui/icons-material/Block';
 import UndoIcon              from '@mui/icons-material/Undo';
@@ -88,6 +90,10 @@ function statusDot(level: 'ok' | 'warn' | 'empty') {
   if (level === 'warn') return <WarningAmberIcon sx={{ fontSize: 15, color: 'warning.main', flexShrink: 0 }} />;
   return <RadioButtonUncheckedIcon sx={{ fontSize: 15, color: 'text.disabled', flexShrink: 0 }} />;
 }
+
+/** Strips all non-digit characters for use in WhatsApp wa.me links */
+const toDialDigits = (phone: string) => phone.replace(/\D/g, '');
+
 
 // ─── Strip wrapper ────────────────────────────────────────────────────────────
 
@@ -327,10 +333,11 @@ export default function TripOverview({ trip, onNavigate }: Props) {
 
   // ── Resources ─────────────────────────────────────────────────────────────
   const contacts   = resources.filter(r => r.resourceType === 'contact');
+  const notes      = resources.filter(r => r.resourceType === 'note');
   const keyLinks   = resources.filter(r => r.resourceType === 'link' &&
     ['event_website', 'booking_reference', 'venue', 'artist_lineup'].includes(r.type));
   const docCount   = resources.filter(r => r.resourceType === 'file').length;
-  const hasResources = contacts.length > 0 || keyLinks.length > 0 || docCount > 0;
+  const hasResources = contacts.length > 0 || keyLinks.length > 0 || docCount > 0 || notes.length > 0;
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
@@ -655,63 +662,67 @@ export default function TripOverview({ trip, onNavigate }: Props) {
             >
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.25 }}>
 
-                {/* Contacts — thumb-friendly tap targets */}
-                {contacts.length > 0 && (
-                  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.75 }}>
-                    {contacts.map((c: any) => (
-                      <Box key={c._id} sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-                        <PersonIcon sx={{ fontSize: 15, color: 'text.disabled', flexShrink: 0 }} />
-                        <Typography variant="body2" fontWeight={700} sx={{ fontSize: '0.85rem', mr: 0.5 }}>
-                          {c.name}
-                        </Typography>
-                        <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.75rem', mr: 'auto' }}>
-                          {c.type?.replace(/_/g, ' ')}
-                        </Typography>
-                        <Box sx={{ display: 'flex', gap: 0.75, flexShrink: 0 }}>
-                          {c.phone && (
-                            <Button
-                              component="a"
-                              href={`tel:${c.phone}`}
-                              size="small"
-                              startIcon={<PhoneIcon sx={{ fontSize: '0.9rem !important' }} />}
-                              variant="outlined"
-                              onClick={e => e.stopPropagation()}
-                              sx={{
-                                fontSize: '0.75rem', fontWeight: 700, py: 0.4, px: 1,
-                                minHeight: 32,
-                                borderColor: alpha('#55702C', 0.4), color: '#55702C',
-                                '&:hover': { borderColor: '#55702C', backgroundColor: alpha('#55702C', 0.06) },
-                              }}
-                            >
-                              Call
-                            </Button>
-                          )}
-                          {c.email && (
-                            <Button
-                              component="a"
-                              href={`mailto:${c.email}`}
-                              size="small"
-                              startIcon={<EmailIcon sx={{ fontSize: '0.9rem !important' }} />}
-                              variant="outlined"
-                              onClick={e => e.stopPropagation()}
-                              sx={{
-                                fontSize: '0.75rem', fontWeight: 700, py: 0.4, px: 1,
-                                minHeight: 32,
-                                borderColor: alpha('#0891b2', 0.4), color: '#0891b2',
-                                '&:hover': { borderColor: '#0891b2', backgroundColor: alpha('#0891b2', 0.06) },
-                              }}
-                            >
-                              Email
-                            </Button>
-                          )}
-                        </Box>
-                      </Box>
-                    ))}
-                  </Box>
-                )}
+   {contacts.length > 0 && (
+  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.75 }}>
+    {contacts.map((c: any) => (
+      <Box key={c._id} sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+        <PersonIcon sx={{ fontSize: 15, color: 'text.disabled', flexShrink: 0 }} />
+        <Typography variant="body2" fontWeight={700} sx={{ fontSize: '0.85rem', mr: 0.5 }}>
+          {c.name}
+        </Typography>
+        <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.75rem', mr: 'auto' }}>
+          {c.type?.replace(/_/g, ' ')}
+        </Typography>
+        <Box sx={{ display: 'flex', gap: 0.75, flexShrink: 0, flexWrap: 'wrap' }}>
+          {c.phone && (
+            <Button
+              component="a" href={`tel:${c.phone}`} size="small"
+              startIcon={<PhoneIcon sx={{ fontSize: '0.9rem !important' }} />}
+              variant="outlined" onClick={e => e.stopPropagation()}
+              sx={{ fontSize: '0.75rem', fontWeight: 700, py: 0.4, px: 1, minHeight: 32,
+                borderColor: alpha('#55702C', 0.4), color: '#55702C',
+                '&:hover': { borderColor: '#55702C', backgroundColor: alpha('#55702C', 0.06) } }}
+            >Call</Button>
+          )}
+          {c.phone && (
+            <Button
+              component="a" href={`sms:${c.phone}`} size="small"
+              startIcon={<SmsIcon sx={{ fontSize: '0.9rem !important' }} />}
+              variant="outlined" onClick={e => e.stopPropagation()}
+              sx={{ fontSize: '0.75rem', fontWeight: 700, py: 0.4, px: 1, minHeight: 32,
+                borderColor: alpha('#64748b', 0.4), color: '#64748b',
+                '&:hover': { borderColor: '#64748b', backgroundColor: alpha('#64748b', 0.06) } }}
+            >SMS</Button>
+          )}
+          {c.phone && (
+            <Button
+              component="a" href={`https://wa.me/${toDialDigits(c.phone)}`}
+              target="_blank" rel="noopener noreferrer" size="small"
+              startIcon={<WhatsAppIcon sx={{ fontSize: '0.9rem !important' }} />}
+              variant="outlined" onClick={e => e.stopPropagation()}
+              sx={{ fontSize: '0.75rem', fontWeight: 700, py: 0.4, px: 1, minHeight: 32,
+                borderColor: alpha('#25D366', 0.5), color: '#25D366',
+                '&:hover': { borderColor: '#25D366', backgroundColor: alpha('#25D366', 0.06) } }}
+            >WhatsApp</Button>
+          )}
+          {c.email && (
+            <Button
+              component="a" href={`mailto:${c.email}`} size="small"
+              startIcon={<EmailIcon sx={{ fontSize: '0.9rem !important' }} />}
+              variant="outlined" onClick={e => e.stopPropagation()}
+              sx={{ fontSize: '0.75rem', fontWeight: 700, py: 0.4, px: 1, minHeight: 32,
+                borderColor: alpha('#0891b2', 0.4), color: '#0891b2',
+                '&:hover': { borderColor: '#0891b2', backgroundColor: alpha('#0891b2', 0.06) } }}
+            >Email</Button>
+          )}
+        </Box>
+      </Box>
+    ))}
+  </Box>
+)}
 
                 {/* Divider if contacts + links both present */}
-                {contacts.length > 0 && (keyLinks.length > 0 || docCount > 0) && (
+                {contacts.length > 0 && (keyLinks.length > 0 || docCount > 0 || notes.length > 0) && (
                   <Divider />
                 )}
 
@@ -742,6 +753,12 @@ export default function TripOverview({ trip, onNavigate }: Props) {
                     📄 {docCount} document{docCount !== 1 ? 's' : ''} — tap to view
                   </Typography>
                 )}
+                {/* Notes */}
+                {notes.length > 0 && (
+                  <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.78rem' }}>
+                    🗒️ {notes.length} note{notes.length !== 1 ? 's' : ''} — tap to view
+                  </Typography>
+                )}
               </Box>
             </Strip>
           )}
@@ -757,7 +774,7 @@ export default function TripOverview({ trip, onNavigate }: Props) {
               onDismiss={() => toggleDismiss('resources')}
             >
               <Typography variant="body2" color="text.disabled" sx={{ fontSize: '0.82rem' }}>
-                No contacts, links or documents yet
+                No contacts, notes, links or documents yet
               </Typography>
             </Strip>
           )}

@@ -26,6 +26,7 @@ import IntelligenceTab   from '@/components/intelligence/IntelligenceTab';
 import WeatherTab        from '@/components/weather/WeatherTab';
 import TripOverview      from '@/components/overview/TripOverview';
 import FilesTab          from '@/components/files/FilesTab';
+import OnTripScreen from '@/components/trips/OnTripScreen';
 import dynamic           from 'next/dynamic';
 import { saveTripCache, getTripCache, queueAction } from '@/lib/offline/db';
 
@@ -282,6 +283,9 @@ export default function TripPage() {
 
       {/* ── Tab content ── */}
       <Container maxWidth="lg" sx={{ py: { xs: 3, sm: 4 }, px: { xs: 2, sm: 3 } }}>
+
+        {trip.status === 'active' && <OnTripScreen tripId={trip._id} trip={trip} />}
+
         {activeTab === 0 && <TripOverview trip={trip} onNavigate={setActiveTab} />}
         {activeTab === 1 && <LogisticsTab tripId={trip._id} trip={trip} />}
         {activeTab === 2 && <ItineraryTab tripId={trip._id} startDate={trip.startDate} endDate={trip.endDate} />}

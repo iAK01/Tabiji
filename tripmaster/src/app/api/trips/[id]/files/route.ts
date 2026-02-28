@@ -30,6 +30,7 @@ export async function GET(
 // For files:    multipart/form-data with file binary + metadata fields
 // For links:    multipart/form-data with resourceType=link, linkUrl, name, type, notes
 // For contacts: multipart/form-data with resourceType=contact, name, type, phone, email, notes
+// For notes:    multipart/form-data with resourceType=note, name (optional), type, body
 export async function POST(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -52,15 +53,30 @@ export async function POST(
   const notes        = (formData.get('notes') as string) || '';
   const linkedToRaw  = formData.get('linkedTo') as string | null;
 
-  if (!name) return NextResponse.json({ error: 'name is required' }, { status: 400 });
-
   let linkedTo: object | undefined;
   if (linkedToRaw) {
     try { linkedTo = JSON.parse(linkedToRaw); } catch { /* ignore */ }
   }
 
+  // ── Note path ─────────────────────────────────────────────────────────────────
+  if (resourceType === 'note') {
+    const body = formData.get('body') as string | null;
+    if (!body?.trim()) return NextResponse.json({ error: 'body is required for notes' }, { status: 400 });
+
+    const doc = await TripFile.create({
+      tripId: id, userId: user._id,
+      resourceType: 'note',
+      name: name || '',
+      type,
+      body: body.trim(),
+      linkedTo: linkedTo || undefined,
+    });
+    return NextResponse.json({ file: doc }, { status: 201 });
+  }
+
   // ── Contact path ─────────────────────────────────────────────────────────────
   if (resourceType === 'contact') {
+    if (!name) return NextResponse.json({ error: 'name is required' }, { status: 400 });
     const phone = (formData.get('phone') as string) || '';
     const email = (formData.get('email') as string) || '';
 
@@ -81,6 +97,7 @@ export async function POST(
 
   // ── Link path ─────────────────────────────────────────────────────────────────
   if (resourceType === 'link') {
+    if (!name) return NextResponse.json({ error: 'name is required' }, { status: 400 });
     const linkUrl = formData.get('linkUrl') as string | null;
     if (!linkUrl) return NextResponse.json({ error: 'linkUrl is required for links' }, { status: 400 });
 
@@ -95,6 +112,8 @@ export async function POST(
   }
 
   // ── File path ─────────────────────────────────────────────────────────────────
+  if (!name) return NextResponse.json({ error: 'name is required' }, { status: 400 });
+
   const file = formData.get('file') as File | null;
   if (!file) return NextResponse.json({ error: 'file is required' }, { status: 400 });
 

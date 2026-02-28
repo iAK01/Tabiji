@@ -12,41 +12,68 @@ export async function DELETE(
 ) {
   const { id, fileId } = await params;
   const session = await getServerSession();
-  if (!session?.user?.email) {
-    return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
-  }
+  if (!session?.user?.email) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
 
   await connectDB();
   const user = await User.findOne({ email: session.user.email });
   if (!user) return NextResponse.json({ error: 'User not found' }, { status: 404 });
 
-  // Verify ownership — file must belong to this user and this trip
   const doc = await TripFile.findOne({ _id: fileId, tripId: id, userId: user._id });
   if (!doc) return NextResponse.json({ error: 'File not found' }, { status: 404 });
 
-  // Remove from GCS first, then MongoDB
-  // deleteFile in storage.ts silently ignores missing files so this is safe
-  await deleteFile(doc.gcsPath);
-  await TripFile.findByIdAndDelete(fileId);
+  // Only attempt GCS deletion for actual uploaded files — links, contacts and notes have no GCS object
+  if (doc.resourceType === 'file' && doc.gcsPath) {
+    await deleteFile(doc.gcsPath);
+  }
 
+  await TripFile.findByIdAndDelete(fileId);
   return NextResponse.json({ success: true });
 }
 
-export async function PUT(req: Request, { params }: { params: Promise<{ id: string; fileId: string }> }) {
+// ─── PUT /api/trips/[id]/files/[fileId] ───────────────────────────────────────
+export async function PUT(
+  req: Request,
+  { params }: { params: Promise<{ id: string; fileId: string }> }
+) {
   const { id, fileId } = await params;
   const session = await getServerSession();
   if (!session?.user?.email) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
+
   await connectDB();
-  const fd      = await req.formData();
+  const user = await User.findOne({ email: session.user.email });
+  if (!user) return NextResponse.json({ error: 'User not found' }, { status: 404 });
+
+  const doc = await TripFile.findOne({ _id: fileId, tripId: id, userId: user._id });
+  if (!doc) return NextResponse.json({ error: 'File not found' }, { status: 404 });
+
+  const fd = await req.formData();
+
   const updates: Record<string, any> = {
-    name:  fd.get('name'),
-    type:  fd.get('type'),
-    notes: fd.get('notes') ?? '',
+    type: fd.get('type') ?? doc.type,
   };
-  if (fd.get('linkUrl')) updates.linkUrl = fd.get('linkUrl');
-  if (fd.get('phone'))   updates.phone   = fd.get('phone');
-  if (fd.get('email'))   updates.email   = fd.get('email');
-  const TripFile = (await import('@/lib/mongodb/models/TripFile')).default;
+
+  // name — optional for notes, required for everything else (keep existing if not provided)
+  const name = fd.get('name') as string | null;
+  if (name !== null) updates.name = name;
+
+  if (doc.resourceType === 'note') {
+    const body = fd.get('body') as string | null;
+    if (body !== null) updates.body = body.trim();
+  } else if (doc.resourceType === 'link') {
+    updates.notes = fd.get('notes') ?? '';
+    const linkUrl = fd.get('linkUrl') as string | null;
+    if (linkUrl) updates.linkUrl = linkUrl;
+  } else if (doc.resourceType === 'contact') {
+    updates.notes = fd.get('notes') ?? '';
+    const phone = fd.get('phone') as string | null;
+    const email = fd.get('email') as string | null;
+    if (phone !== null) updates.phone = phone;
+    if (email !== null) updates.email = email;
+  } else {
+    // file — metadata only, no re-upload
+    updates.notes = fd.get('notes') ?? '';
+  }
+
   const file = await TripFile.findByIdAndUpdate(fileId, updates, { new: true });
   return NextResponse.json({ file });
 }
