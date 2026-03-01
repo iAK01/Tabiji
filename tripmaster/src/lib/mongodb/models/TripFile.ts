@@ -68,7 +68,7 @@ const TripFileSchema = new Schema({
   notes: { type: String },      // annotation on files/links/contacts
 
   linkedTo: {
-    collection: { type: String, enum: ['transport', 'accommodation', 'itinerary_stop', 'venue'] },
+    collection: { type: String, enum: ['transport', 'accommodation', 'itinerary_stop', 'itinerary', 'venue'] },
     entryId:    { type: String },
     label:      { type: String },
   },

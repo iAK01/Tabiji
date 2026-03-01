@@ -28,12 +28,15 @@ import SportsSoccerIcon     from '@mui/icons-material/SportsSoccer';
 import LaunchIcon           from '@mui/icons-material/Launch';
 import AttractionIcon       from '@mui/icons-material/AccountBalance';
 import EventIcon            from '@mui/icons-material/Event';
+import EditIcon             from '@mui/icons-material/Edit';
+import ChevronLeftIcon      from '@mui/icons-material/ChevronLeft';
+import ChevronRightIcon     from '@mui/icons-material/ChevronRight';
+import HomeIcon             from '@mui/icons-material/Home';
 import AirportSearch        from '@/components/ui/AirportSearch';
 import AirlineSearch        from '@/components/ui/AirlineSearch';
 import AddressSearch        from '@/components/ui/AddressSearch';
 import NavigateButton       from '@/components/ui/NavigateButton';
 import BookingLinks         from '@/components/logistics/BookingLinks';
-import EditIcon from '@mui/icons-material/Edit';
 
 import { saveTripCache, getTripCache, queueAction } from '@/lib/offline/db';
 import type { ResolvedAddress } from '@/components/ui/AddressSearch';
@@ -65,7 +68,7 @@ type TransportType = typeof TRANSPORT_TYPES[number]['value'];
 
 // Transport types where departure location is a navigable real-world place
 const NAVIGABLE_TRANSPORT_TYPES = new Set([
-  'train', 'bus', 'ferry', 'car_hire', 'taxi', 'private_transfer',
+  'train', 'bus', 'ferry', 'car', 'bicycle', 'car_hire', 'taxi', 'private_transfer',
 ]);
 
 // ─── Venue types ──────────────────────────────────────────────────────────────
@@ -105,7 +108,7 @@ const STATUS_COLOUR: Record<string, 'default' | 'warning' | 'success' | 'error' 
   confirmed: 'success', cancelled: 'error',
 };
 
-// ── Blank states — coordinates added for navigable fields ────────────────────
+// ── Blank states ──────────────────────────────────────────────────────────────
 const BLANK_TRANSPORT = {
   type:                 'flight' as TransportType,
   status:               'not_booked',
@@ -159,7 +162,7 @@ const BLANK_VENUE = {
   website:            '',
 };
 
-// ─── Label helpers ─────────────────────────────────────────────────────────────
+// ─── Label helpers ────────────────────────────────────────────────────────────
 function getTransportLabel(t: any): string {
   switch (t.type) {
     case 'flight': {
@@ -214,6 +217,293 @@ function getTransportSubtitle(t: any): string {
   }
 }
 
+// ─── Date helpers ─────────────────────────────────────────────────────────────
+const toISO = (d: Date) => d.toISOString().split('T')[0];
+
+// Always strip to YYYY-MM-DD before any date arithmetic — MongoDB sends full ISO strings
+const toDateOnly = (s: string) => (s ? s.split('T')[0] : '');
+
+function addDays(dateStr: string, days: number): string {
+  const d = new Date(toDateOnly(dateStr) + 'T12:00:00');
+  d.setDate(d.getDate() + days);
+  return toISO(d);
+}
+
+const MONTH_NAMES = [
+  'January','February','March','April','May','June',
+  'July','August','September','October','November','December',
+];
+const DAY_HEADERS = ['Mo','Tu','We','Th','Fr','Sa','Su'];
+
+// ─── TripDateTimePicker ───────────────────────────────────────────────────────
+// A calendar-based date+time picker that is aware of trip date boundaries.
+// Replaces the browser-native datetime-local input throughout logistics forms.
+function TripDateTimePicker({
+  label,
+  value,
+  onChange,
+  minDate,
+  maxDate,
+  initialMonth,
+}: {
+  label:        string;
+  value:        string;
+  onChange:     (iso: string) => void;
+  minDate?:     string;
+  maxDate?:     string;
+  initialMonth?: string;
+}) {
+  const parseValue = (v: string) => {
+    if (!v) return { date: '', time: '09:00' };
+    const [d, t] = v.split('T');
+    return { date: d ?? '', time: t ? t.slice(0, 5) : '09:00' };
+  };
+
+  const { date: initDate, time: initTime } = parseValue(value);
+  const [open,    setOpen]    = useState(false);
+  const [selDate, setSelDate] = useState(initDate);
+  const [selTime, setSelTime] = useState(initTime);
+
+  // Sync when value changes externally (e.g. on edit open)
+  useEffect(() => {
+    const { date, time } = parseValue(value);
+    setSelDate(date);
+    setSelTime(time);
+  }, [value]);
+
+  // Seed month from initialMonth or minDate, not today — strip time portion defensively
+  const seedStr  = toDateOnly(initialMonth || minDate || toISO(new Date()));
+  const seedDate = new Date(seedStr + 'T12:00:00');
+  const [year,  setYear]  = useState(seedDate.getFullYear());
+  const [month, setMonth] = useState(seedDate.getMonth());
+
+  // Re-seed month when initialMonth changes (e.g. departure drives arrival month)
+  useEffect(() => {
+    const src = initialMonth || minDate;
+    if (src) {
+      const d = new Date(toDateOnly(src) + 'T12:00:00');
+      setYear(d.getFullYear());
+      setMonth(d.getMonth());
+    }
+  }, [initialMonth, minDate]);
+
+  const prevMonth = () => {
+    if (month === 0) { setMonth(11); setYear(y => y - 1); }
+    else setMonth(m => m - 1);
+  };
+  const nextMonth = () => {
+    if (month === 11) { setMonth(0); setYear(y => y + 1); }
+    else setMonth(m => m + 1);
+  };
+
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const firstDow    = new Date(year, month, 1).getDay(); // 0 = Sun
+  const offset      = (firstDow + 6) % 7;               // convert to Mon-start
+
+  const today = toISO(new Date());
+
+  const isDisabled = (iso: string) => {
+    if (minDate && iso < minDate) return true;
+    if (maxDate && iso > maxDate) return true;
+    return false;
+  };
+
+  // Build grid cells: null = empty padding
+  const cells: Array<string | null> = [];
+  for (let i = 0; i < offset; i++) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d++) {
+    cells.push(
+      `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`
+    );
+  }
+  while (cells.length % 7 !== 0) cells.push(null);
+
+  const handleConfirm = () => {
+    if (!selDate) return;
+    onChange(`${selDate}T${selTime}`);
+    setOpen(false);
+  };
+
+  const handleClear = () => {
+    onChange('');
+    setSelDate('');
+    setSelTime('09:00');
+    setOpen(false);
+  };
+
+  const formatDisplay = (v: string) => {
+    if (!v) return null;
+    const [d, t] = v.split('T');
+    if (!d) return null;
+    const dateObj = new Date(d + 'T12:00:00');
+    const dateStr = dateObj.toLocaleDateString('en-IE', {
+      day: 'numeric', month: 'short', year: 'numeric',
+    });
+    return t ? `${dateStr} · ${t.slice(0, 5)}` : dateStr;
+  };
+
+  const displayed = formatDisplay(value);
+
+  return (
+    <Box>
+      {/* ── Trigger ── */}
+      <Box
+        onClick={() => setOpen(o => !o)}
+        sx={{
+          border: '1px solid',
+          borderColor: open ? 'primary.main' : 'rgba(0,0,0,0.23)',
+          borderRadius: 1,
+          px: 1.75,
+          py: 1.625,
+          cursor: 'pointer',
+          position: 'relative',
+          transition: 'border-color 0.15s',
+          '&:hover': { borderColor: 'text.primary' },
+        }}
+      >
+        <Typography
+          variant="caption"
+          color={open ? 'primary.main' : 'text.secondary'}
+          sx={{
+            position: 'absolute',
+            top: -10,
+            left: 10,
+            bgcolor: 'background.paper',
+            px: 0.5,
+            fontSize: '0.75rem',
+            lineHeight: 1,
+          }}
+        >
+          {label}
+        </Typography>
+        <Typography
+          variant="body1"
+          color={displayed ? 'text.primary' : 'text.disabled'}
+          sx={{ fontSize: '1rem', userSelect: 'none' }}
+        >
+          {displayed ?? 'Select date & time'}
+        </Typography>
+      </Box>
+
+      {/* ── Calendar panel ── */}
+      {open && (
+        <Paper
+          elevation={4}
+          sx={{
+            mt: 0.5,
+            p: 2,
+            border: '1px solid',
+            borderColor: 'primary.main',
+            borderRadius: 2,
+          }}
+        >
+          {/* Month navigation */}
+          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1.5 }}>
+            <IconButton onClick={prevMonth} size="small" sx={{ border: '1px solid', borderColor: 'divider' }}>
+              <ChevronLeftIcon fontSize="small" />
+            </IconButton>
+            <Typography fontWeight={700} fontSize="0.95rem">
+              {MONTH_NAMES[month]} {year}
+            </Typography>
+            <IconButton onClick={nextMonth} size="small" sx={{ border: '1px solid', borderColor: 'divider' }}>
+              <ChevronRightIcon fontSize="small" />
+            </IconButton>
+          </Box>
+
+          {/* Day-of-week headers */}
+          <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', mb: 0.5 }}>
+            {DAY_HEADERS.map(d => (
+              <Typography key={d} align="center" variant="caption" color="text.secondary" fontWeight={600}>
+                {d}
+              </Typography>
+            ))}
+          </Box>
+
+          {/* Day cells */}
+          <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 0.25 }}>
+            {cells.map((iso, idx) => {
+              if (!iso) return <Box key={idx} />;
+              const disabled  = isDisabled(iso);
+              const selected  = iso === selDate;
+              const isToday   = iso === today;
+              const dayNum    = new Date(iso + 'T12:00:00').getDate();
+              return (
+                <Box
+                  key={iso}
+                  onClick={() => { if (!disabled) setSelDate(iso); }}
+                  sx={{
+                    height:          44,
+                    display:         'flex',
+                    alignItems:      'center',
+                    justifyContent:  'center',
+                    borderRadius:    '50%',
+                    cursor:          disabled ? 'default' : 'pointer',
+                    bgcolor:         selected  ? 'primary.main' : 'transparent',
+                    border:          isToday && !selected ? '2px solid' : 'none',
+                    borderColor:     'primary.main',
+                    color:           selected  ? '#fff'
+                                   : disabled  ? 'text.disabled'
+                                   :             'text.primary',
+                    fontWeight:      selected ? 700 : 400,
+                    fontSize:        '0.875rem',
+                    transition:      'background-color 0.1s',
+                    '&:hover':       disabled || selected ? {} : { bgcolor: 'action.hover' },
+                  }}
+                >
+                  {dayNum}
+                </Box>
+              );
+            })}
+          </Box>
+
+          {/* Time input — appears once a date is selected */}
+          {selDate && (
+            <Box sx={{ mt: 2, pt: 2, borderTop: '1px solid', borderColor: 'divider' }}>
+              <Typography
+                variant="caption"
+                color="text.secondary"
+                fontWeight={600}
+                sx={{
+                  display:       'block',
+                  mb:            1,
+                  textTransform: 'uppercase',
+                  fontSize:      '0.65rem',
+                  letterSpacing: '0.05em',
+                }}
+              >
+                Time
+              </Typography>
+              <TextField
+                type="time"
+                value={selTime}
+                onChange={e => setSelTime(e.target.value)}
+                size="small"
+                InputLabelProps={{ shrink: true }}
+                sx={{ width: 150 }}
+              />
+            </Box>
+          )}
+
+          {/* Actions */}
+          <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1, mt: 2 }}>
+            <Button size="small" onClick={handleClear} color="inherit">
+              Clear
+            </Button>
+            <Button
+              size="small"
+              variant="contained"
+              onClick={handleConfirm}
+              disabled={!selDate}
+            >
+              Confirm
+            </Button>
+          </Box>
+        </Paper>
+      )}
+    </Box>
+  );
+}
+
 // ─── Main component ───────────────────────────────────────────────────────────
 export default function LogisticsTab({ tripId, trip }: LogisticsTabProps) {
   const theme  = useTheme();
@@ -222,6 +512,12 @@ export default function LogisticsTab({ tripId, trip }: LogisticsTabProps) {
   const [section,       setSection]       = useState(0);
   const [logistics,     setLogistics]     = useState<any>(null);
   const [saving,        setSaving]        = useState(false);
+
+  // Home location — fetched once from the user profile, used to pre-fill car departure
+  const [homeLocation,  setHomeLocation]  = useState<{
+    address:     string;
+    coordinates: { lat: number; lng: number } | null;
+  } | null>(null);
 
   const [transportOpen, setTransportOpen] = useState(false);
   const [transport,     setTransport]     = useState({ ...BLANK_TRANSPORT, details: { ...BLANK_TRANSPORT.details } });
@@ -232,13 +528,14 @@ export default function LogisticsTab({ tripId, trip }: LogisticsTabProps) {
   const [venueOpen,     setVenueOpen]     = useState(false);
   const [venue,         setVenue]         = useState({ ...BLANK_VENUE });
 
-  const [deleteTarget,    setDeleteTarget]    = useState<{ kind: 'transport' | 'accom' | 'venue'; index: number } | null>(null);
-const [menuPosition,    setMenuPosition]    = useState<{ top: number; left: number } | null>(null);
-const [menuTarget,      setMenuTarget]      = useState<{ kind: 'transport' | 'accom' | 'venue'; index: number } | null>(null);
-const [editTransportIdx, setEditTransportIdx] = useState<number | null>(null);
-const [editAccomIdx,     setEditAccomIdx]     = useState<number | null>(null);
-const [editVenueIdx,     setEditVenueIdx]     = useState<number | null>(null);
-  // ── Load ───────────────────────────────────────────────────────────────────
+  const [deleteTarget,     setDeleteTarget]     = useState<{ kind: 'transport' | 'accom' | 'venue'; index: number } | null>(null);
+  const [menuPosition,     setMenuPosition]     = useState<{ top: number; left: number } | null>(null);
+  const [menuTarget,       setMenuTarget]       = useState<{ kind: 'transport' | 'accom' | 'venue'; index: number } | null>(null);
+  const [editTransportIdx, setEditTransportIdx] = useState<number | null>(null);
+  const [editAccomIdx,     setEditAccomIdx]     = useState<number | null>(null);
+  const [editVenueIdx,     setEditVenueIdx]     = useState<number | null>(null);
+
+  // ── Load logistics ─────────────────────────────────────────────────────────
   useEffect(() => {
     async function loadLogistics() {
       try {
@@ -255,102 +552,118 @@ const [editVenueIdx,     setEditVenueIdx]     = useState<number | null>(null);
     loadLogistics();
   }, [tripId]);
 
-  // ── Saves ──────────────────────────────────────────────────────────────────
-const saveTransport = async () => {
-  setSaving(true);
-  const isEdit = editTransportIdx !== null;
-  const updated = {
-    ...(logistics ?? {}),
-    transportation: isEdit
-      ? logistics.transportation.map((t: any, i: number) => i === editTransportIdx ? transport : t)
-      : [...(logistics?.transportation ?? []), transport],
-  };
-  setLogistics(updated);
-  await saveTripCache(tripId, { ...(await getTripCache(tripId)), logistics: updated });
+  // ── Load home location for car departure pre-fill ──────────────────────────
+  useEffect(() => {
+    fetch('/api/user/profile')
+      .then(r => r.json())
+      .then(data => {
+        const h = data.user?.homeLocation;
+        if (!h) return;
+        const parts = [h.addressLine1, h.addressLine2, h.city, h.postcode, h.country]
+          .filter(Boolean)
+          .join(', ');
+        const coords = h.coordinates?.lat ? h.coordinates : null;
+        setHomeLocation({ address: parts, coordinates: coords });
+      })
+      .catch(() => {});
+  }, []);
 
-  if (!navigator.onLine) {
-    await queueAction({ type: isEdit ? 'EDIT_TRANSPORT' : 'ADD_TRANSPORT', tripId, payload: transport, index: editTransportIdx });
+  // ── Saves ──────────────────────────────────────────────────────────────────
+  const saveTransport = async () => {
+    setSaving(true);
+    const isEdit  = editTransportIdx !== null;
+    const updated = {
+      ...(logistics ?? {}),
+      transportation: isEdit
+        ? logistics.transportation.map((t: any, i: number) => i === editTransportIdx ? transport : t)
+        : [...(logistics?.transportation ?? []), transport],
+    };
+    setLogistics(updated);
+    await saveTripCache(tripId, { ...(await getTripCache(tripId)), logistics: updated });
+
+    if (!navigator.onLine) {
+      await queueAction({ type: isEdit ? 'EDIT_TRANSPORT' : 'ADD_TRANSPORT', tripId, payload: transport, index: editTransportIdx });
+      setTransportOpen(false);
+      setTransport({ ...BLANK_TRANSPORT, details: { ...BLANK_TRANSPORT.details } });
+      setEditTransportIdx(null);
+      setSaving(false);
+      return;
+    }
+
+    const url    = isEdit ? `/api/trips/${tripId}/logistics/transport/${editTransportIdx}` : `/api/trips/${tripId}/logistics/transport`;
+    const method = isEdit ? 'PUT' : 'POST';
+    const res    = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(transport) });
+    const data   = await res.json();
+    setLogistics(data.logistics);
     setTransportOpen(false);
     setTransport({ ...BLANK_TRANSPORT, details: { ...BLANK_TRANSPORT.details } });
     setEditTransportIdx(null);
     setSaving(false);
-    return;
-  }
-
-  const url    = isEdit ? `/api/trips/${tripId}/logistics/transport/${editTransportIdx}` : `/api/trips/${tripId}/logistics/transport`;
-  const method = isEdit ? 'PUT' : 'POST';
-  const res    = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(transport) });
-  const data   = await res.json();
-  setLogistics(data.logistics);
-  setTransportOpen(false);
-  setTransport({ ...BLANK_TRANSPORT, details: { ...BLANK_TRANSPORT.details } });
-  setEditTransportIdx(null);
-  setSaving(false);
-};
-
-const saveAccom = async () => {
-  setSaving(true);
-  const isEdit = editAccomIdx !== null;
-  const updated = {
-    ...(logistics ?? {}),
-    accommodation: isEdit
-      ? logistics.accommodation.map((a: any, i: number) => i === editAccomIdx ? accom : a)
-      : [...(logistics?.accommodation ?? []), accom],
   };
-  setLogistics(updated);
-  await saveTripCache(tripId, { ...(await getTripCache(tripId)), logistics: updated });
 
-  if (!navigator.onLine) {
-    await queueAction({ type: isEdit ? 'EDIT_ACCOM' : 'ADD_ACCOM', tripId, payload: accom, index: editAccomIdx });
+  const saveAccom = async () => {
+    setSaving(true);
+    const isEdit  = editAccomIdx !== null;
+    const updated = {
+      ...(logistics ?? {}),
+      accommodation: isEdit
+        ? logistics.accommodation.map((a: any, i: number) => i === editAccomIdx ? accom : a)
+        : [...(logistics?.accommodation ?? []), accom],
+    };
+    setLogistics(updated);
+    await saveTripCache(tripId, { ...(await getTripCache(tripId)), logistics: updated });
+
+    if (!navigator.onLine) {
+      await queueAction({ type: isEdit ? 'EDIT_ACCOM' : 'ADD_ACCOM', tripId, payload: accom, index: editAccomIdx });
+      setAccomOpen(false);
+      setAccom({ ...BLANK_ACCOM });
+      setEditAccomIdx(null);
+      setSaving(false);
+      return;
+    }
+
+    const url    = isEdit ? `/api/trips/${tripId}/logistics/accommodation/${editAccomIdx}` : `/api/trips/${tripId}/logistics/accommodation`;
+    const method = isEdit ? 'PUT' : 'POST';
+    const res    = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(accom) });
+    const data   = await res.json();
+    setLogistics(data.logistics);
     setAccomOpen(false);
     setAccom({ ...BLANK_ACCOM });
     setEditAccomIdx(null);
     setSaving(false);
-    return;
-  }
-
-  const url    = isEdit ? `/api/trips/${tripId}/logistics/accommodation/${editAccomIdx}` : `/api/trips/${tripId}/logistics/accommodation`;
-  const method = isEdit ? 'PUT' : 'POST';
-  const res    = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(accom) });
-  const data   = await res.json();
-  setLogistics(data.logistics);
-  setAccomOpen(false);
-  setAccom({ ...BLANK_ACCOM });
-  setEditAccomIdx(null);
-  setSaving(false);
-};
-
-const saveVenue = async () => {
-  setSaving(true);
-  const isEdit = editVenueIdx !== null;
-  const updated = {
-    ...(logistics ?? {}),
-    venues: isEdit
-      ? (logistics.venues ?? []).map((v: any, i: number) => i === editVenueIdx ? venue : v)
-      : [...(logistics?.venues ?? []), venue],
   };
-  setLogistics(updated);
-  await saveTripCache(tripId, { ...(await getTripCache(tripId)), logistics: updated });
 
-  if (!navigator.onLine) {
-    await queueAction({ type: isEdit ? 'EDIT_VENUE' : 'ADD_VENUE', tripId, payload: venue, index: editVenueIdx });
+  const saveVenue = async () => {
+    setSaving(true);
+    const isEdit  = editVenueIdx !== null;
+    const updated = {
+      ...(logistics ?? {}),
+      venues: isEdit
+        ? (logistics.venues ?? []).map((v: any, i: number) => i === editVenueIdx ? venue : v)
+        : [...(logistics?.venues ?? []), venue],
+    };
+    setLogistics(updated);
+    await saveTripCache(tripId, { ...(await getTripCache(tripId)), logistics: updated });
+
+    if (!navigator.onLine) {
+      await queueAction({ type: isEdit ? 'EDIT_VENUE' : 'ADD_VENUE', tripId, payload: venue, index: editVenueIdx });
+      setVenueOpen(false);
+      setVenue({ ...BLANK_VENUE });
+      setEditVenueIdx(null);
+      setSaving(false);
+      return;
+    }
+
+    const url    = isEdit ? `/api/trips/${tripId}/logistics/venues/${editVenueIdx}` : `/api/trips/${tripId}/logistics/venues`;
+    const method = isEdit ? 'PUT' : 'POST';
+    const res    = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(venue) });
+    const data   = await res.json();
+    setLogistics(data.logistics);
     setVenueOpen(false);
     setVenue({ ...BLANK_VENUE });
     setEditVenueIdx(null);
     setSaving(false);
-    return;
-  }
-
-  const url    = isEdit ? `/api/trips/${tripId}/logistics/venues/${editVenueIdx}` : `/api/trips/${tripId}/logistics/venues`;
-  const method = isEdit ? 'PUT' : 'POST';
-  const res    = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(venue) });
-  const data   = await res.json();
-  setLogistics(data.logistics);
-  setVenueOpen(false);
-  setVenue({ ...BLANK_VENUE });
-  setEditVenueIdx(null);
-  setSaving(false);
-};
+  };
 
   // ── Deletes ────────────────────────────────────────────────────────────────
   const confirmDelete = async () => {
@@ -391,38 +704,34 @@ const saveVenue = async () => {
     setDeleteTarget(null);
   };
 
-const openMenu = (e: React.MouseEvent<HTMLElement>, kind: 'transport' | 'accom' | 'venue', index: number) => {
-  e.stopPropagation();
-  const rect = e.currentTarget.getBoundingClientRect();
-  setMenuPosition({ top: rect.bottom + window.scrollY, left: rect.left + window.scrollX });
-  setMenuTarget({ kind, index });
-};
-const closeMenu = () => { setMenuPosition(null); setMenuTarget(null); };
-
-const openEdit = () => {
-  if (!menuTarget) return;
-  const { kind, index } = menuTarget;
-if (kind === 'transport') {
-  const t = logistics.transportation[index];
-  const merged = {
-    ...BLANK_TRANSPORT,
-    ...t,
-    details: { ...BLANK_TRANSPORT.details, ...(t.details ?? {}) },
+  const openMenu = (e: React.MouseEvent<HTMLElement>, kind: 'transport' | 'accom' | 'venue', index: number) => {
+    e.stopPropagation();
+    const rect = e.currentTarget.getBoundingClientRect();
+    setMenuPosition({ top: rect.bottom + window.scrollY, left: rect.left + window.scrollX });
+    setMenuTarget({ kind, index });
   };
-  setTransport(merged);
-  setEditTransportIdx(index);
-  setTransportOpen(true);
-  } else if (kind === 'accom') {
-    setAccom({ ...BLANK_ACCOM, ...logistics.accommodation[index] });
-    setEditAccomIdx(index);
-    setAccomOpen(true);
-  } else if (kind === 'venue') {
-    setVenue({ ...BLANK_VENUE, ...logistics.venues[index] });
-    setEditVenueIdx(index);
-    setVenueOpen(true);
-  }
-  closeMenu();
-};
+  const closeMenu = () => { setMenuPosition(null); setMenuTarget(null); };
+
+  const openEdit = () => {
+    if (!menuTarget) return;
+    const { kind, index } = menuTarget;
+    if (kind === 'transport') {
+      const t = logistics.transportation[index];
+      setTransport({ ...BLANK_TRANSPORT, ...t, details: { ...BLANK_TRANSPORT.details, ...(t.details ?? {}) } });
+      setEditTransportIdx(index);
+      setTransportOpen(true);
+    } else if (kind === 'accom') {
+      setAccom({ ...BLANK_ACCOM, ...logistics.accommodation[index] });
+      setEditAccomIdx(index);
+      setAccomOpen(true);
+    } else if (kind === 'venue') {
+      setVenue({ ...BLANK_VENUE, ...logistics.venues[index] });
+      setEditVenueIdx(index);
+      setVenueOpen(true);
+    }
+    closeMenu();
+  };
+
   // ── Helpers ────────────────────────────────────────────────────────────────
   const fmtDateTime = (dt: string) =>
     dt ? new Date(dt).toLocaleString('en-IE', { dateStyle: 'medium', timeStyle: 'short' }) : '';
@@ -432,8 +741,23 @@ if (kind === 'transport') {
   const setDetail = (key: string, val: any) =>
     setTransport(p => ({ ...p, details: { ...p.details, [key]: val } }));
 
-  const changeType = (newType: TransportType) =>
-    setTransport(p => ({ ...BLANK_TRANSPORT, details: { ...BLANK_TRANSPORT.details }, type: newType, status: p.status }));
+  // When changing transport type, reset fields — and for car, pre-fill home departure
+  const changeType = (newType: TransportType) => {
+    const base = {
+      ...BLANK_TRANSPORT,
+      details: { ...BLANK_TRANSPORT.details },
+      type:   newType,
+      status: transport.status,
+    };
+    if (newType === 'car' && homeLocation) {
+      base.departureLocation    = homeLocation.address;
+      base.departureCoordinates = homeLocation.coordinates;
+    }
+    setTransport(base);
+  };
+
+  // Departure date for driving arrival min constraint
+  const departureDateOnly = transport.departureTime ? transport.departureTime.split('T')[0] : '';
 
   // ── Transport form fields ──────────────────────────────────────────────────
   const TransportFields = () => {
@@ -552,13 +876,34 @@ if (kind === 'transport') {
           </FormControl>
         </>)}
 
+        {/* ── Car — both fields geocoded; From pre-filled from home ── */}
         {type === 'car' && (<>
-          <TextField label="From" fullWidth placeholder="Home / Dublin"
-            value={transport.departureLocation}
-            onChange={e => setTransport(p => ({ ...p, departureLocation: e.target.value }))} />
-          <TextField label="To" fullWidth placeholder="Dublin Airport"
-            value={transport.arrivalLocation}
-            onChange={e => setTransport(p => ({ ...p, arrivalLocation: e.target.value }))} />
+          {homeLocation && transport.departureLocation === homeLocation.address && (
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+              <HomeIcon sx={{ fontSize: '0.9rem', color: 'primary.main' }} />
+              <Typography variant="caption" color="primary.main" fontWeight={600}>
+                Pre-filled from your home location
+              </Typography>
+            </Box>
+          )}
+          <AddressSearch
+            label="From" value={transport.departureLocation}
+            placeholder="Your departure address"
+            onChange={(r: ResolvedAddress | null) => setTransport(p => ({
+              ...p,
+              departureLocation:    r?.address     ?? '',
+              departureCoordinates: r?.coordinates ?? null,
+            }))}
+          />
+          <AddressSearch
+            label="To" value={transport.arrivalLocation}
+            placeholder="Your destination address"
+            onChange={(r: ResolvedAddress | null) => setTransport(p => ({
+              ...p,
+              arrivalLocation:    r?.address     ?? '',
+              arrivalCoordinates: r?.coordinates ?? null,
+            }))}
+          />
           <TextField label="Vehicle (optional)" fullWidth placeholder="Tesla Model 3"
             value={transport.details.vehicle} onChange={e => setDetail('vehicle', e.target.value)} />
         </>)}
@@ -645,22 +990,54 @@ if (kind === 'transport') {
             value={transport.details.vehicle} onChange={e => setDetail('vehicle', e.target.value)} />
         </>)}
 
+        {/* ── Bicycle — both fields geocoded ── */}
         {type === 'bicycle' && (<>
-          <TextField label="From" fullWidth value={transport.departureLocation}
-            onChange={e => setTransport(p => ({ ...p, departureLocation: e.target.value }))} />
-          <TextField label="To" fullWidth value={transport.arrivalLocation}
-            onChange={e => setTransport(p => ({ ...p, arrivalLocation: e.target.value }))} />
+          <AddressSearch
+            label="From" value={transport.departureLocation}
+            placeholder="Starting point"
+            onChange={(r: ResolvedAddress | null) => setTransport(p => ({
+              ...p,
+              departureLocation:    r?.address     ?? '',
+              departureCoordinates: r?.coordinates ?? null,
+            }))}
+          />
+          <AddressSearch
+            label="To" value={transport.arrivalLocation}
+            placeholder="Destination"
+            onChange={(r: ResolvedAddress | null) => setTransport(p => ({
+              ...p,
+              arrivalLocation:    r?.address     ?? '',
+              arrivalCoordinates: r?.coordinates ?? null,
+            }))}
+          />
         </>)}
 
-        {/* Common fields */}
-        <TextField label="Departure date & time" type="datetime-local"
+        {/* ── Common fields ── */}
+
+        {/* Departure — constrained to trip date range, seeded to trip start */}
+        <TripDateTimePicker
+          label="Departure date & time"
           value={transport.departureTime}
-          onChange={e => setTransport(p => ({ ...p, departureTime: e.target.value }))}
-          fullWidth InputLabelProps={{ shrink: true }} />
-        <TextField label="Arrival date & time" type="datetime-local"
+          onChange={val => {
+            // If new departure is after current arrival, clear arrival
+            const newArrival = transport.arrivalTime && val > transport.arrivalTime ? '' : transport.arrivalTime;
+            setTransport(p => ({ ...p, departureTime: val, arrivalTime: newArrival }));
+          }}
+          minDate={toDateOnly(trip.startDate)}
+          maxDate={addDays(trip.endDate, 1)}
+          initialMonth={toDateOnly(trip.startDate)}
+        />
+
+        {/* Arrival — min is the chosen departure date; can extend a day past trip end */}
+        <TripDateTimePicker
+          label="Arrival date & time"
           value={transport.arrivalTime}
-          onChange={e => setTransport(p => ({ ...p, arrivalTime: e.target.value }))}
-          fullWidth InputLabelProps={{ shrink: true }} />
+          onChange={val => setTransport(p => ({ ...p, arrivalTime: val }))}
+          minDate={departureDateOnly || toDateOnly(trip.startDate)}
+          maxDate={addDays(trip.endDate, 2)}
+          initialMonth={departureDateOnly || toDateOnly(trip.startDate)}
+        />
+
         {!['car', 'bicycle', 'taxi'].includes(type) && (
           <TextField label="Confirmation ref" fullWidth value={transport.confirmationNumber}
             onChange={e => setTransport(p => ({ ...p, confirmationNumber: e.target.value }))} />
@@ -930,19 +1307,19 @@ if (kind === 'transport') {
       )}
 
       {/* ── Context menu ── */}
-     <Menu
-  anchorReference="anchorPosition"
-  anchorPosition={menuPosition ?? undefined}
-  open={Boolean(menuPosition)}
-  onClose={closeMenu}
->
-<MenuItem onClick={openEdit} sx={{ gap: 1 }}>
-  <EditIcon fontSize="small" /> Edit
-</MenuItem>
-  <MenuItem onClick={() => { setDeleteTarget(menuTarget); closeMenu(); }} sx={{ color: 'error.main', gap: 1 }}>
-    <DeleteIcon fontSize="medium" /> Delete
-  </MenuItem>
-</Menu>
+      <Menu
+        anchorReference="anchorPosition"
+        anchorPosition={menuPosition ?? undefined}
+        open={Boolean(menuPosition)}
+        onClose={closeMenu}
+      >
+        <MenuItem onClick={openEdit} sx={{ gap: 1 }}>
+          <EditIcon fontSize="small" /> Edit
+        </MenuItem>
+        <MenuItem onClick={() => { setDeleteTarget(menuTarget); closeMenu(); }} sx={{ color: 'error.main', gap: 1 }}>
+          <DeleteIcon fontSize="medium" /> Delete
+        </MenuItem>
+      </Menu>
 
       {/* ── Delete confirmation ── */}
       <Dialog open={Boolean(deleteTarget)} onClose={() => setDeleteTarget(null)}>
@@ -956,7 +1333,7 @@ if (kind === 'transport') {
         </DialogActions>
       </Dialog>
 
-      {/* ── Add transport dialog ── */}
+      {/* ── Add / Edit transport dialog ── */}
       <Dialog open={transportOpen} onClose={() => setTransportOpen(false)}
         maxWidth="sm" fullWidth fullScreen={mobile}>
         <DialogTitle fontWeight={700}>{editTransportIdx !== null ? 'Edit Transport' : 'Add Transport'}</DialogTitle>
@@ -981,12 +1358,12 @@ if (kind === 'transport') {
           </Box>
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 3, gap: 1, flexDirection: { xs: 'column-reverse', sm: 'row' } }}>
-          <Button onClick={() => setTransportOpen(false)} fullWidth={mobile} size="large">Cancel</Button>
+          <Button onClick={() => { setTransportOpen(false); setEditTransportIdx(null); setTransport({ ...BLANK_TRANSPORT, details: { ...BLANK_TRANSPORT.details } }); }} fullWidth={mobile} size="large">Cancel</Button>
           <Button variant="contained" onClick={saveTransport} disabled={saving} fullWidth={mobile} size="large">Save</Button>
         </DialogActions>
       </Dialog>
 
-      {/* ── Add accommodation dialog ── */}
+      {/* ── Add / Edit accommodation dialog ── */}
       <Dialog open={accomOpen} onClose={() => setAccomOpen(false)}
         maxWidth="sm" fullWidth fullScreen={mobile}>
         <DialogTitle fontWeight={700}>{editAccomIdx !== null ? 'Edit Accommodation' : 'Add Accommodation'}</DialogTitle>
@@ -1036,17 +1413,17 @@ if (kind === 'transport') {
           </Box>
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 3, gap: 1, flexDirection: { xs: 'column-reverse', sm: 'row' } }}>
-          <Button onClick={() => setAccomOpen(false)} fullWidth={mobile} size="large">Cancel</Button>
+          <Button onClick={() => { setAccomOpen(false); setEditAccomIdx(null); setAccom({ ...BLANK_ACCOM }); }} fullWidth={mobile} size="large">Cancel</Button>
           <Button variant="contained" onClick={saveAccom} disabled={saving} fullWidth={mobile} size="large">
             Save accommodation
           </Button>
         </DialogActions>
       </Dialog>
 
-      {/* ── Add venue dialog ── */}
+      {/* ── Add / Edit venue dialog ── */}
       <Dialog open={venueOpen} onClose={() => setVenueOpen(false)}
         maxWidth="sm" fullWidth fullScreen={mobile}>
-       <DialogTitle fontWeight={700}>{editVenueIdx !== null ? 'Edit Venue' : 'Add Venue'}</DialogTitle>
+        <DialogTitle fontWeight={700}>{editVenueIdx !== null ? 'Edit Venue' : 'Add Venue'}</DialogTitle>
         <DialogContent>
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, pt: 1 }}>
             <Box>
@@ -1105,7 +1482,7 @@ if (kind === 'transport') {
           </Box>
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 3, gap: 1, flexDirection: { xs: 'column-reverse', sm: 'row' } }}>
-          <Button onClick={() => setVenueOpen(false)} fullWidth={mobile} size="large">Cancel</Button>
+          <Button onClick={() => { setVenueOpen(false); setEditVenueIdx(null); setVenue({ ...BLANK_VENUE }); }} fullWidth={mobile} size="large">Cancel</Button>
           <Button variant="contained" onClick={saveVenue} disabled={saving} fullWidth={mobile} size="large">
             Save venue
           </Button>
