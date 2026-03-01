@@ -113,18 +113,21 @@ function ActiveTripBanner({ trip, onOpen }: { trip: Trip; onOpen: () => void }) 
         <Box sx={{ flexGrow: 1 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
             <Chip
-              label="✈ On trip"
+              label={new Date(trip.startDate) <= new Date() ? '✈ On trip' : '✈ Departing soon'}
+
               size="small"
               sx={{ height: 22, fontSize: '0.72rem', fontWeight: 800,
                 backgroundColor: '#55702C', color: 'white' }}
             />
-            <Chip
-              label={`Day ${dayNum} of ${totalDays}`}
-              size="small"
-              sx={{ height: 22, fontSize: '0.72rem', fontWeight: 700,
-                backgroundColor: alpha('#fff', 0.2), color: 'white',
-                border: `1px solid ${alpha('#fff', 0.3)}` }}
-            />
+          {new Date(trip.startDate) <= new Date() && (
+  <Chip
+    label={`Day ${dayNum} of ${totalDays}`}
+    size="small"
+    sx={{ height: 22, fontSize: '0.72rem', fontWeight: 700,
+      backgroundColor: alpha('#fff', 0.2), color: 'white',
+      border: `1px solid ${alpha('#fff', 0.3)}` }}
+  />
+)}
           </Box>
           <Typography variant="h6" fontWeight={900}
             sx={{ color: 'white', fontSize: { xs: '1.15rem', sm: '1.35rem' }, lineHeight: 1.2 }}>
@@ -260,7 +263,11 @@ export default function Dashboard() {
         <Box sx={{ pt: { xs: 3, sm: 4 }, pb: { xs: 2, sm: 3 } }}>
           <Typography variant="h4" fontWeight={800} color="text.primary"
             sx={{ fontSize: { xs: '1.75rem', sm: '2.125rem' } }}>
-            {activeTrip ? `You're in ${activeTrip.destination.city} 🌍` : 'My Trips'}
+           {activeTrip
+  ? new Date(activeTrip.startDate) <= new Date()
+    ? `You're in ${activeTrip.destination.city}`
+    : `Leaving for ${activeTrip.destination.city} tomorrow`
+  : 'My Trips'}
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
             {loading ? '…' : `${counts.upcoming} upcoming · ${trips.length} total`}
