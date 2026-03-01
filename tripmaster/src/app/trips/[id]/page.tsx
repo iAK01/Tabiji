@@ -89,7 +89,7 @@ const TAB_CONFIG = [
   { label: 'Logistics', Icon: FlightIcon },
   { label: 'Itinerary', Icon: MapIcon },
   { label: 'Packing',   Icon: BackpackIcon },
-  { label: 'Context',   Icon: LightbulbIcon },
+  { label: 'Discover',   Icon: LightbulbIcon },
   { label: 'Weather',   Icon: WbSunnyIcon },
   { label: 'Map',       Icon: MapIcon },
   { label: 'Resources', Icon: FolderOpenIcon },

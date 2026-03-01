@@ -102,7 +102,8 @@ function RangeCalendar({ startDate, endDate, onRangeChange, minDate }: RangeCale
   const handleDayClick = (iso: string) => {
     if (iso < minDate) return;
     if (!startDate || (startDate && endDate)) { onRangeChange(iso, ''); }
-    else { if (iso <= startDate) onRangeChange(iso, ''); else onRangeChange(startDate, iso); }
+    else { if (iso < startDate) onRangeChange(iso, '');
+else onRangeChange(startDate, iso); }
   };
 
   const rangeEnd = endDate || (hovered && startDate && hovered > startDate ? hovered : null);
@@ -291,10 +292,10 @@ export default function NewTripPage() {
   const canProceed = [
     !!(form.name && form.tripType),
     !!(form.originCity && form.originCountryCode && form.destinationCity && form.destinationCountryCode),
-    !!(form.startDate && form.endDate && nights > 0),
+   !!(form.startDate && form.endDate && nights >= 0),
   ];
 
-  const tomorrow = toISO(new Date(Date.now() + 86400000));
+  const today = toISO(new Date());
 
   return (
     <Box sx={{ minHeight: '100vh', backgroundColor: 'background.default' }}>
@@ -432,7 +433,7 @@ export default function NewTripPage() {
               <RangeCalendar
                 startDate={form.startDate}
                 endDate={form.endDate}
-                minDate={tomorrow}
+                minDate={today}
                 onRangeChange={(start, end) => { update('startDate', start); update('endDate', end); }}
               />
               {nights > 0 && (
@@ -442,7 +443,7 @@ export default function NewTripPage() {
                 }}>
                   <Box sx={{ textAlign: 'center' }}>
                     <Typography variant="h3" fontWeight={800} sx={{ color: MOSS, lineHeight: 1 }}>{nights}</Typography>
-                    <Typography variant="body2" fontWeight={600} sx={{ color: MOSS }}>{nights === 1 ? 'night' : 'nights'}</Typography>
+                    <Typography variant="body2" fontWeight={600} sx={{ color: MOSS }}>{nights === 0 ? 'day trip' : nights === 1 ? 'night' : 'nights'}</Typography>
                   </Box>
                   <Box sx={{ borderLeft: `2px solid ${MOSS}44`, pl: 2 }}>
                     <Typography variant="body2" fontWeight={700}>

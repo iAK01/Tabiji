@@ -106,6 +106,12 @@ export async function syncLogisticsToItinerary(tripId: string, logistics?: any) 
     const itinerary = await TripItinerary.findOne({ tripId });
     if (!itinerary) return;
 
+    // Normalise all existing day dates to YYYY-MM-DD to prevent duplicate day
+    // creation when MongoDB has stored them as full ISO strings (e.g. "2026-03-02T00:00:00.000Z")
+    for (const day of itinerary.days) {
+      if (day.date) day.date = toDateString(day.date);
+    }
+
     // Strip all existing logistics-sourced stops
     for (const day of itinerary.days) {
       day.stops = (day.stops ?? []).filter((s: any) => s.source !== 'logistics');
@@ -135,16 +141,15 @@ export async function syncLogisticsToItinerary(tripId: string, logistics?: any) 
         newStops.push({
           _id:            new mongoose.Types.ObjectId(),
           date:           toDateString(depTime),
-          name,                          // ← was `label`
+          name,
           type,
-          color,  
+          color,
           time,
           scheduledStart: toScheduledStart(depTime, time),
           scheduledEnd:   arrTime ? new Date(arrTime).toISOString() : undefined,
           duration,
           locked:         true,
           source:         'logistics',
-          // Departure address/coords if available
           address:     t.departureAddress ?? t.departureLocation ?? undefined,
           coordinates: t.departureCoordinates ?? undefined,
           metadata: { transportType: t.type, phase: 'departure' },
@@ -184,7 +189,7 @@ export async function syncLogisticsToItinerary(tripId: string, logistics?: any) 
         newStops.push({
           _id:            new mongoose.Types.ObjectId(),
           date:           toDateString(a.checkIn),
-          name:           `Check in: ${a.name ?? 'Accommodation'}`,  // ← was `label`
+          name:           `Check in: ${a.name ?? 'Accommodation'}`,
           type:           'hotel',
           color:          '#5c35a0',
           time,
@@ -202,7 +207,7 @@ export async function syncLogisticsToItinerary(tripId: string, logistics?: any) 
         newStops.push({
           _id:            new mongoose.Types.ObjectId(),
           date:           toDateString(a.checkOut),
-          name:           `Check out: ${a.name ?? 'Accommodation'}`, // ← was `label`
+          name:           `Check out: ${a.name ?? 'Accommodation'}`,
           type:           'hotel',
           color:          '#5c35a0',
           time,
@@ -241,7 +246,7 @@ export async function syncLogisticsToItinerary(tripId: string, logistics?: any) 
       newStops.push({
         _id:            new mongoose.Types.ObjectId(),
         date:           toDateString(v.date),
-        name:           `${emoji} ${v.name}`,            // ← was `label`
+        name:           `${emoji} ${v.name}`,
         type:           'activity',
         color:          '#55702C',
         time,
@@ -249,7 +254,6 @@ export async function syncLogisticsToItinerary(tripId: string, logistics?: any) 
         duration,
         locked:         true,
         source:         'logistics',
-        // Address and coordinates feed NavigateButton
         address:        v.address ?? undefined,
         coordinates:    v.coordinates ?? undefined,
         notes: [
