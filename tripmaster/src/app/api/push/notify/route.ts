@@ -536,8 +536,8 @@ export async function POST(req: Request) {
   // Fetch all confirmed+active trips that have at least one enabled todo
   // whose dueAt falls within the next WINDOW_MS from now.
   // The index on { dueAt, notification.enabled } makes this efficient.
-  const windowStart = new Date(nowMs);
-  const windowEnd   = new Date(nowMs + WINDOW_MS);
+const windowStart = new Date(nowMs - WINDOW_MS);
+const windowEnd   = new Date(nowMs);
 
   const dueTodos = await TripFile.find({
     resourceType:           'todo',

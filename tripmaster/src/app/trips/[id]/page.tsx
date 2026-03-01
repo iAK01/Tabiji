@@ -364,8 +364,8 @@ export default function TripPage() {
       {/* ── Tab content ── */}
       <Container maxWidth="lg" sx={{ py: { xs: 3, sm: 4 }, px: { xs: 2, sm: 3 } }}>
 
-        {trip.status === 'active' && <OnTripScreen tripId={trip._id} trip={trip} />}
-
+      {trip.status === 'active' && new Date(trip.startDate) <= new Date() && <OnTripScreen tripId={trip._id} trip={trip} />}
+      
         {activeTab === 0 && <TripOverview trip={trip} onNavigate={setActiveTab} />}
         {activeTab === 1 && <LogisticsTab tripId={trip._id} trip={trip} />}
         {activeTab === 2 && <ItineraryTab tripId={trip._id} startDate={trip.startDate} endDate={trip.endDate} />}
