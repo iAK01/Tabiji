@@ -20,6 +20,7 @@ import FilterListIcon    from '@mui/icons-material/FilterList';
 import WbSunnyIcon       from '@mui/icons-material/WbSunny';
 import InfoOutlinedIcon  from '@mui/icons-material/InfoOutlined';
 import TuneIcon          from '@mui/icons-material/Tune';
+import AssignmentTurnedInIcon from '@mui/icons-material/AssignmentTurnedIn';
 
 const CATEGORIES = [
   'Documents', 'Electronics', 'Clothes', 'Toiletries',
@@ -89,8 +90,8 @@ interface CatalogueEditState {
   name:               string;
   essential:          boolean;
   tripTypes:          string[];
-  transportTypes:     string[];   // empty = include regardless of transport
-  accommodationTypes: string[];   // empty = include regardless of accommodation
+  transportTypes:     string[];
+  accommodationTypes: string[];
   quantity:           number;
   quantityType:       'fixed' | 'per_night';
   quantityMin:        number;
@@ -116,15 +117,10 @@ function qtyLabel(item: PackingItem): string {
   return `× ${q}`;
 }
 
-// ─── Toggle group helper — empty selection means "any / always" ──────────────
-// Visually we show "Any" as a de-selected state so the user can clear all filters.
+// ─── Toggle group helper ──────────────────────────────────────────────────────
 
 function TypeToggleGroup({
-  label,
-  options,
-  value,
-  onChange,
-  hint,
+  label, options, value, onChange, hint,
 }: {
   label:    string;
   options:  string[];
@@ -163,18 +159,25 @@ export default function PackingTab({ tripId, tripType, nights, startDate }: Pack
   const theme  = useTheme();
   const mobile = useMediaQuery(theme.breakpoints.down('sm'));
 
-  const [packing,         setPacking]         = useState<PackingList | null>(null);
-  const [loading,         setLoading]         = useState(true);
-  const [generating,      setGenerating]      = useState(false);
-  const [toggling,        setToggling]        = useState<number | null>(null);
-  const [addOpen,         setAddOpen]         = useState(false);
-  const [preTravel,       setPreTravel]       = useState(false);
-  const [filterOpen,      setFilterOpen]      = useState(false);
-  const [filter,          setFilter]          = useState<'all' | 'unpacked' | 'packed'>('all');
-  const [expanded,        setExpanded]        = useState<Record<string, boolean>>({});
-  const [newItem,         setNewItem]         = useState({ name: '', category: 'Other', quantity: 1, advisoryNote: '' });
-  const [catalogueEdit,   setCatalogueEdit]   = useState<CatalogueEditState | null>(null);
-  const [catalogueSaving, setCatalogueSaving] = useState(false);
+  const [packing,          setPacking]          = useState<PackingList | null>(null);
+  const [loading,          setLoading]          = useState(true);
+  const [generating,       setGenerating]       = useState(false);
+  const [toggling,         setToggling]         = useState<number | null>(null);
+  const [addOpen,          setAddOpen]          = useState(false);
+  const [preTravel,        setPreTravel]        = useState(false);
+  const [filterOpen,       setFilterOpen]       = useState(false);
+  const [filter,           setFilter]           = useState<'all' | 'unpacked' | 'packed'>('all');
+  const [expanded,         setExpanded]         = useState<Record<string, boolean>>({});
+  const [newItem,          setNewItem]          = useState({ name: '', category: 'Other', quantity: 1, advisoryNote: '' });
+  const [catalogueEdit,    setCatalogueEdit]    = useState<CatalogueEditState | null>(null);
+  const [catalogueSaving,  setCatalogueSaving]  = useState(false);
+
+  // ── Packing advisory state ─────────────────────────────────────────────────
+  // creatingAdvisory: spinner while the POST is in flight
+  // advisoryCreated:  true after first successful creation — disables the button
+  //                   and shows a confirmation so the user knows it worked
+  const [creatingAdvisory, setCreatingAdvisory] = useState(false);
+  const [advisoryCreated,  setAdvisoryCreated]  = useState(false);
 
   useEffect(() => {
     fetch(`/api/trips/${tripId}/packing`)
@@ -307,6 +310,45 @@ export default function PackingTab({ tripId, tripType, nights, startDate }: Pack
     setNewItem({ name: '', category: 'Other', quantity: 1, advisoryNote: '' });
   };
 
+  // ── Packing advisory: create consolidated to-do ────────────────────────────
+  // Creates a single packing_advisory todo in the Files tab covering all
+  // pre-travel action items. Judicious by design — one notification, not many.
+  // The user can always create granular manual todos from the Files tab.
+  const createPackingAdvisory = async (items: IndexedItem[]) => {
+    if (!items.length || creatingAdvisory || advisoryCreated) return;
+    setCreatingAdvisory(true);
+
+    // Build a compact body listing each item and its note
+    const bodyLines = items.map(item =>
+      item.preTravelNote ? `• ${item.name}: ${item.preTravelNote}` : `• ${item.name}`
+    );
+
+    // packingItemRef is a short comma-separated summary used in the push notification body
+    // when the todo has no explicit body (not the case here, but kept for completeness)
+    const packingItemRef = items.map(i => i.name).join(', ');
+
+    const fd = new FormData();
+    fd.append('resourceType',    'todo');
+    fd.append('name',            'Pre-travel checklist');
+    fd.append('body',            bodyLines.join('\n'));
+    fd.append('source',          'packing_advisory');
+    fd.append('packingItemRef',  packingItemRef);
+    // No dueAt or notification by default — user sets that in the Files tab
+    // if they want a push reminder at a specific time before the trip.
+    fd.append('notification.enabled', 'false');
+
+    try {
+      const res = await fetch(`/api/trips/${tripId}/files`, { method: 'POST', body: fd });
+      if (res.ok) {
+        setAdvisoryCreated(true);
+      }
+    } catch {
+      // Silently fail — user can try again or create manually
+    } finally {
+      setCreatingAdvisory(false);
+    }
+  };
+
   // ── Loading / empty ───────────────────────────────────────────────────────
 
   if (loading) return (
@@ -364,6 +406,7 @@ export default function PackingTab({ tripId, tripType, nights, startDate }: Pack
   return (
     <Box>
 
+      {/* ── Weather alert ── */}
       {ws && (ws.hasRain || ws.minLow <= 8 || ws.maxHigh >= 22) && (
         <Alert severity="info" icon={<WbSunnyIcon fontSize="small" />}
           sx={{ mb: 2, '& .MuiAlert-message': { fontSize: '0.82rem' } }}>
@@ -392,13 +435,15 @@ export default function PackingTab({ tripId, tripType, nights, startDate }: Pack
 
       {/* ── Progress card ── */}
       <Paper sx={{ p: { xs: 2.5, sm: 3 }, mb: 2.5, backgroundColor: 'background.paper' }}>
+
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
           <Typography variant="h6" fontWeight={700} sx={{ fontSize: { xs: '1.05rem', sm: '1.15rem' } }}>
             {nights} nights · {tripType}
           </Typography>
           <Box sx={{ display: 'flex', gap: 1 }}>
             <Button size="small" variant="outlined" startIcon={<FilterListIcon />}
-              onClick={() => setFilterOpen(p => !p)} color={filter !== 'all' ? 'primary' : 'inherit'}>
+              onClick={() => setFilterOpen(p => !p)}
+              color={filter !== 'all' ? 'primary' : 'inherit'}>
               {filter === 'all' ? 'Filter' : filter}
             </Button>
             <IconButton size="small" onClick={generate} disabled={generating} aria-label="Regenerate list">
@@ -407,10 +452,12 @@ export default function PackingTab({ tripId, tripType, nights, startDate }: Pack
           </Box>
         </Box>
 
+        {/* Filter chips */}
         <Collapse in={filterOpen}>
           <Box sx={{ display: 'flex', gap: 1, mb: 2, flexWrap: 'wrap' }}>
             {(['all', 'unpacked', 'packed'] as const).map(f => (
-              <Chip key={f} label={f.charAt(0).toUpperCase() + f.slice(1)}
+              <Chip key={f}
+                label={f.charAt(0).toUpperCase() + f.slice(1)}
                 onClick={() => { setFilter(f); setFilterOpen(false); }}
                 color={filter === f ? 'primary' : 'default'}
                 variant={filter === f ? 'filled' : 'outlined'}
@@ -419,6 +466,7 @@ export default function PackingTab({ tripId, tripType, nights, startDate }: Pack
           </Box>
         </Collapse>
 
+        {/* Progress bar */}
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 1 }}>
           <LinearProgress variant="determinate" value={packing.packingProgress}
             color={allDone ? 'success' : 'primary'}
@@ -437,6 +485,7 @@ export default function PackingTab({ tripId, tripType, nights, startDate }: Pack
           </Box>
         )}
 
+        {/* Summary chips */}
         <Box sx={{ display: 'flex', gap: 1, mt: 2, flexWrap: 'wrap' }}>
           <Chip label={`${indexedItems.filter(i => i.essential).length} essentials`} size="small" color="primary" />
           {preTravelItems.length > 0 && (
@@ -509,43 +558,30 @@ export default function PackingTab({ tripId, tripType, nights, startDate }: Pack
                         {item.quantity > 1 && (
                           <Typography variant="body2" fontWeight={700} sx={{
                             fontSize: '0.88rem',
-                            color: item.packed ? 'text.disabled' : 'primary.main',
-                            whiteSpace: 'nowrap',
+                            color: item.packed ? 'text.disabled' : 'text.secondary',
+                            flexShrink: 0,
                           }}>
                             {qtyLabel(item)}
                           </Typography>
                         )}
-                        {item.essential && (
-                          <Chip label="Essential" size="small" color="primary"
-                            sx={{ height: 18, fontSize: '0.65rem' }} />
-                        )}
-                        {item.preTravelAction && (
-                          <WarningAmberIcon color="warning" sx={{ fontSize: 16 }} />
-                        )}
                       </Box>
                       {item.advisoryNote && !item.packed && (
-                        <Typography variant="caption" color="text.secondary"
-                          sx={{ fontStyle: 'italic', display: 'block', mt: 0.25, fontSize: '0.78rem' }}>
-                          {item.advisoryNote}
-                        </Typography>
+                        <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 0.5, mt: 0.5 }}>
+                          <InfoOutlinedIcon sx={{ fontSize: 13, color: 'text.disabled', mt: 0.25, flexShrink: 0 }} />
+                          <Typography variant="caption" color="text.disabled" sx={{ fontSize: '0.74rem', lineHeight: 1.4 }}>
+                            {item.advisoryNote}
+                          </Typography>
+                        </Box>
                       )}
-                      {item.preTravelAction && item.preTravelNote && !item.packed && (
-                        <Typography variant="caption" color="warning.dark"
-                          sx={{ display: 'block', mt: 0.25, fontSize: '0.78rem', fontWeight: 600 }}>
-                          {item.preTravelNote}
-                        </Typography>
-                      )}
-                      {item.conditionReason && !item.packed && (
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.4, mt: 0.4 }}>
-                          <InfoOutlinedIcon sx={{ fontSize: '0.75rem', color: 'text.disabled' }} />
-                          <Typography variant="caption" color="text.disabled"
-                            sx={{ fontSize: '0.72rem', fontStyle: 'italic' }}>
-                            {item.conditionReason}
+                      {item.preTravelAction && !item.packed && (
+                        <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 0.5, mt: 0.5 }}>
+                          <WarningAmberIcon sx={{ fontSize: 13, color: 'warning.main', mt: 0.25, flexShrink: 0 }} />
+                          <Typography variant="caption" sx={{ fontSize: '0.74rem', color: 'warning.dark', lineHeight: 1.4 }}>
+                            {item.preTravelNote || 'Pre-travel action required'}
                           </Typography>
                         </Box>
                       )}
                     </Box>
-
                     {item.source === 'auto' && item.masterItemId && !item.packed && (
                       <IconButton className="catalogue-tune" size="small"
                         onClick={e => { e.stopPropagation(); openCatalogueEdit(item); }}
@@ -587,9 +623,42 @@ export default function PackingTab({ tripId, tripType, nights, startDate }: Pack
               )}
             </Paper>
           ))}
+
+          {/* ── Advisory confirmation message ── */}
+          {advisoryCreated && (
+            <Box sx={{
+              display: 'flex', alignItems: 'center', gap: 1,
+              mt: 2, p: 1.5, borderRadius: 1.5,
+              backgroundColor: 'success.light',
+            }}>
+              <AssignmentTurnedInIcon color="success" fontSize="small" />
+              <Typography variant="body2" fontWeight={700} color="success.dark">
+                Pre-travel checklist added to Resources → To-dos
+              </Typography>
+            </Box>
+          )}
         </DialogContent>
-        <DialogActions sx={{ px: 3, pb: 3 }}>
-          <Button onClick={() => setPreTravel(false)} variant="contained" fullWidth={mobile} size="large">Got it</Button>
+
+        <DialogActions sx={{ px: 3, pb: 3, gap: 1, flexDirection: { xs: 'column-reverse', sm: 'row' } }}>
+          <Button onClick={() => setPreTravel(false)} fullWidth={mobile} size="large">
+            Got it
+          </Button>
+          {/* Create reminder — one-shot, disabled after first creation */}
+          <Button
+            variant="outlined"
+            color="warning"
+            onClick={() => createPackingAdvisory(preTravelItems)}
+            disabled={creatingAdvisory || advisoryCreated}
+            startIcon={
+              creatingAdvisory
+                ? <CircularProgress size={16} color="inherit" />
+                : <AssignmentTurnedInIcon />
+            }
+            fullWidth={mobile}
+            size="large"
+          >
+            {advisoryCreated ? 'Reminder created' : 'Create reminder'}
+          </Button>
         </DialogActions>
       </Dialog>
 

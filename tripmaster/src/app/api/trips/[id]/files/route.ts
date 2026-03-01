@@ -31,6 +31,8 @@ export async function GET(
 // For links:    multipart/form-data with resourceType=link, linkUrl, name, type, notes
 // For contacts: multipart/form-data with resourceType=contact, name, type, phone, email, notes
 // For notes:    multipart/form-data with resourceType=note, name (optional), type, body
+// For todos:    multipart/form-data with resourceType=todo, name, body (optional), dueAt (optional),
+//               notification.enabled (optional), source (optional), packingItemRef (optional)
 export async function POST(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -56,6 +58,47 @@ export async function POST(
   let linkedTo: object | undefined;
   if (linkedToRaw) {
     try { linkedTo = JSON.parse(linkedToRaw); } catch { /* ignore */ }
+  }
+
+  // ── Todo path ─────────────────────────────────────────────────────────────────
+  if (resourceType === 'todo') {
+    if (!name?.trim()) return NextResponse.json({ error: 'name is required for todos' }, { status: 400 });
+
+    const body            = (formData.get('body') as string | null) || '';
+    const dueAtRaw        = formData.get('dueAt') as string | null;
+    const notifEnabled    = formData.get('notification.enabled') === 'true';
+    const source          = (formData.get('source') as string) || 'manual';
+    const packingItemRef  = (formData.get('packingItemRef') as string | null) || undefined;
+
+    // Parse and validate dueAt — stored as UTC, user provides ISO string
+    let dueAt: Date | undefined;
+    if (dueAtRaw) {
+      const parsed = new Date(dueAtRaw);
+      if (!isNaN(parsed.getTime())) dueAt = parsed;
+    }
+
+    // surfaceAt equals dueAt when notification is enabled — this is what the cron queries
+    const surfaceAt = notifEnabled && dueAt ? dueAt : undefined;
+
+    const doc = await TripFile.create({
+      tripId:   id,
+      userId:   user._id,
+      resourceType: 'todo',
+      name:     name.trim(),
+      type:     source === 'packing_advisory' ? 'packing_advisory' : 'task',
+      body:     body.trim() || undefined,
+      dueAt:    dueAt     || undefined,
+      surfaceAt: surfaceAt || undefined,
+      completed:  false,
+      source,
+      packingItemRef: packingItemRef || undefined,
+      notification: {
+        enabled:    notifEnabled,
+        // minutesBefore intentionally unused for todos — dueAt is the trigger point
+      },
+    });
+
+    return NextResponse.json({ file: doc }, { status: 201 });
   }
 
   // ── Note path ─────────────────────────────────────────────────────────────────

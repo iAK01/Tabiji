@@ -128,6 +128,14 @@ function isInWindow(eventDt: DateTime, leadMs: number, nowMs: number): boolean {
   return diff >= 0 && diff <= WINDOW_MS;
 }
 
+// For todos: dueAt IS the trigger — no lead time offset needed.
+// Returns true if nowMs is within the WINDOW_MS after dueAt.
+function isTodoInWindow(dueAt: Date, nowMs: number): boolean {
+  const dueMs = dueAt.getTime();
+  const diff  = nowMs - dueMs;
+  return diff >= 0 && diff <= WINDOW_MS;
+}
+
 // "Today" check in destination timezone — avoids UTC midnight flipping
 function isTodayInZone(eventDt: DateTime, nowDt: DateTime): boolean {
   return eventDt.toISODate() === nowDt.toISODate();
@@ -261,8 +269,12 @@ export async function POST(req: Request) {
   // nowMs is UTC epoch milliseconds — timezone-agnostic reference point
   const nowMs = Date.now();
 
+  // =========================================================================
+  // PASS 1: Active trips — full itinerary / logistics / doc / venue processing
+  // (unchanged from original — no todos in this pass)
+  // =========================================================================
+
   const activeTrips = await Trip.find({ status: 'active', deleted: false });
-  if (!activeTrips.length) return NextResponse.json({ sent: 0 });
 
   let totalSent = 0;
 
@@ -496,11 +508,113 @@ export async function POST(req: Request) {
       }
     }
 
-    // Clean up expired subscriptions
+    // Clean up expired subscriptions for this user
     if (invalidEndpoints.length) {
       await User.findByIdAndUpdate(userId, {
         $pull: { pushSubscriptions: { endpoint: { $in: invalidEndpoints } } },
       });
+    }
+  }
+
+  // =========================================================================
+  // PASS 2: Todo reminders — confirmed AND active trips
+  //
+  // This pass is intentionally separate from Pass 1 so that:
+  //   - Confirmed trips (not yet active) can still fire pre-trip todo reminders
+  //   - The logic is clean and not entangled with itinerary/logistics processing
+  //   - A packing advisory set for "7 days before departure" fires reliably
+  //     regardless of the trip activation window (currently 2 days)
+  //
+  // Key differences from Pass 1:
+  //   - Scope: status confirmed OR active (not just active)
+  //   - Only processes resourceType === 'todo' files
+  //   - No lead time — dueAt IS the trigger moment
+  //   - One-shot: PushNotificationLog prevents re-fire (key: todo-{fileId})
+  //   - Skips completed todos — no point reminding about done tasks
+  // =========================================================================
+
+  // Fetch all confirmed+active trips that have at least one enabled todo
+  // whose dueAt falls within the next WINDOW_MS from now.
+  // The index on { dueAt, notification.enabled } makes this efficient.
+  const windowStart = new Date(nowMs);
+  const windowEnd   = new Date(nowMs + WINDOW_MS);
+
+  const dueTodos = await TripFile.find({
+    resourceType:           'todo',
+    'notification.enabled': true,
+    completed:              false,
+    dueAt:                  { $gte: windowStart, $lte: windowEnd },
+  }).lean();
+
+  if (dueTodos.length > 0) {
+    // Group todos by tripId to batch user + trip lookups
+    const todosByTrip = new Map<string, typeof dueTodos>();
+    for (const todo of dueTodos) {
+      const key = todo.tripId.toString();
+      if (!todosByTrip.has(key)) todosByTrip.set(key, []);
+      todosByTrip.get(key)!.push(todo);
+    }
+
+    for (const [tripId, todos] of todosByTrip) {
+      // Only fire for confirmed or active trips — not completed/cancelled
+      const trip = await Trip.findOne({
+        _id:     tripId,
+        status:  { $in: ['confirmed', 'active'] },
+        deleted: false,
+      });
+      if (!trip) continue;
+
+      const userId = trip.userId.toString();
+      const user   = await User.findById(userId);
+      if (!user?.pushSubscriptions?.length) continue;
+
+      const subs             = user.pushSubscriptions;
+      const invalidEndpoints: string[] = [];
+
+      for (const todo of todos) {
+        const fileId = todo._id.toString();
+        const key    = `todo-${fileId}`;
+
+        // Double-check the window in JS (the DB query already filtered, but
+        // isTodoInWindow gives us the same ±WINDOW_MS precision as Pass 1)
+        if (!isTodoInWindow(todo.dueAt as Date, nowMs)) continue;
+
+        // Format dueAt for the notification body — show time in UTC
+        // (user set the time knowing their local context; we show what they set)
+        const dueTime = DateTime.fromJSDate(todo.dueAt as Date)
+          .toUTC()
+          .toFormat('HH:mm');
+
+        // Build notification body — include packing items if this is an advisory
+        const isPacking = todo.type === 'packing_advisory';
+        const bodyLines: string[] = [];
+
+        if (todo.body) {
+          bodyLines.push(todo.body);
+        } else if (isPacking && todo.packingItemRef) {
+          bodyLines.push(todo.packingItemRef);
+        }
+
+        bodyLines.push(`Due at ${dueTime}`);
+
+        const sent = await logAndSend(userId, tripId, key, 'todo_reminder', subs, {
+          title: isPacking
+            ? `⚡ Pre-trip: ${todo.name}`
+            : `✅ To-do: ${todo.name}`,
+          body:  bodyLines.join('\n'),
+          url:   `/trips/${tripId}?tab=7`,   // Files tab
+          tag:   `todo-${fileId}`,
+        }, invalidEndpoints);
+
+        if (sent) totalSent++;
+      }
+
+      // Clean up expired subscriptions encountered in this pass
+      if (invalidEndpoints.length) {
+        await User.findByIdAndUpdate(userId, {
+          $pull: { pushSubscriptions: { endpoint: { $in: invalidEndpoints } } },
+        });
+      }
     }
   }
 

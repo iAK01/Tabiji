@@ -4,7 +4,7 @@ const TripFileSchema = new Schema({
   tripId:       { type: Schema.Types.ObjectId, ref: 'Trip', required: true, index: true },
   userId:       { type: Schema.Types.ObjectId, ref: 'User', required: true },
 
-  resourceType: { type: String, enum: ['file', 'link', 'contact', 'note'], default: 'file' },
+  resourceType: { type: String, enum: ['file', 'link', 'contact', 'note', 'todo'], default: 'file' },
 
   name:         { type: String, required: true },
   type: {
@@ -42,6 +42,9 @@ const TripFileSchema = new Schema({
       'observation',
       'reminder',
       'recommendation',
+      // ── Todo types ──
+      'task',
+      'packing_advisory',
       // ── Shared fallback ──
       'other',
     ],
@@ -76,18 +79,32 @@ const TripFileSchema = new Schema({
   // ── On-trip surfacing ───────────────────────────────────
   // Computed datetime at which this resource should surface in the on-trip feed.
   // Derived from linked entity's event time minus notification.minutesBefore.
+  // For todos: set equal to dueAt when notification is enabled.
   surfaceAt: { type: Date },
 
   // ── Notification preferences (per resource) ─────────────
   notification: {
     enabled:       { type: Boolean, default: false },
-    minutesBefore: { type: Number, default: 120 },   // user-configurable
+    minutesBefore: { type: Number, default: 120 },   // used by files/links; not used for todos
     lastSentAt:    { type: Date },
   },
+
+  // ── Todo-only ──────────────────────────────────────────
+  // dueAt: the exact UTC moment the user wants the reminder to fire (and the task shown as due).
+  // surfaceAt is set equal to dueAt when notification.enabled is true.
+  // source distinguishes user-created tasks from system-generated packing advisories.
+  // packingItemRef is a human-readable back-reference to the packing item(s) that triggered this.
+  dueAt:          { type: Date },
+  completed:      { type: Boolean, default: false },
+  completedAt:    { type: Date },
+  source:         { type: String, enum: ['manual', 'packing_advisory'] },
+  packingItemRef: { type: String },   // e.g. "Laptop, Portable power bank, Camera" — for packing advisories
 
 }, { timestamps: true });
 
 TripFileSchema.index({ tripId: 1, type: 1 });
-TripFileSchema.index({ tripId: 1, surfaceAt: 1 });  // for on-trip feed queries
+TripFileSchema.index({ tripId: 1, surfaceAt: 1 });       // for on-trip feed queries
+TripFileSchema.index({ tripId: 1, resourceType: 1 });    // for todo-specific cron queries
+TripFileSchema.index({ dueAt: 1, 'notification.enabled': 1 }); // for cron window lookups across confirmed+active trips
 
 export default mongoose.models.TripFile || mongoose.model('TripFile', TripFileSchema);

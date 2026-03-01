@@ -7,6 +7,7 @@ import {
   TextField, Select, MenuItem, FormControl, InputLabel,
   IconButton, Divider, LinearProgress, alpha, Fab,
   useTheme, useMediaQuery, Menu, Autocomplete,
+  Switch, FormControlLabel,
 } from '@mui/material';
 import AddIcon                from '@mui/icons-material/Add';
 import DeleteIcon             from '@mui/icons-material/Delete';
@@ -45,6 +46,12 @@ import NotesIcon              from '@mui/icons-material/Notes';
 import LightbulbIcon          from '@mui/icons-material/Lightbulb';
 import AlarmIcon              from '@mui/icons-material/Alarm';
 import StarIcon               from '@mui/icons-material/Star';
+import CheckBoxIcon           from '@mui/icons-material/CheckBox';
+import CheckBoxOutlineBlankIcon from '@mui/icons-material/CheckBoxOutlineBlank';
+import NotificationsIcon      from '@mui/icons-material/Notifications';
+import NotificationsOffIcon   from '@mui/icons-material/NotificationsOff';
+import AssignmentIcon         from '@mui/icons-material/Assignment';
+import BoltIcon               from '@mui/icons-material/Bolt';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -56,7 +63,7 @@ interface LinkedTo {
 
 interface TripFile {
   _id: string;
-  resourceType: 'file' | 'link' | 'contact' | 'note';
+  resourceType: 'file' | 'link' | 'contact' | 'note' | 'todo';
   name: string;
   type: string;
   gcsUrl?: string;
@@ -69,19 +76,25 @@ interface TripFile {
   notes?: string;
   linkedTo?: LinkedTo;
   createdAt: string;
+  // Todo-specific
+  dueAt?: string;
+  completed?: boolean;
+  completedAt?: string;
+  source?: 'manual' | 'packing_advisory';
+  packingItemRef?: string;
+  notification?: { enabled: boolean };
 }
 
-// A linkable item built from logistics + itinerary data
 interface LinkableItem {
-  label:      string;   // Human-readable, also used for matching in notify route
-  collection: string;   // 'transportation' | 'accommodation' | 'venue' | 'itinerary'
-  entryId:    string;   // Index or stop _id
-  group:      string;   // Group header in dropdown
+  label:      string;
+  collection: string;
+  entryId:    string;
+  group:      string;
 }
 
 interface FilesTabProps { tripId: string; }
 
-type Mode = 'file' | 'link' | 'contact' | 'note';
+type Mode = 'file' | 'link' | 'contact' | 'note' | 'todo';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -114,7 +127,7 @@ const CONTACT_TYPES = [
   { value: 'event_manager',         label: 'Event Manager',  Icon: EventIcon },
   { value: 'tour_manager',          label: 'Tour Manager',   Icon: GroupIcon },
   { value: 'production',            label: 'Production',     Icon: EngineeringIcon },
-  { value: 'promoter',              label: 'Promoter',       Icon: CampaignIcon },
+  { value: 'promoter',             label: 'Promoter',        Icon: CampaignIcon },
   { value: 'accommodation_contact', label: 'Accommodation',  Icon: HotelIcon },
   { value: 'transport_contact',     label: 'Transport',      Icon: DirectionsBusIcon },
   { value: 'emergency_contact',     label: 'Emergency',      Icon: LocalHospitalIcon },
@@ -144,6 +157,7 @@ const TYPE_COLOUR: Record<string, string> = {
   tour_manager: '#0369a1', production: '#374151', promoter: '#C9521B',
   accommodation_contact: '#5c35a0', transport_contact: '#0891b2', emergency_contact: '#dc2626',
   general: '#55702C', observation: '#0891b2', reminder: '#C9521B', recommendation: '#7c3aed',
+  task: '#1D2642', packing_advisory: '#b45309',
   other: '#6b7280',
 };
 
@@ -151,6 +165,7 @@ const BLANK_FILE_FORM    = { name: '', type: 'other' as FileTypeValue,    notes:
 const BLANK_LINK_FORM    = { name: '', type: 'event_website' as LinkTypeValue, url: '', notes: '' };
 const BLANK_CONTACT_FORM = { name: '', type: 'other' as ContactTypeValue, phone: '', email: '', notes: '' };
 const BLANK_NOTE_FORM    = { name: '', type: 'general' as NoteTypeValue,  body: '' };
+const BLANK_TODO_FORM    = { name: '', body: '', dueAt: '', notificationEnabled: false };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -158,6 +173,26 @@ function formatBytes(bytes: number): string {
   if (bytes < 1024)    return `${bytes} B`;
   if (bytes < 1048576) return `${(bytes / 1024).toFixed(0)} KB`;
   return `${(bytes / 1048576).toFixed(1)} MB`;
+}
+
+// Convert a stored ISO date string to the format required by datetime-local inputs
+function toDatetimeLocal(iso: string | undefined): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+// Format a dueAt for display in cards
+function formatDueAt(iso: string | undefined): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  return d.toLocaleString('en-IE', {
+    weekday: 'short', day: 'numeric', month: 'short',
+    hour: '2-digit', minute: '2-digit',
+  });
 }
 
 function TypeIcon({ type, size = 18 }: { type: string; size?: number }) {
@@ -181,52 +216,33 @@ function groupByType(files: TripFile[]): Map<string, TripFile[]> {
   return map;
 }
 
-// Build human-readable label for a transport entry — must match what notify route searches
 function transportLabel(t: any): string {
   const from  = t.departureLocation ?? '';
   const to    = t.arrivalLocation   ?? '';
   const route = from && to ? `${from} to ${to}` : (from || to);
   switch (t.type) {
-    case 'flight':
-      return [t.details?.airline, t.details?.flightNumber, route].filter(Boolean).join(' · ');
+    case 'flight':      return [t.details?.airline, t.details?.flightNumber, route].filter(Boolean).join(' - ');
     case 'train':
     case 'bus':
-    case 'ferry':
-      return [t.details?.operator, route].filter(Boolean).join(' · ');
-    case 'car_hire':
-      return [t.details?.rentalCompany, t.details?.pickupLocation ? `Pickup: ${t.details.pickupLocation}` : ''].filter(Boolean).join(' · ');
+    case 'ferry':       return [t.details?.operator, route].filter(Boolean).join(' - ');
+    case 'car_hire':    return [t.details?.rentalCompany, t.details?.pickupLocation ? `Pickup: ${t.details.pickupLocation}` : ''].filter(Boolean).join(' - ');
     case 'taxi':
-    case 'private_transfer':
-      return route || 'Transfer';
-    default:
-      return route || t.type;
+    case 'private_transfer': return route || 'Transfer';
+    default:            return route || t.type;
   }
 }
 
-function transportEmoji(type: string): string {
-  const map: Record<string, string> = {
-    flight: '✈', train: '🚂', bus: '🚌', ferry: '⛴',
-    car_hire: '🚗', car: '🚗', taxi: '🚕', private_transfer: '🚐', bicycle: '🚲',
-  };
-  return map[type] ?? '🚌';
-}
-
-// Build the list of linkable items from logistics + itinerary data
 function buildLinkableItems(logistics: any, itinerary: any): LinkableItem[] {
   const items: LinkableItem[] = [];
-
-  // Transport entries
   for (let i = 0; i < (logistics?.transportation ?? []).length; i++) {
     const t = logistics.transportation[i];
     items.push({
       label:      transportLabel(t),
-      collection: 'transportation',
+      collection: 'transport',
       entryId:    String(i),
-      group:      `${transportEmoji(t.type)} Transport`,
+      group:      '🚀 Transport',
     });
   }
-
-  // Accommodation entries
   for (let i = 0; i < (logistics?.accommodation ?? []).length; i++) {
     const a = logistics.accommodation[i];
     items.push({
@@ -236,8 +252,6 @@ function buildLinkableItems(logistics: any, itinerary: any): LinkableItem[] {
       group:      '🏨 Accommodation',
     });
   }
-
-  // Venues
   for (let i = 0; i < (logistics?.venues ?? []).length; i++) {
     const v = logistics.venues[i];
     items.push({
@@ -247,8 +261,6 @@ function buildLinkableItems(logistics: any, itinerary: any): LinkableItem[] {
       group:      '🎟 Venues',
     });
   }
-
-  // Itinerary stops (skip logistics-synced transport stops)
   for (const day of (itinerary?.days ?? [])) {
     for (const stop of (day.stops ?? [])) {
       if (stop.source === 'logistics' && stop.type === 'transport') continue;
@@ -260,7 +272,6 @@ function buildLinkableItems(logistics: any, itinerary: any): LinkableItem[] {
       });
     }
   }
-
   return items;
 }
 
@@ -316,16 +327,13 @@ function DropZone({ onFile }: { onFile: (f: File) => void }) {
 // ─── Link To selector ─────────────────────────────────────────────────────────
 
 function LinkToSelector({
-  items,
-  value,
-  onChange,
+  items, value, onChange,
 }: {
   items:    LinkableItem[];
   value:    LinkableItem | null;
   onChange: (item: LinkableItem | null) => void;
 }) {
   if (!items.length) return null;
-
   return (
     <Autocomplete
       options={items}
@@ -356,48 +364,103 @@ function LinkToSelector({
   );
 }
 
-// ─── Note card ────────────────────────────────────────────────────────────────
+// ─── To-do card ───────────────────────────────────────────────────────────────
 
-function NoteCard({ file, onDelete, onEdit }: { file: TripFile; onDelete: (id: string) => void; onEdit: (file: TripFile) => void }) {
+function ToDoCard({
+  file,
+  onDelete,
+  onEdit,
+  onToggleComplete,
+}: {
+  file:             TripFile;
+  onDelete:         (id: string) => void;
+  onEdit:           (file: TripFile) => void;
+  onToggleComplete: (file: TripFile) => void;
+}) {
   const [menuAnchor,  setMenuAnchor]  = useState<null | HTMLElement>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
-  const color    = TYPE_COLOUR[file.type] ?? '#55702C';
-  const typeMeta = NOTE_TYPES.find(t => t.value === file.type);
+  const [toggling,    setToggling]    = useState(false);
+
+  const isPacking  = file.type === 'packing_advisory';
+  const isComplete = !!file.completed;
+  const color      = isPacking ? '#b45309' : '#1D2642';
+
+  const handleToggle = async () => {
+    setToggling(true);
+    await onToggleComplete(file);
+    setToggling(false);
+  };
 
   return (
     <>
-      <Box sx={{ px: { xs: 2, sm: 2.5 }, py: { xs: 1.75, sm: 2 }, display: 'flex', gap: 1.5 }}>
-        <Box sx={{ width: 3, alignSelf: 'stretch', borderRadius: 2, backgroundColor: color, flexShrink: 0 }} />
+      <Box sx={{ px: { xs: 2, sm: 2.5 }, py: { xs: 1.75, sm: 2 }, display: 'flex', gap: 1.5, alignItems: 'flex-start' }}>
+
+        {/* Completion checkbox */}
+        <IconButton
+          size="small"
+          onClick={handleToggle}
+          disabled={toggling}
+          sx={{ mt: 0.25, flexShrink: 0, color: isComplete ? 'success.main' : 'text.disabled', p: 0.5 }}
+          aria-label={isComplete ? 'Mark incomplete' : 'Mark complete'}
+        >
+          {toggling
+            ? <CircularProgress size={20} />
+            : isComplete
+              ? <CheckBoxIcon sx={{ fontSize: 22 }} />
+              : <CheckBoxOutlineBlankIcon sx={{ fontSize: 22 }} />
+          }
+        </IconButton>
+
+        {/* Accent bar */}
+        <Box sx={{ width: 3, alignSelf: 'stretch', borderRadius: 2, backgroundColor: isComplete ? alpha(color, 0.3) : color, flexShrink: 0 }} />
+
+        {/* Content */}
         <Box sx={{ flexGrow: 1, minWidth: 0 }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', mb: file.body ? 0.5 : 0 }}>
-            {file.name && (
-              <Typography variant="body2" fontWeight={800} sx={{ fontSize: '0.9rem' }}>{file.name}</Typography>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', mb: 0.25 }}>
+            {isPacking && (
+              <BoltIcon sx={{ fontSize: 15, color: '#b45309', flexShrink: 0 }} />
             )}
-            {typeMeta && (
-              <Chip label={typeMeta.label} size="small"
-                sx={{ height: 18, fontSize: '0.68rem', fontWeight: 700, backgroundColor: alpha(color, 0.12), color }} />
+            <Typography
+              variant="body2"
+              fontWeight={700}
+              sx={{
+                fontSize: '0.9rem',
+                textDecoration: isComplete ? 'line-through' : 'none',
+                color: isComplete ? 'text.disabled' : 'text.primary',
+              }}
+            >
+              {file.name}
+            </Typography>
+            {file.notification?.enabled && !isComplete && (
+              <NotificationsIcon sx={{ fontSize: 14, color: '#55702C', flexShrink: 0 }} />
             )}
           </Box>
+
           {file.body && (
-            <Typography variant="body2" color="text.primary" sx={{ fontSize: '0.875rem', lineHeight: 1.55, whiteSpace: 'pre-wrap' }}>
+            <Typography
+              variant="body2"
+              color={isComplete ? 'text.disabled' : 'text.secondary'}
+              sx={{ fontSize: '0.82rem', mb: 0.5, mt: 0.25 }}
+            >
               {file.body}
             </Typography>
           )}
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, mt: 0.75, flexWrap: 'wrap' }}>
-            <Typography variant="caption" color="text.disabled" sx={{ fontSize: '0.72rem' }}>
-              {new Date(file.createdAt).toLocaleDateString('en-IE', { day: 'numeric', month: 'short', year: 'numeric' })}
-              {' · '}
-              {new Date(file.createdAt).toLocaleTimeString('en-IE', { hour: '2-digit', minute: '2-digit' })}
+
+          {file.dueAt && (
+            <Typography variant="caption" sx={{ fontSize: '0.72rem', color: isComplete ? 'text.disabled' : color, fontWeight: 600, display: 'block' }}>
+              {isComplete ? '✓ Done' : `Due: ${formatDueAt(file.dueAt)}`}
             </Typography>
-            {file.linkedTo?.label && (
-              <>
-                <Typography variant="caption" color="text.disabled" sx={{ fontSize: '0.72rem' }}>·</Typography>
-                <Chip label={file.linkedTo.label} size="small" sx={{ height: 16, fontSize: '0.65rem', fontWeight: 700, backgroundColor: alpha(color, 0.1), color }} />
-              </>
-            )}
-          </Box>
+          )}
+
+          {isComplete && file.completedAt && (
+            <Typography variant="caption" color="text.disabled" sx={{ fontSize: '0.7rem', display: 'block' }}>
+              Completed {new Date(file.completedAt).toLocaleString('en-IE', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+            </Typography>
+          )}
         </Box>
-        <IconButton size="small" onClick={e => { e.stopPropagation(); setMenuAnchor(e.currentTarget); }} sx={{ flexShrink: 0, alignSelf: 'flex-start', mt: 0.25 }}>
+
+        {/* Menu */}
+        <IconButton size="small" onClick={e => setMenuAnchor(e.currentTarget)} sx={{ flexShrink: 0, alignSelf: 'flex-start', mt: 0.25 }}>
           <MoreVertIcon fontSize="small" />
         </IconButton>
       </Box>
@@ -414,9 +477,64 @@ function NoteCard({ file, onDelete, onEdit }: { file: TripFile; onDelete: (id: s
       </Menu>
 
       <Dialog open={confirmOpen} onClose={() => setConfirmOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle fontWeight={700} sx={{ fontSize: '1.1rem' }}>Delete to-do?</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary">
+            <strong>{file.name}</strong> will be permanently removed. This cannot be undone.
+          </Typography>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2.5, gap: 1 }}>
+          <Button onClick={() => setConfirmOpen(false)}>Cancel</Button>
+          <Button variant="contained" color="error" onClick={() => { setConfirmOpen(false); onDelete(file._id); }}>Delete</Button>
+        </DialogActions>
+      </Dialog>
+    </>
+  );
+}
+
+// ─── Note card ────────────────────────────────────────────────────────────────
+
+function NoteCard({ file, onDelete, onEdit }: { file: TripFile; onDelete: (id: string) => void; onEdit: (file: TripFile) => void }) {
+  const [menuAnchor,  setMenuAnchor]  = useState<null | HTMLElement>(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const color    = TYPE_COLOUR[file.type] ?? '#55702C';
+  const typeMeta = NOTE_TYPES.find(t => t.value === file.type);
+
+  return (
+    <>
+      <Box sx={{ px: { xs: 2, sm: 2.5 }, py: { xs: 1.75, sm: 2 }, display: 'flex', gap: 1.5 }}>
+        <Box sx={{ width: 3, alignSelf: 'stretch', borderRadius: 2, backgroundColor: color, flexShrink: 0 }} />
+        <Box sx={{ flexGrow: 1, minWidth: 0 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', mb: file.body ? 0.5 : 0 }}>
+            {file.name && <Typography variant="body2" fontWeight={800} sx={{ fontSize: '0.9rem' }}>{file.name}</Typography>}
+            {typeMeta && <Chip label={typeMeta.label} size="small" sx={{ height: 18, fontSize: '0.68rem', fontWeight: 700, backgroundColor: alpha(color, 0.12), color }} />}
+          </Box>
+          {file.body && (
+            <Typography variant="body2" color="text.secondary" sx={{ fontSize: '0.85rem', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+              {file.body}
+            </Typography>
+          )}
+          <Typography variant="caption" color="text.disabled" sx={{ fontSize: '0.7rem', display: 'block', mt: 0.5 }}>
+            {new Date(file.createdAt).toLocaleString('en-IE', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+            {file.linkedTo?.label ? ` · ${file.linkedTo.label}` : ''}
+          </Typography>
+        </Box>
+        <IconButton size="small" onClick={e => setMenuAnchor(e.currentTarget)} sx={{ flexShrink: 0, alignSelf: 'flex-start', mt: 0.25 }}>
+          <MoreVertIcon fontSize="small" />
+        </IconButton>
+      </Box>
+
+      <Menu anchorEl={menuAnchor} open={Boolean(menuAnchor)} onClose={() => setMenuAnchor(null)}
+        transformOrigin={{ horizontal: 'right', vertical: 'top' }} anchorOrigin={{ horizontal: 'right', vertical: 'bottom' }}>
+        <MenuItem onClick={() => { setMenuAnchor(null); onEdit(file); }} sx={{ gap: 1.5, fontSize: '0.875rem' }}><EditIcon fontSize="small" /> Edit</MenuItem>
+        <Divider />
+        <MenuItem onClick={() => { setMenuAnchor(null); setConfirmOpen(true); }} sx={{ gap: 1.5, fontSize: '0.875rem', color: 'error.main' }}><DeleteIcon fontSize="small" /> Delete</MenuItem>
+      </Menu>
+
+      <Dialog open={confirmOpen} onClose={() => setConfirmOpen(false)} maxWidth="xs" fullWidth>
         <DialogTitle fontWeight={700} sx={{ fontSize: '1.1rem' }}>Delete note?</DialogTitle>
         <DialogContent>
-          <Typography variant="body2" color="text.secondary">This note will be permanently deleted. This cannot be undone.</Typography>
+          <Typography variant="body2" color="text.secondary"><strong>{file.name || 'This note'}</strong> will be permanently removed. This cannot be undone.</Typography>
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 2.5, gap: 1 }}>
           <Button onClick={() => setConfirmOpen(false)}>Cancel</Button>
@@ -457,26 +575,15 @@ function ContactCard({ file, onDelete, onEdit }: { file: TripFile; onDelete: (id
               )}
               {file.email && (
                 <Button component="a" href={`mailto:${file.email}`} size="small" startIcon={<EmailIcon sx={{ fontSize: '0.95rem !important' }} />} variant="outlined"
-                  sx={{ fontSize: '0.78rem', fontWeight: 700, py: 0.5, px: 1.25, borderColor: alpha('#0891b2', 0.35), color: '#0891b2', '&:hover': { borderColor: '#0891b2', backgroundColor: alpha('#0891b2', 0.06) }, minHeight: 32 }}>
+                  sx={{ fontSize: '0.78rem', fontWeight: 700, py: 0.5, px: 1.25, borderColor: alpha(color, 0.35), color, '&:hover': { borderColor: color, backgroundColor: alpha(color, 0.06) }, minHeight: 32 }}>
                   {file.email}
                 </Button>
               )}
             </Box>
           )}
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, mt: 0.75, flexWrap: 'wrap' }}>
-            <Typography variant="caption" color="text.disabled" sx={{ fontSize: '0.72rem' }}>
-              {new Date(file.createdAt).toLocaleDateString('en-IE', { day: 'numeric', month: 'short', year: 'numeric' })}
-            </Typography>
-            {file.linkedTo?.label && (
-              <>
-                <Typography variant="caption" color="text.disabled" sx={{ fontSize: '0.72rem' }}>·</Typography>
-                <Chip label={file.linkedTo.label} size="small" sx={{ height: 16, fontSize: '0.65rem', fontWeight: 700, backgroundColor: alpha(color, 0.1), color }} />
-              </>
-            )}
-          </Box>
-          {file.notes && <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.72rem', mt: 0.25, display: 'block' }}>{file.notes}</Typography>}
+          {file.notes && <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.75, fontSize: '0.78rem' }}>{file.notes}</Typography>}
         </Box>
-        <IconButton size="small" onClick={e => { e.stopPropagation(); setMenuAnchor(e.currentTarget); }} sx={{ flexShrink: 0, alignSelf: 'flex-start', mt: 0.25 }}>
+        <IconButton size="small" onClick={e => setMenuAnchor(e.currentTarget)} sx={{ flexShrink: 0, alignSelf: 'flex-start', mt: 0.25 }}>
           <MoreVertIcon fontSize="small" />
         </IconButton>
       </Box>
@@ -519,47 +626,45 @@ function ResourceCard({ file, onDelete, onEdit }: { file: TripFile; onDelete: (i
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, px: { xs: 2, sm: 2.5 }, py: { xs: 1.5, sm: 1.75 } }}>
         <Box sx={{ width: 3, alignSelf: 'stretch', borderRadius: 2, backgroundColor: color, flexShrink: 0 }} />
         <Box sx={{ flexShrink: 0 }}>
-          {isLink ? <LinkIcon sx={{ fontSize: 20, color: '#0891b2' }} /> : <MimeIcon mimeType={file.mimeType} size={20} />}
+          {isLink
+            ? <LinkIcon sx={{ fontSize: 20, color }} />
+            : <MimeIcon mimeType={file.mimeType} size={20} />
+          }
         </Box>
         <Box sx={{ flexGrow: 1, minWidth: 0 }}>
-          <Typography variant="body2" fontWeight={700} sx={{ fontSize: { xs: '0.88rem', sm: '0.875rem' }, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          <Typography variant="body2" fontWeight={700} sx={{ fontSize: '0.88rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {file.name}
           </Typography>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, mt: 0.25, flexWrap: 'wrap' }}>
-            {isLink && file.linkUrl && <Typography variant="caption" color="text.disabled" sx={{ fontSize: '0.7rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 220 }}>{file.linkUrl}</Typography>}
-            {!isLink && file.size && <Typography variant="caption" color="text.disabled" sx={{ fontSize: '0.72rem' }}>{formatBytes(file.size)}</Typography>}
-            <Typography variant="caption" color="text.disabled" sx={{ fontSize: '0.72rem' }}>·</Typography>
-            <Typography variant="caption" color="text.disabled" sx={{ fontSize: '0.72rem' }}>
-              {new Date(file.createdAt).toLocaleDateString('en-IE', { day: 'numeric', month: 'short', year: 'numeric' })}
-            </Typography>
-            {file.linkedTo?.label && (
-              <>
-                <Typography variant="caption" color="text.disabled" sx={{ fontSize: '0.72rem' }}>·</Typography>
-                <Chip label={file.linkedTo.label} size="small" sx={{ height: 16, fontSize: '0.65rem', fontWeight: 700, backgroundColor: alpha(color, 0.1), color }} />
-              </>
-            )}
-          </Box>
-          {file.notes && <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.72rem', mt: 0.25, display: 'block' }}>{file.notes}</Typography>}
+          {file.notes && <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.75rem', display: 'block' }}>{file.notes}</Typography>}
+          {!isLink && file.size && (
+            <Typography variant="caption" color="text.disabled" sx={{ fontSize: '0.72rem' }}>{formatBytes(file.size)}</Typography>
+          )}
+          {file.linkedTo?.label && (
+            <Typography variant="caption" color="text.disabled" sx={{ fontSize: '0.7rem', display: 'block' }}>↳ {file.linkedTo.label}</Typography>
+          )}
         </Box>
-        <IconButton size="small" onClick={e => { e.stopPropagation(); setMenuAnchor(e.currentTarget); }} sx={{ flexShrink: 0 }}>
+        {actionUrl && (
+          <IconButton size="small" component="a" href={actionUrl} target="_blank" rel="noopener noreferrer"
+            aria-label={isLink ? 'Open link' : 'Download file'}>
+            {isLink ? <OpenInNewIcon fontSize="small" /> : <DownloadIcon fontSize="small" />}
+          </IconButton>
+        )}
+        <IconButton size="small" onClick={e => setMenuAnchor(e.currentTarget)} sx={{ flexShrink: 0 }}>
           <MoreVertIcon fontSize="small" />
         </IconButton>
       </Box>
 
       <Menu anchorEl={menuAnchor} open={Boolean(menuAnchor)} onClose={() => setMenuAnchor(null)}
         transformOrigin={{ horizontal: 'right', vertical: 'top' }} anchorOrigin={{ horizontal: 'right', vertical: 'bottom' }}>
-        <MenuItem component="a" href={actionUrl} target="_blank" rel="noopener noreferrer" onClick={() => setMenuAnchor(null)} sx={{ gap: 1.5, fontSize: '0.875rem' }}>
-          <OpenInNewIcon fontSize="small" /> {isLink ? 'Open link' : 'Open'}
-        </MenuItem>
-        {!isLink && (
-          <MenuItem component="a" href={actionUrl} download={file.name} onClick={() => setMenuAnchor(null)} sx={{ gap: 1.5, fontSize: '0.875rem' }}>
-            <DownloadIcon fontSize="small" /> Download
+        {actionUrl && (
+          <MenuItem component="a" href={actionUrl} target="_blank" rel="noopener noreferrer" onClick={() => setMenuAnchor(null)} sx={{ gap: 1.5, fontSize: '0.875rem' }}>
+            {isLink ? <OpenInNewIcon fontSize="small" /> : <DownloadIcon fontSize="small" />}
+            {isLink ? 'Open link' : 'Download'}
           </MenuItem>
         )}
+        <MenuItem onClick={() => { setMenuAnchor(null); onEdit(file); }} sx={{ gap: 1.5, fontSize: '0.875rem' }}><EditIcon fontSize="small" /> Edit details</MenuItem>
         <Divider />
-        <MenuItem onClick={() => { setMenuAnchor(null); onEdit(file); }} sx={{ gap: 1.5, fontSize: '0.875rem' }}><EditIcon fontSize="small" /> Edit</MenuItem>
-        <Divider />
-        <MenuItem onClick={() => { setMenuAnchor(null); setConfirmOpen(true); }} sx={{ gap: 1.5, fontSize: '0.875rem', color: 'error.main' }}><DeleteIcon fontSize="small" /> Delete</MenuItem>
+        <MenuItem onClick={() => { setMenuAnchor(null); setConfirmOpen(true); }} sx={{ gap: 1.5, fontSize: '0.875rem', color: 'error.main' }}><DeleteIcon fontSize="small" /> {isLink ? 'Remove link' : 'Delete file'}</MenuItem>
       </Menu>
 
       <Dialog open={confirmOpen} onClose={() => setConfirmOpen(false)} maxWidth="xs" fullWidth>
@@ -594,11 +699,11 @@ export default function FilesTab({ tripId }: FilesTabProps) {
   const [linkForm,      setLinkForm]      = useState({ ...BLANK_LINK_FORM });
   const [contactForm,   setContactForm]   = useState({ ...BLANK_CONTACT_FORM });
   const [noteForm,      setNoteForm]      = useState({ ...BLANK_NOTE_FORM });
+  const [todoForm,      setTodoForm]      = useState({ ...BLANK_TODO_FORM });
   const [linkedTo,      setLinkedTo]      = useState<LinkableItem | null>(null);
   const [error,         setError]         = useState<string | null>(null);
   const [editingFile,   setEditingFile]   = useState<TripFile | null>(null);
 
-  // Fetch files, logistics, and itinerary in parallel on mount
   useEffect(() => {
     Promise.all([
       fetch(`/api/trips/${tripId}/files`).then(r => r.json()),
@@ -622,6 +727,7 @@ export default function FilesTab({ tripId }: FilesTabProps) {
     setLinkForm({ ...BLANK_LINK_FORM });
     setContactForm({ ...BLANK_CONTACT_FORM });
     setNoteForm({ ...BLANK_NOTE_FORM });
+    setTodoForm({ ...BLANK_TODO_FORM });
     setLinkedTo(null);
     setEditingFile(null);
     setError(null);
@@ -632,13 +738,20 @@ export default function FilesTab({ tripId }: FilesTabProps) {
     setEditingFile(file);
     setError(null);
 
-    // Restore linkedTo selection if the file has one
     const existingLink = file.linkedTo?.label
       ? linkableItems.find(i => i.label === file.linkedTo!.label) ?? null
       : null;
     setLinkedTo(existingLink);
 
-    if (file.resourceType === 'note') {
+    if (file.resourceType === 'todo') {
+      setMode('todo');
+      setTodoForm({
+        name:                file.name ?? '',
+        body:                file.body ?? '',
+        dueAt:               toDatetimeLocal(file.dueAt),
+        notificationEnabled: file.notification?.enabled ?? false,
+      });
+    } else if (file.resourceType === 'note') {
       setMode('note');
       setNoteForm({ name: file.name ?? '', type: file.type as NoteTypeValue, body: file.body ?? '' });
     } else if (file.resourceType === 'contact') {
@@ -663,6 +776,31 @@ export default function FilesTab({ tripId }: FilesTabProps) {
     if (!dialogOpen) setDialogOpen(true);
   };
 
+  // ── Toggle complete (PATCH) ────────────────────────────────────────────────
+  const handleToggleComplete = async (file: TripFile) => {
+    const newCompleted = !file.completed;
+    // Optimistic update
+    setFiles(prev => prev.map(f =>
+      f._id === file._id ? { ...f, completed: newCompleted, completedAt: newCompleted ? new Date().toISOString() : undefined } : f
+    ));
+    try {
+      const res  = await fetch(`/api/trips/${tripId}/files/${file._id}`, {
+        method:  'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ completed: newCompleted }),
+      });
+      const data = await res.json();
+      if (res.ok && data.file) {
+        setFiles(prev => prev.map(f => f._id === file._id ? data.file : f));
+      }
+    } catch {
+      // Revert on failure
+      setFiles(prev => prev.map(f =>
+        f._id === file._id ? { ...f, completed: file.completed, completedAt: file.completedAt } : f
+      ));
+    }
+  };
+
   const handleUpload = async () => {
     setUploading(true);
     setUploadPct(0);
@@ -670,7 +808,6 @@ export default function FilesTab({ tripId }: FilesTabProps) {
 
     const fd = new FormData();
 
-    // Append linkedTo as JSON string — matches what the API expects
     if (linkedTo) {
       fd.append('linkedTo', JSON.stringify({
         label:      linkedTo.label,
@@ -679,7 +816,18 @@ export default function FilesTab({ tripId }: FilesTabProps) {
       }));
     }
 
-    if (mode === 'note') {
+    if (mode === 'todo') {
+      if (!todoForm.name.trim()) { setError('Title is required'); setUploading(false); return; }
+      fd.append('resourceType', 'todo');
+      fd.append('name', todoForm.name.trim());
+      if (todoForm.body.trim()) fd.append('body', todoForm.body.trim());
+      if (todoForm.dueAt) {
+        // Convert datetime-local string to ISO UTC
+        fd.append('dueAt', new Date(todoForm.dueAt).toISOString());
+      }
+      fd.append('notification.enabled', todoForm.notificationEnabled && !!todoForm.dueAt ? 'true' : 'false');
+      fd.append('source', 'manual');
+    } else if (mode === 'note') {
       if (!noteForm.body.trim()) { setError('Note content is required'); setUploading(false); return; }
       fd.append('resourceType', 'note');
       fd.append('name',  noteForm.name.trim());
@@ -749,11 +897,37 @@ export default function FilesTab({ tripId }: FilesTabProps) {
     setFiles(prev => prev.filter(f => f._id !== fileId));
   };
 
-  const grouped    = groupByType(files);
+  // ── Derived ───────────────────────────────────────────────────────────────
+
+  // Split todos from all other resource types
+  const todos    = files.filter(f => f.resourceType === 'todo');
+  const nonTodos = files.filter(f => f.resourceType !== 'todo');
+
+  // Sort todos: incomplete first (by dueAt asc), then completed (by completedAt desc)
+  const sortedTodos = [...todos].sort((a, b) => {
+    if (a.completed !== b.completed) return Number(a.completed) - Number(b.completed);
+    if (!a.completed && !b.completed) {
+      // Both incomplete — sort by dueAt ascending (soonest first), undated last
+      if (!a.dueAt && !b.dueAt) return 0;
+      if (!a.dueAt) return 1;
+      if (!b.dueAt) return -1;
+      return new Date(a.dueAt).getTime() - new Date(b.dueAt).getTime();
+    }
+    // Both complete — most recently completed first
+    const aAt = a.completedAt ? new Date(a.completedAt).getTime() : 0;
+    const bAt = b.completedAt ? new Date(b.completedAt).getTime() : 0;
+    return bAt - aAt;
+  });
+
+  const pendingTodos    = sortedTodos.filter(t => !t.completed);
+  const completedTodos  = sortedTodos.filter(t => t.completed);
+
+  const grouped    = groupByType(nonTodos);
   const typeOrder  = ALL_TYPES.map(t => t.value);
   const sortedKeys = [...grouped.keys()].sort((a, b) => typeOrder.indexOf(a as any) - typeOrder.indexOf(b as any));
 
   const canSubmit =
+    mode === 'todo'    ? !!todoForm.name.trim() :
     mode === 'note'    ? !!noteForm.body.trim() :
     mode === 'contact' ? !!contactForm.name.trim() && (!!contactForm.phone.trim() || !!contactForm.email.trim()) :
     mode === 'link'    ? !!linkForm.name.trim() && !!linkForm.url.trim() :
@@ -761,14 +935,26 @@ export default function FilesTab({ tripId }: FilesTabProps) {
 
   const dialogTitle =
     editingFile
-      ? mode === 'note' ? 'Edit note' : mode === 'contact' ? 'Edit contact' : mode === 'link' ? 'Edit link' : 'Edit file details'
-      : mode === 'note' ? 'Add a note' : mode === 'contact' ? 'Add a contact' : mode === 'link' ? 'Add a link' : 'Upload a file';
+      ? mode === 'todo'    ? 'Edit to-do'
+      : mode === 'note'    ? 'Edit note'
+      : mode === 'contact' ? 'Edit contact'
+      : mode === 'link'    ? 'Edit link'
+      :                      'Edit file details'
+      : mode === 'todo'    ? 'Add a to-do'
+      : mode === 'note'    ? 'Add a note'
+      : mode === 'contact' ? 'Add a contact'
+      : mode === 'link'    ? 'Add a link'
+      :                      'Upload a file';
 
   const submitLabel =
     uploading          ? <CircularProgress size={20} sx={{ color: 'white' }} /> :
-    mode === 'note'    ? (editingFile ? 'Save note' : 'Add note') :
+    mode === 'todo'    ? (editingFile ? 'Save to-do'   : 'Add to-do') :
+    mode === 'note'    ? (editingFile ? 'Save note'    : 'Add note') :
     mode === 'contact' ? (editingFile ? 'Save contact' : 'Add contact') :
-    mode === 'link'    ? (editingFile ? 'Save link' : 'Add link') : (editingFile ? 'Save file' : 'Upload file');
+    mode === 'link'    ? (editingFile ? 'Save link'    : 'Add link') :
+                         (editingFile ? 'Save file'    : 'Upload file');
+
+  const totalCount = files.length;
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, pb: 10 }}>
@@ -780,10 +966,11 @@ export default function FilesTab({ tripId }: FilesTabProps) {
             Resources
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mt: 0.25 }}>
-            {files.length === 0 ? 'No resources yet' : `${files.length} item${files.length !== 1 ? 's' : ''}`}
+            {totalCount === 0 ? 'No resources yet' : `${totalCount} item${totalCount !== 1 ? 's' : ''}`}
           </Typography>
         </Box>
         <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+          <Button variant="outlined" startIcon={<AssignmentIcon />} onClick={() => openDialog('todo')} sx={{ fontWeight: 700 }}>Add to-do</Button>
           <Button variant="outlined" startIcon={<PersonIcon />} onClick={() => openDialog('contact')} sx={{ fontWeight: 700 }}>Add contact</Button>
           <Button variant="outlined" startIcon={<LinkIcon />} onClick={() => openDialog('link')} sx={{ fontWeight: 700 }}>Add link</Button>
           <Button variant="outlined" startIcon={<NoteAddIcon />} onClick={() => openDialog('note')} sx={{ fontWeight: 700 }}>Add note</Button>
@@ -797,22 +984,94 @@ export default function FilesTab({ tripId }: FilesTabProps) {
         </Box>
       )}
 
-      {!loading && files.length === 0 && (
+      {!loading && totalCount === 0 && (
         <Paper sx={{ p: { xs: 3, sm: 4 }, backgroundColor: 'background.paper' }}>
           <Box sx={{ textAlign: 'center', mb: 3 }}>
             <FolderOpenIcon sx={{ fontSize: 52, color: 'text.disabled', mb: 1.5 }} />
             <Typography variant="body1" fontWeight={700} color="text.secondary" gutterBottom>No resources yet</Typography>
             <Typography variant="body2" color="text.disabled" sx={{ maxWidth: 380, mx: 'auto' }}>
-              Upload boarding passes and documents, save links to event websites and venues, add key contacts, or jot a note.
+              Upload boarding passes and documents, save links, add key contacts, jot a note, or add a to-do with reminders.
             </Typography>
           </Box>
           <DropZone onFile={f => { setMode('file'); handleFileSelected(f); }} />
         </Paper>
       )}
 
-      {!loading && files.length > 0 && (
+      {!loading && totalCount > 0 && (
         <>
+          {/* ── To-dos section — always first ── */}
+          {sortedTodos.length > 0 && (
+            <Paper sx={{ backgroundColor: 'background.paper', overflow: 'hidden' }}>
+              <Box sx={{
+                px: { xs: 2, sm: 2.5 }, py: 1.5,
+                display: 'flex', alignItems: 'center', gap: 1.25,
+                borderBottom: '1px solid', borderColor: 'divider',
+                backgroundColor: alpha('#1D2642', 0.04),
+              }}>
+                <AssignmentIcon sx={{ fontSize: 17, color: '#1D2642' }} />
+                <Typography variant="subtitle2" fontWeight={800} sx={{ fontSize: '0.82rem', letterSpacing: 0.3, textTransform: 'uppercase', color: '#1D2642' }}>
+                  To-dos
+                </Typography>
+                {pendingTodos.length > 0 && (
+                  <Chip
+                    label={`${pendingTodos.length} pending`}
+                    size="small"
+                    sx={{ ml: 'auto', height: 20, backgroundColor: alpha('#1D2642', 0.12), color: '#1D2642', fontWeight: 800, fontSize: '0.72rem' }}
+                  />
+                )}
+                {completedTodos.length > 0 && pendingTodos.length === 0 && (
+                  <Chip
+                    label={`${completedTodos.length} done`}
+                    size="small"
+                    color="success"
+                    sx={{ ml: 'auto', height: 20, fontWeight: 800, fontSize: '0.72rem' }}
+                  />
+                )}
+              </Box>
+
+              {/* Pending todos */}
+              {pendingTodos.map((todo, i) => (
+                <Box key={todo._id}>
+                  {i > 0 && <Divider />}
+                  <ToDoCard
+                    file={todo}
+                    onDelete={handleDelete}
+                    onEdit={openEdit}
+                    onToggleComplete={handleToggleComplete}
+                  />
+                </Box>
+              ))}
+
+              {/* Completed todos — shown below pending with a subtle separator */}
+              {completedTodos.length > 0 && (
+                <>
+                  {pendingTodos.length > 0 && (
+                    <Box sx={{ px: 2.5, py: 1, backgroundColor: alpha('#000', 0.02), borderTop: '1px solid', borderColor: 'divider' }}>
+                      <Typography variant="caption" fontWeight={700} color="text.disabled" sx={{ fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                        Completed
+                      </Typography>
+                    </Box>
+                  )}
+                  {completedTodos.map((todo, i) => (
+                    <Box key={todo._id}>
+                      {(i > 0 || pendingTodos.length > 0) && <Divider />}
+                      <ToDoCard
+                        file={todo}
+                        onDelete={handleDelete}
+                        onEdit={openEdit}
+                        onToggleComplete={handleToggleComplete}
+                      />
+                    </Box>
+                  ))}
+                </>
+              )}
+            </Paper>
+          )}
+
+          {/* ── Drop zone for files ── */}
           <DropZone onFile={f => { setMode('file'); handleFileSelected(f); }} />
+
+          {/* ── Grouped resources (files / links / contacts / notes) ── */}
           {sortedKeys.map(type => {
             const group    = grouped.get(type) ?? [];
             const typeMeta = ALL_TYPES.find(t => t.value === type);
@@ -865,6 +1124,76 @@ export default function FilesTab({ tripId }: FilesTabProps) {
         <DialogContent>
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, pt: 1 }}>
 
+            {/* ── Todo mode ── */}
+            {mode === 'todo' && (
+              <>
+                <TextField
+                  label="Title"
+                  value={todoForm.name}
+                  autoFocus
+                  fullWidth
+                  required
+                  disabled={uploading}
+                  onChange={e => setTodoForm(p => ({ ...p, name: e.target.value }))}
+                  placeholder="e.g. Charge all devices before packing"
+                  InputProps={{ sx: mobile ? { fontSize: '1rem' } : {} }}
+                />
+                <TextField
+                  label="Notes (optional)"
+                  value={todoForm.body}
+                  fullWidth
+                  multiline
+                  rows={3}
+                  disabled={uploading}
+                  onChange={e => setTodoForm(p => ({ ...p, body: e.target.value }))}
+                  placeholder="Any extra detail..."
+                  InputProps={{ sx: mobile ? { fontSize: '1rem' } : {} }}
+                />
+                <TextField
+                  label="Due date & time (optional)"
+                  type="datetime-local"
+                  value={todoForm.dueAt}
+                  fullWidth
+                  disabled={uploading}
+                  onChange={e => {
+                    const val = e.target.value;
+                    setTodoForm(p => ({
+                      ...p,
+                      dueAt: val,
+                      // Auto-clear notification if due date is cleared
+                      notificationEnabled: val ? p.notificationEnabled : false,
+                    }));
+                  }}
+                  InputLabelProps={{ shrink: true }}
+                  helperText="Required to enable push notification"
+                  InputProps={{ sx: mobile ? { fontSize: '1rem' } : {} }}
+                />
+                {todoForm.dueAt && (
+                  <FormControlLabel
+                    control={
+                      <Switch
+                        checked={todoForm.notificationEnabled}
+                        onChange={e => setTodoForm(p => ({ ...p, notificationEnabled: e.target.checked }))}
+                        disabled={uploading}
+                        color="primary"
+                      />
+                    }
+                    label={
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+                        {todoForm.notificationEnabled
+                          ? <NotificationsIcon sx={{ fontSize: 18, color: '#55702C' }} />
+                          : <NotificationsOffIcon sx={{ fontSize: 18, color: 'text.disabled' }} />
+                        }
+                        <Typography variant="body2" fontWeight={600}>
+                          {todoForm.notificationEnabled ? 'Push notification enabled' : 'Push notification off'}
+                        </Typography>
+                      </Box>
+                    }
+                  />
+                )}
+              </>
+            )}
+
             {/* ── Note mode ── */}
             {mode === 'note' && (
               <>
@@ -883,6 +1212,62 @@ export default function FilesTab({ tripId }: FilesTabProps) {
                   label="Note" value={noteForm.body} fullWidth multiline rows={5} disabled={uploading}
                   onChange={e => setNoteForm(p => ({ ...p, body: e.target.value }))}
                   placeholder="What's on your mind?"
+                />
+                <LinkToSelector items={linkableItems} value={linkedTo} onChange={setLinkedTo} />
+              </>
+            )}
+
+            {/* ── Contact mode ── */}
+            {mode === 'contact' && (
+              <>
+                <TextField
+                  label="Name" value={contactForm.name} autoFocus fullWidth required disabled={uploading}
+                  onChange={e => setContactForm(p => ({ ...p, name: e.target.value }))}
+                />
+                <FormControl fullWidth disabled={uploading}>
+                  <InputLabel>Contact type</InputLabel>
+                  <Select value={contactForm.type} label="Contact type" onChange={e => setContactForm(p => ({ ...p, type: e.target.value as ContactTypeValue }))}>
+                    {CONTACT_TYPES.map(({ value, label }) => <MenuItem key={value} value={value}>{label}</MenuItem>)}
+                  </Select>
+                </FormControl>
+                <TextField
+                  label="Phone" value={contactForm.phone} fullWidth disabled={uploading} type="tel"
+                  onChange={e => setContactForm(p => ({ ...p, phone: e.target.value }))}
+                />
+                <TextField
+                  label="Email" value={contactForm.email} fullWidth disabled={uploading} type="email"
+                  onChange={e => setContactForm(p => ({ ...p, email: e.target.value }))}
+                />
+                <TextField
+                  label="Notes (optional)" value={contactForm.notes} fullWidth disabled={uploading}
+                  onChange={e => setContactForm(p => ({ ...p, notes: e.target.value }))}
+                />
+                <LinkToSelector items={linkableItems} value={linkedTo} onChange={setLinkedTo} />
+              </>
+            )}
+
+            {/* ── Link mode ── */}
+            {mode === 'link' && (
+              <>
+                <TextField
+                  label="Name" value={linkForm.name} autoFocus fullWidth required disabled={uploading}
+                  onChange={e => setLinkForm(p => ({ ...p, name: e.target.value }))}
+                  placeholder="e.g. Venue website"
+                />
+                <FormControl fullWidth disabled={uploading}>
+                  <InputLabel>Link type</InputLabel>
+                  <Select value={linkForm.type} label="Link type" onChange={e => setLinkForm(p => ({ ...p, type: e.target.value as LinkTypeValue }))}>
+                    {LINK_TYPES.map(({ value, label }) => <MenuItem key={value} value={value}>{label}</MenuItem>)}
+                  </Select>
+                </FormControl>
+                <TextField
+                  label="URL" value={linkForm.url} fullWidth required disabled={uploading} type="url"
+                  onChange={e => setLinkForm(p => ({ ...p, url: e.target.value }))}
+                  placeholder="https://"
+                />
+                <TextField
+                  label="Notes (optional)" value={linkForm.notes} fullWidth disabled={uploading}
+                  onChange={e => setLinkForm(p => ({ ...p, notes: e.target.value }))}
                 />
                 <LinkToSelector items={linkableItems} value={linkedTo} onChange={setLinkedTo} />
               </>
@@ -911,84 +1296,52 @@ export default function FilesTab({ tripId }: FilesTabProps) {
             )}
             {mode === 'file' && (pendingFile || editingFile) && (
               <>
-                <TextField label="Display name" value={fileForm.name} autoFocus={!!pendingFile} fullWidth disabled={uploading}
+                <TextField
+                  label="Display name" value={fileForm.name} autoFocus={!!pendingFile} fullWidth disabled={uploading}
                   onChange={e => setFileForm(p => ({ ...p, name: e.target.value }))}
-                  placeholder="e.g. Ryanair boarding pass DUB to BUH" />
+                  placeholder="e.g. Outbound boarding pass"
+                />
                 <FormControl fullWidth disabled={uploading}>
-                  <InputLabel>File type</InputLabel>
-                  <Select value={fileForm.type} label="File type" onChange={e => setFileForm(p => ({ ...p, type: e.target.value as FileTypeValue }))}>
+                  <InputLabel>Document type</InputLabel>
+                  <Select value={fileForm.type} label="Document type" onChange={e => setFileForm(p => ({ ...p, type: e.target.value as FileTypeValue }))}>
                     {FILE_TYPES.map(({ value, label }) => <MenuItem key={value} value={value}>{label}</MenuItem>)}
                   </Select>
                 </FormControl>
-                <TextField label="Notes (optional)" value={fileForm.notes} fullWidth multiline rows={2} disabled={uploading}
-                  onChange={e => setFileForm(p => ({ ...p, notes: e.target.value }))} />
+                <TextField
+                  label="Notes (optional)" value={fileForm.notes} fullWidth disabled={uploading}
+                  onChange={e => setFileForm(p => ({ ...p, notes: e.target.value }))}
+                />
                 <LinkToSelector items={linkableItems} value={linkedTo} onChange={setLinkedTo} />
               </>
             )}
 
-            {/* ── Link mode ── */}
-            {mode === 'link' && (
-              <>
-                <TextField label="URL" value={linkForm.url} autoFocus fullWidth disabled={uploading}
-                  onChange={e => setLinkForm(p => ({ ...p, url: e.target.value }))} placeholder="https://..." type="url" />
-                <TextField label="Display name" value={linkForm.name} fullWidth disabled={uploading}
-                  onChange={e => setLinkForm(p => ({ ...p, name: e.target.value }))} placeholder="e.g. Interland Festival Programme" />
-                <FormControl fullWidth disabled={uploading}>
-                  <InputLabel>Link type</InputLabel>
-                  <Select value={linkForm.type} label="Link type" onChange={e => setLinkForm(p => ({ ...p, type: e.target.value as LinkTypeValue }))}>
-                    {LINK_TYPES.map(({ value, label }) => <MenuItem key={value} value={value}>{label}</MenuItem>)}
-                  </Select>
-                </FormControl>
-                <TextField label="Notes (optional)" value={linkForm.notes} fullWidth multiline rows={2} disabled={uploading}
-                  onChange={e => setLinkForm(p => ({ ...p, notes: e.target.value }))} />
-                <LinkToSelector items={linkableItems} value={linkedTo} onChange={setLinkedTo} />
-              </>
+            {/* Upload progress */}
+            {uploading && uploadPct > 0 && mode === 'file' && (
+              <LinearProgress variant="determinate" value={uploadPct} sx={{ borderRadius: 2, height: 6 }} />
             )}
 
-            {/* ── Contact mode ── */}
-            {mode === 'contact' && (
-              <>
-                <TextField label="Name" value={contactForm.name} autoFocus fullWidth disabled={uploading}
-                  onChange={e => setContactForm(p => ({ ...p, name: e.target.value }))} placeholder="e.g. Sarah Kavanagh" />
-                <FormControl fullWidth disabled={uploading}>
-                  <InputLabel>Role</InputLabel>
-                  <Select value={contactForm.type} label="Role" onChange={e => setContactForm(p => ({ ...p, type: e.target.value as ContactTypeValue }))}>
-                    {CONTACT_TYPES.map(({ value, label }) => <MenuItem key={value} value={value}>{label}</MenuItem>)}
-                  </Select>
-                </FormControl>
-                <TextField label="Phone number" value={contactForm.phone} fullWidth disabled={uploading}
-                  onChange={e => setContactForm(p => ({ ...p, phone: e.target.value }))} placeholder="+353 87 123 4567" type="tel"
-                  InputProps={{ startAdornment: <PhoneIcon sx={{ fontSize: 18, color: 'text.disabled', mr: 1 }} /> }} />
-                <TextField label="Email address" value={contactForm.email} fullWidth disabled={uploading}
-                  onChange={e => setContactForm(p => ({ ...p, email: e.target.value }))} placeholder="sarah@venue.ie" type="email"
-                  InputProps={{ startAdornment: <EmailIcon sx={{ fontSize: 18, color: 'text.disabled', mr: 1 }} /> }} />
-                <TextField label="Notes (optional)" value={contactForm.notes} fullWidth multiline rows={2} disabled={uploading}
-                  onChange={e => setContactForm(p => ({ ...p, notes: e.target.value }))} placeholder="e.g. Best reached after 10am" />
-                <LinkToSelector items={linkableItems} value={linkedTo} onChange={setLinkedTo} />
-              </>
+            {error && (
+              <Typography variant="body2" color="error" sx={{ mt: 0.5 }}>{error}</Typography>
             )}
-
-            {uploading && (
-              <Box>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.75 }}>
-                  <Typography variant="caption" color="text.secondary" fontWeight={600}>
-                    {mode === 'file' ? 'Uploading...' : 'Saving...'}
-                  </Typography>
-                  <Typography variant="caption" fontWeight={700}>{uploadPct}%</Typography>
-                </Box>
-                <LinearProgress variant="determinate" value={uploadPct} sx={{ height: 6, borderRadius: 3, backgroundColor: alpha('#55702C', 0.15), '& .MuiLinearProgress-bar': { borderRadius: 3, backgroundColor: '#55702C' } }} />
-              </Box>
-            )}
-
-            {error && <Typography variant="caption" color="error.main" fontWeight={600}>{error}</Typography>}
           </Box>
         </DialogContent>
 
-        <DialogActions sx={{ px: 3, pb: 3, gap: 1, flexDirection: { xs: 'column-reverse', sm: 'row' } }}>
-          <Button onClick={() => { setDialogOpen(false); setEditingFile(null); setLinkedTo(null); }} disabled={uploading} fullWidth={mobile} size="large">
+        <DialogActions sx={{ px: { xs: 2, sm: 3 }, pb: { xs: 3, sm: 2.5 }, pt: 1, gap: 1, flexDirection: { xs: 'column-reverse', sm: 'row' } }}>
+          <Button
+            onClick={() => { setDialogOpen(false); setEditingFile(null); setLinkedTo(null); }}
+            disabled={uploading}
+            fullWidth={mobile}
+            size={mobile ? 'large' : 'medium'}
+          >
             Cancel
           </Button>
-          <Button variant="contained" onClick={handleUpload} disabled={!canSubmit || uploading} fullWidth={mobile} size="large" sx={{ fontWeight: 700 }}>
+          <Button
+            variant="contained"
+            onClick={handleUpload}
+            disabled={uploading || !canSubmit}
+            fullWidth={mobile}
+            size={mobile ? 'large' : 'medium'}
+          >
             {submitLabel}
           </Button>
         </DialogActions>
