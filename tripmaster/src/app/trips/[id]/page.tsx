@@ -4,13 +4,16 @@ import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import {
   Box, Container, Typography, AppBar, Toolbar, IconButton,
-  Tabs, Tab, Chip, Button, Paper,
+  Tabs, Tab, Chip, Button, Paper, CircularProgress,
   Dialog, DialogTitle, DialogContent, DialogActions,
   TextField, Select, MenuItem, FormControl, InputLabel,
+  List, ListItem, ListItemText, Divider, alpha,
   useMediaQuery, useTheme,
 } from '@mui/material';
 import ArrowBackIcon     from '@mui/icons-material/ArrowBack';
 import EditIcon          from '@mui/icons-material/Edit';
+import DeleteForeverIcon from '@mui/icons-material/DeleteForever';
+import WarningAmberIcon  from '@mui/icons-material/WarningAmber';
 import RefreshIcon       from '@mui/icons-material/Refresh';
 import FlightIcon        from '@mui/icons-material/Flight';
 import MapIcon           from '@mui/icons-material/Map';
@@ -110,6 +113,13 @@ export default function TripPage() {
     name: '', tripType: '', purpose: '', startDate: '', endDate: '', status: '',
   });
 
+  // ── Delete state ──
+  const [deletePreviewOpen,  setDeletePreviewOpen]  = useState(false);
+  const [deleteConfirmOpen,  setDeleteConfirmOpen]  = useState(false);
+  const [deletePreview,      setDeletePreview]      = useState<any>(null);
+  const [deleting,           setDeleting]           = useState(false);
+  const [deleteError,        setDeleteError]        = useState('');
+
   useEffect(() => {
     async function loadTrip() {
       try {
@@ -181,6 +191,35 @@ export default function TripPage() {
     const res  = await fetch(`/api/trips/${trip._id}/cover-photo`, { method: 'POST' });
     const data = await res.json();
     if (data.trip) setTrip(data.trip);
+  };
+
+  // ── Delete handlers ───────────────────────────────────────────────────────
+
+  const openDeletePreview = async () => {
+    setDeletePreview(null);
+    setDeleteError('');
+    setDeletePreviewOpen(true);
+    try {
+      const res  = await fetch(`/api/trips/${trip?._id}/delete-preview`);
+      const data = await res.json();
+      setDeletePreview(data);
+    } catch {
+      setDeleteError('Failed to load deletion summary. Please try again.');
+    }
+  };
+
+  const handleDeleteTrip = async () => {
+    if (!trip) return;
+    setDeleting(true);
+    setDeleteError('');
+    try {
+      const res = await fetch(`/api/trips/${trip._id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error('Delete failed');
+      router.push('/dashboard');
+    } catch {
+      setDeleteError('Something went wrong. Please try again.');
+      setDeleting(false);
+    }
   };
 
   if (!trip) return null;
@@ -364,8 +403,8 @@ export default function TripPage() {
       {/* ── Tab content ── */}
       <Container maxWidth="lg" sx={{ py: { xs: 3, sm: 4 }, px: { xs: 2, sm: 3 } }}>
 
-      {trip.status === 'active' && new Date(trip.startDate) <= new Date() && <OnTripScreen tripId={trip._id} trip={trip} />}
-      
+        {trip.status === 'active' && <OnTripScreen tripId={trip._id} trip={trip} />}
+
         {activeTab === 0 && <TripOverview trip={trip} onNavigate={setActiveTab} />}
         {activeTab === 1 && <LogisticsTab tripId={trip._id} trip={trip} />}
         {activeTab === 2 && <ItineraryTab tripId={trip._id} startDate={trip.startDate} endDate={trip.endDate} />}
@@ -406,8 +445,178 @@ export default function TripPage() {
           </Box>
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 3, gap: 1, flexDirection: { xs: 'column-reverse', sm: 'row' } }}>
+          {/* Delete — left-aligned, destructive, unobtrusive until clicked */}
+          <Button
+            startIcon={<DeleteForeverIcon />}
+            onClick={() => { setEditOpen(false); openDeletePreview(); }}
+            sx={{ mr: 'auto', color: '#dc2626', '&:hover': { backgroundColor: alpha('#dc2626', 0.06) } }}
+            fullWidth={isMobile}
+            size="large"
+          >
+            Delete trip
+          </Button>
           <Button onClick={() => setEditOpen(false)} fullWidth={isMobile} size="large">Cancel</Button>
           <Button variant="contained" onClick={saveEdit} disabled={!editForm.name} fullWidth={isMobile} size="large">Save Changes</Button>
+        </DialogActions>
+      </Dialog>
+
+
+      {/* ── Delete preview dialog (Step 1: audit) ── */}
+      <Dialog
+        open={deletePreviewOpen}
+        onClose={() => !deleting && setDeletePreviewOpen(false)}
+        maxWidth="sm"
+        fullWidth
+        fullScreen={isMobile}
+      >
+        <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1.5, fontWeight: 700, color: '#dc2626' }}>
+          <WarningAmberIcon />
+          Delete "{trip?.name}"?
+        </DialogTitle>
+        <DialogContent>
+          {!deletePreview && !deleteError && (
+            <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
+              <CircularProgress size={32} />
+            </Box>
+          )}
+          {deleteError && (
+            <Typography color="error" variant="body2">{deleteError}</Typography>
+          )}
+          {deletePreview && (
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <Typography variant="body2" color="text.secondary">
+                This will permanently delete the following. This cannot be undone.
+              </Typography>
+              <Paper variant="outlined" sx={{ borderRadius: 2, overflow: 'hidden' }}>
+                <List dense disablePadding>
+                  {deletePreview.audit.itinerary.days > 0 && (
+                    <>
+                      <ListItem>
+                        <ListItemText
+                          primary={`Itinerary — ${deletePreview.audit.itinerary.days} day${deletePreview.audit.itinerary.days !== 1 ? 's' : ''}, ${deletePreview.audit.itinerary.stops} stop${deletePreview.audit.itinerary.stops !== 1 ? 's' : ''}`}
+                        />
+                      </ListItem>
+                      <Divider />
+                    </>
+                  )}
+                  {(deletePreview.audit.logistics.transport > 0 || deletePreview.audit.logistics.accommodation > 0 || deletePreview.audit.logistics.venues > 0) && (
+                    <>
+                      <ListItem>
+                        <ListItemText
+                          primary={[
+                            deletePreview.audit.logistics.transport > 0 && `${deletePreview.audit.logistics.transport} transport booking${deletePreview.audit.logistics.transport !== 1 ? 's' : ''}`,
+                            deletePreview.audit.logistics.accommodation > 0 && `${deletePreview.audit.logistics.accommodation} accommodation`,
+                            deletePreview.audit.logistics.venues > 0 && `${deletePreview.audit.logistics.venues} venue${deletePreview.audit.logistics.venues !== 1 ? 's' : ''}`,
+                          ].filter(Boolean).join(', ')}
+                          secondary="Logistics"
+                        />
+                      </ListItem>
+                      <Divider />
+                    </>
+                  )}
+                  {deletePreview.audit.files.total > 0 && (
+                    <>
+                      <ListItem>
+                        <ListItemText
+                          primary={`${deletePreview.audit.files.total} resource${deletePreview.audit.files.total !== 1 ? 's' : ''} — ${Object.entries(deletePreview.audit.files.byType).map(([k, v]) => `${v} ${k}${(v as number) !== 1 ? 's' : ''}`).join(', ')}`}
+                          secondary="Files, links, contacts, notes, todos"
+                        />
+                      </ListItem>
+                      <Divider />
+                    </>
+                  )}
+                  {deletePreview.audit.gcsAttachments.length > 0 && (
+                    <>
+                      <ListItem sx={{ backgroundColor: alpha('#dc2626', 0.04) }}>
+                        <ListItemText
+                          primary={`${deletePreview.audit.gcsAttachments.length} uploaded file${deletePreview.audit.gcsAttachments.length !== 1 ? 's' : ''} will be permanently removed from storage`}
+                          secondary={deletePreview.audit.gcsAttachments.map((f: any) => f.name).join(', ')}
+                          primaryTypographyProps={{ color: '#dc2626', fontWeight: 700 }}
+                        />
+                      </ListItem>
+                      <Divider />
+                    </>
+                  )}
+                  {deletePreview.audit.pushLogs.total > 0 && (
+                    <ListItem>
+                      <ListItemText
+                        primary={`${deletePreview.audit.pushLogs.total} push notification log${deletePreview.audit.pushLogs.total !== 1 ? 's' : ''}`}
+                      />
+                    </ListItem>
+                  )}
+                  {deletePreview.audit.packing.exists && (
+                    <>
+                      <Divider />
+                      <ListItem>
+                        <ListItemText primary="Packing list" />
+                      </ListItem>
+                    </>
+                  )}
+                  {deletePreview.audit.intelligence.exists && (
+                    <>
+                      <Divider />
+                      <ListItem>
+                        <ListItemText primary="Cultural intelligence data" />
+                      </ListItem>
+                    </>
+                  )}
+                </List>
+              </Paper>
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 3, gap: 1, flexDirection: { xs: 'column-reverse', sm: 'row' } }}>
+          <Button onClick={() => setDeletePreviewOpen(false)} fullWidth={isMobile} size="large">
+            Cancel
+          </Button>
+          {deletePreview && (
+            <Button
+              variant="contained"
+              onClick={() => { setDeletePreviewOpen(false); setDeleteConfirmOpen(true); }}
+              fullWidth={isMobile}
+              size="large"
+              sx={{ backgroundColor: '#dc2626', '&:hover': { backgroundColor: '#b91c1c' } }}
+              startIcon={<DeleteForeverIcon />}
+            >
+              Continue to delete
+            </Button>
+          )}
+        </DialogActions>
+      </Dialog>
+
+      {/* ── Delete confirm dialog (Step 2: point of no return) ── */}
+      <Dialog
+        open={deleteConfirmOpen}
+        onClose={() => !deleting && setDeleteConfirmOpen(false)}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle sx={{ fontWeight: 700, color: '#dc2626' }}>
+          Are you absolutely sure?
+        </DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary">
+            <strong>"{trip?.name}"</strong> and all its data will be permanently deleted.
+            There is no undo.
+          </Typography>
+          {deleteError && (
+            <Typography color="error" variant="body2" sx={{ mt: 1 }}>{deleteError}</Typography>
+          )}
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 3, gap: 1 }}>
+          <Button onClick={() => setDeleteConfirmOpen(false)} disabled={deleting} size="large">
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            onClick={handleDeleteTrip}
+            disabled={deleting}
+            size="large"
+            sx={{ backgroundColor: '#dc2626', '&:hover': { backgroundColor: '#b91c1c' } }}
+            startIcon={deleting ? <CircularProgress size={18} sx={{ color: 'white' }} /> : <DeleteForeverIcon />}
+          >
+            {deleting ? 'Deleting…' : 'Permanently delete'}
+          </Button>
         </DialogActions>
       </Dialog>
 
