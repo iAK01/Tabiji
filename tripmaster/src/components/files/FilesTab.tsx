@@ -714,6 +714,12 @@ export default function FilesTab({ tripId }: FilesTabProps) {
   const [error,         setError]         = useState<string | null>(null);
   const [editingFile,   setEditingFile]   = useState<TripFile | null>(null);
 
+  // Refs for the date/time inputs — MUI's synthetic event layer can silently
+  // drop onChange on type="date" and type="time" in some versions.
+  // Reading from the DOM directly at submit time is bulletproof.
+  const dueDateRef = useRef<HTMLInputElement>(null);
+  const dueTimeRef = useRef<HTMLInputElement>(null);
+
   useEffect(() => {
     Promise.all([
       fetch(`/api/trips/${tripId}/files`).then(r => r.json()),
@@ -830,10 +836,17 @@ export default function FilesTab({ tripId }: FilesTabProps) {
 
     if (mode === 'todo') {
       if (!todoForm.name.trim()) { setError('Title is required'); setUploading(false); return; }
+
+      // Read directly from DOM — bypasses any MUI synthetic event issues
+      const dueDate = dueDateRef.current?.value ?? '';
+      const dueTime = dueTimeRef.current?.value ?? '';
+      const dueAtIso = combineDueAt(dueDate, dueTime);
+
+      console.log('[todo submit] dueDate:', dueDate, 'dueTime:', dueTime, 'iso:', dueAtIso);
+
       fd.append('resourceType', 'todo');
       fd.append('name', todoForm.name.trim());
       if (todoForm.body.trim()) fd.append('body', todoForm.body.trim());
-      const dueAtIso = combineDueAt(todoForm.dueDate, todoForm.dueTime);
       if (dueAtIso) fd.append('dueAt', dueAtIso);
       fd.append('notification.enabled', todoForm.notificationEnabled && !!dueAtIso ? 'true' : 'false');
       fd.append('source', 'manual');
@@ -936,7 +949,6 @@ export default function FilesTab({ tripId }: FilesTabProps) {
   const typeOrder  = ALL_TYPES.map(t => t.value);
   const sortedKeys = [...grouped.keys()].sort((a, b) => typeOrder.indexOf(a as any) - typeOrder.indexOf(b as any));
 
-  const hasDueAt = !!(todoForm.dueDate && todoForm.dueTime);
   const canSubmit =
     mode === 'todo'    ? !!todoForm.name.trim() :
     mode === 'note'    ? !!noteForm.body.trim() :
@@ -1164,69 +1176,80 @@ export default function FilesTab({ tripId }: FilesTabProps) {
                   placeholder="Any extra detail..."
                   InputProps={{ sx: mobile ? { fontSize: '1rem' } : {} }}
                 />
-                {/* Split into date + time so onChange fires reliably on every keystroke/segment change */}
+                {/* Plain inputs — MUI wrappers swallow onChange/refs on date in this MUI build */}
                 <Box sx={{ display: 'flex', gap: 1.5 }}>
-                  <TextField
-                    label="Due date"
-                    type="date"
-                    value={todoForm.dueDate}
-                    fullWidth
-                    disabled={uploading}
-                    onChange={e => {
-                      const val = e.target.value;
-                      setTodoForm(p => ({
-                        ...p,
-                        dueDate: val,
-                        notificationEnabled: val && p.dueTime ? p.notificationEnabled : false,
-                      }));
-                    }}
-                    InputLabelProps={{ shrink: true }}
-                    InputProps={{ sx: mobile ? { fontSize: '1rem' } : {} }}
-                  />
-                  <TextField
-                    label="Due time"
-                    type="time"
-                    value={todoForm.dueTime}
-                    fullWidth
-                    disabled={uploading}
-                    onChange={e => {
-                      const val = e.target.value;
-                      setTodoForm(p => ({
-                        ...p,
-                        dueTime: val,
-                        notificationEnabled: p.dueDate && val ? p.notificationEnabled : false,
-                      }));
-                    }}
-                    InputLabelProps={{ shrink: true }}
-                    InputProps={{ sx: mobile ? { fontSize: '1rem' } : {} }}
-                  />
+                  <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+                    <Typography variant="caption" color="text.secondary" fontWeight={600} sx={{ fontSize: '0.75rem' }}>
+                      Due date
+                    </Typography>
+                    <input
+                      ref={dueDateRef}
+                      type="date"
+                      defaultValue={todoForm.dueDate}
+                      disabled={uploading}
+                      style={{
+                        width: '100%',
+                        padding: '12px 14px',
+                        fontSize: mobile ? '1rem' : '0.875rem',
+                        border: '1px solid rgba(0,0,0,0.23)',
+                        borderRadius: 4,
+                        backgroundColor: 'transparent',
+                        outline: 'none',
+                        color: 'inherit',
+                        fontFamily: 'inherit',
+                        boxSizing: 'border-box',
+                      }}
+                    />
+                  </Box>
+                  <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+                    <Typography variant="caption" color="text.secondary" fontWeight={600} sx={{ fontSize: '0.75rem' }}>
+                      Due time
+                    </Typography>
+                    <input
+                      ref={dueTimeRef}
+                      type="time"
+                      defaultValue={todoForm.dueTime}
+                      disabled={uploading}
+                      style={{
+                        width: '100%',
+                        padding: '12px 14px',
+                        fontSize: mobile ? '1rem' : '0.875rem',
+                        border: '1px solid rgba(0,0,0,0.23)',
+                        borderRadius: 4,
+                        backgroundColor: 'transparent',
+                        outline: 'none',
+                        color: 'inherit',
+                        fontFamily: 'inherit',
+                        boxSizing: 'border-box',
+                      }}
+                    />
+                  </Box>
                 </Box>
                 <Typography variant="caption" color="text.secondary" sx={{ mt: -1.5 }}>
-                  Required to enable push notification
+                  Set both to enable push notification
                 </Typography>
-                {hasDueAt && (
-                  <FormControlLabel
-                    control={
-                      <Switch
-                        checked={todoForm.notificationEnabled}
-                        onChange={e => setTodoForm(p => ({ ...p, notificationEnabled: e.target.checked }))}
-                        disabled={uploading}
-                        color="primary"
-                      />
-                    }
-                    label={
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
-                        {todoForm.notificationEnabled
-                          ? <NotificationsIcon sx={{ fontSize: 18, color: '#55702C' }} />
-                          : <NotificationsOffIcon sx={{ fontSize: 18, color: 'text.disabled' }} />
-                        }
-                        <Typography variant="body2" fontWeight={600}>
-                          {todoForm.notificationEnabled ? 'Push notification enabled' : 'Push notification off'}
-                        </Typography>
-                      </Box>
-                    }
-                  />
-                )}
+                {/* Notification toggle — always visible so user can enable it after setting the date/time */}
+                <FormControlLabel
+                  control={
+                    <Switch
+                      checked={todoForm.notificationEnabled}
+                      onChange={e => setTodoForm(p => ({ ...p, notificationEnabled: e.target.checked }))}
+                      disabled={uploading}
+                      color="primary"
+                    />
+                  }
+                  label={
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+                      {todoForm.notificationEnabled
+                        ? <NotificationsIcon sx={{ fontSize: 18, color: '#55702C' }} />
+                        : <NotificationsOffIcon sx={{ fontSize: 18, color: 'text.disabled' }} />
+                      }
+                      <Typography variant="body2" fontWeight={600}>
+                        {todoForm.notificationEnabled ? 'Push notification on (requires due date + time)' : 'Push notification off'}
+                      </Typography>
+                    </Box>
+                  }
+                />
               </>
             )}
 
