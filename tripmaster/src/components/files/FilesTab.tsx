@@ -165,7 +165,7 @@ const BLANK_FILE_FORM    = { name: '', type: 'other' as FileTypeValue,    notes:
 const BLANK_LINK_FORM    = { name: '', type: 'event_website' as LinkTypeValue, url: '', notes: '' };
 const BLANK_CONTACT_FORM = { name: '', type: 'other' as ContactTypeValue, phone: '', email: '', notes: '' };
 const BLANK_NOTE_FORM    = { name: '', type: 'general' as NoteTypeValue,  body: '' };
-const BLANK_TODO_FORM    = { name: '', body: '', dueAt: '', notificationEnabled: false };
+const BLANK_TODO_FORM    = { name: '', body: '', dueDate: '', dueTime: '', notificationEnabled: false };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -175,13 +175,23 @@ function formatBytes(bytes: number): string {
   return `${(bytes / 1048576).toFixed(1)} MB`;
 }
 
-// Convert a stored ISO date string to the format required by datetime-local inputs
-function toDatetimeLocal(iso: string | undefined): string {
-  if (!iso) return '';
+// Convert a stored ISO date string to separate date (YYYY-MM-DD) and time (HH:MM) parts
+function splitDueAt(iso: string | undefined): { dueDate: string; dueTime: string } {
+  if (!iso) return { dueDate: '', dueTime: '' };
   const d = new Date(iso);
-  if (isNaN(d.getTime())) return '';
+  if (isNaN(d.getTime())) return { dueDate: '', dueTime: '' };
   const pad = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  return {
+    dueDate: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`,
+    dueTime: `${pad(d.getHours())}:${pad(d.getMinutes())}`,
+  };
+}
+
+// Combine dueDate + dueTime into a UTC ISO string for storage
+function combineDueAt(dueDate: string, dueTime: string): string | null {
+  if (!dueDate || !dueTime) return null;
+  const d = new Date(`${dueDate}T${dueTime}:00`);
+  return isNaN(d.getTime()) ? null : d.toISOString();
 }
 
 // Format a dueAt for display in cards
@@ -745,10 +755,12 @@ export default function FilesTab({ tripId }: FilesTabProps) {
 
     if (file.resourceType === 'todo') {
       setMode('todo');
+      const { dueDate, dueTime } = splitDueAt(file.dueAt);
       setTodoForm({
         name:                file.name ?? '',
         body:                file.body ?? '',
-        dueAt:               toDatetimeLocal(file.dueAt),
+        dueDate,
+        dueTime,
         notificationEnabled: file.notification?.enabled ?? false,
       });
     } else if (file.resourceType === 'note') {
@@ -821,11 +833,9 @@ export default function FilesTab({ tripId }: FilesTabProps) {
       fd.append('resourceType', 'todo');
       fd.append('name', todoForm.name.trim());
       if (todoForm.body.trim()) fd.append('body', todoForm.body.trim());
-      if (todoForm.dueAt) {
-        // Convert datetime-local string to ISO UTC
-        fd.append('dueAt', new Date(todoForm.dueAt).toISOString());
-      }
-      fd.append('notification.enabled', todoForm.notificationEnabled && !!todoForm.dueAt ? 'true' : 'false');
+      const dueAtIso = combineDueAt(todoForm.dueDate, todoForm.dueTime);
+      if (dueAtIso) fd.append('dueAt', dueAtIso);
+      fd.append('notification.enabled', todoForm.notificationEnabled && !!dueAtIso ? 'true' : 'false');
       fd.append('source', 'manual');
     } else if (mode === 'note') {
       if (!noteForm.body.trim()) { setError('Note content is required'); setUploading(false); return; }
@@ -926,8 +936,13 @@ export default function FilesTab({ tripId }: FilesTabProps) {
   const typeOrder  = ALL_TYPES.map(t => t.value);
   const sortedKeys = [...grouped.keys()].sort((a, b) => typeOrder.indexOf(a as any) - typeOrder.indexOf(b as any));
 
+  const hasDueAt = !!(todoForm.dueDate && todoForm.dueTime);
   const canSubmit =
     mode === 'todo'    ? !!todoForm.name.trim() :
+    mode === 'note'    ? !!noteForm.body.trim() :
+    mode === 'contact' ? !!contactForm.name.trim() && (!!contactForm.phone.trim() || !!contactForm.email.trim()) :
+    mode === 'link'    ? !!linkForm.name.trim() && !!linkForm.url.trim() :
+                         (!!editingFile || !!pendingFile) && !!fileForm.name.trim();
     mode === 'note'    ? !!noteForm.body.trim() :
     mode === 'contact' ? !!contactForm.name.trim() && (!!contactForm.phone.trim() || !!contactForm.email.trim()) :
     mode === 'link'    ? !!linkForm.name.trim() && !!linkForm.url.trim() :
@@ -1149,26 +1164,47 @@ export default function FilesTab({ tripId }: FilesTabProps) {
                   placeholder="Any extra detail..."
                   InputProps={{ sx: mobile ? { fontSize: '1rem' } : {} }}
                 />
-                <TextField
-                  label="Due date & time (optional)"
-                  type="datetime-local"
-                  value={todoForm.dueAt}
-                  fullWidth
-                  disabled={uploading}
-                  onChange={e => {
-                    const val = e.target.value;
-                    setTodoForm(p => ({
-                      ...p,
-                      dueAt: val,
-                      // Auto-clear notification if due date is cleared
-                      notificationEnabled: val ? p.notificationEnabled : false,
-                    }));
-                  }}
-                  InputLabelProps={{ shrink: true }}
-                  helperText="Required to enable push notification"
-                  InputProps={{ sx: mobile ? { fontSize: '1rem' } : {} }}
-                />
-                {todoForm.dueAt && (
+                {/* Split into date + time so onChange fires reliably on every keystroke/segment change */}
+                <Box sx={{ display: 'flex', gap: 1.5 }}>
+                  <TextField
+                    label="Due date"
+                    type="date"
+                    value={todoForm.dueDate}
+                    fullWidth
+                    disabled={uploading}
+                    onChange={e => {
+                      const val = e.target.value;
+                      setTodoForm(p => ({
+                        ...p,
+                        dueDate: val,
+                        notificationEnabled: val && p.dueTime ? p.notificationEnabled : false,
+                      }));
+                    }}
+                    InputLabelProps={{ shrink: true }}
+                    InputProps={{ sx: mobile ? { fontSize: '1rem' } : {} }}
+                  />
+                  <TextField
+                    label="Due time"
+                    type="time"
+                    value={todoForm.dueTime}
+                    fullWidth
+                    disabled={uploading}
+                    onChange={e => {
+                      const val = e.target.value;
+                      setTodoForm(p => ({
+                        ...p,
+                        dueTime: val,
+                        notificationEnabled: p.dueDate && val ? p.notificationEnabled : false,
+                      }));
+                    }}
+                    InputLabelProps={{ shrink: true }}
+                    InputProps={{ sx: mobile ? { fontSize: '1rem' } : {} }}
+                  />
+                </Box>
+                <Typography variant="caption" color="text.secondary" sx={{ mt: -1.5 }}>
+                  Required to enable push notification
+                </Typography>
+                {hasDueAt && (
                   <FormControlLabel
                     control={
                       <Switch
