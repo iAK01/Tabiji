@@ -4,33 +4,43 @@ import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import {
   Box, Container, Typography, AppBar, Toolbar, IconButton,
-  Tabs, Tab, Chip, Button, Paper, CircularProgress,
+  Tabs, Tab, Chip, Button, Paper, CircularProgress, Tooltip, alpha,
   Dialog, DialogTitle, DialogContent, DialogActions,
   TextField, Select, MenuItem, FormControl, InputLabel,
-  List, ListItem, ListItemText, Divider, alpha,
+  List, ListItem, ListItemText, Divider,
   useMediaQuery, useTheme,
+  SpeedDial, SpeedDialIcon, SpeedDialAction, Fab,
 } from '@mui/material';
-import ArrowBackIcon     from '@mui/icons-material/ArrowBack';
-import EditIcon          from '@mui/icons-material/Edit';
-import DeleteForeverIcon from '@mui/icons-material/DeleteForever';
-import WarningAmberIcon  from '@mui/icons-material/WarningAmber';
-import RefreshIcon       from '@mui/icons-material/Refresh';
-import FlightIcon        from '@mui/icons-material/Flight';
-import MapIcon           from '@mui/icons-material/Map';
-import BackpackIcon      from '@mui/icons-material/Backpack';
-import LightbulbIcon     from '@mui/icons-material/Lightbulb';
-import WbSunnyIcon       from '@mui/icons-material/WbSunny';
-import GridViewIcon      from '@mui/icons-material/GridView';
-import FolderOpenIcon    from '@mui/icons-material/FolderOpen';
-import LogisticsTab      from '@/components/logistics/LogisticsTab';
-import ItineraryTab      from '@/components/itinerary/ItineraryTab';
-import PackingTab        from '@/components/packing/PackingTab';
-import IntelligenceTab   from '@/components/intelligence/IntelligenceTab';
-import WeatherTab        from '@/components/weather/WeatherTab';
-import TripOverview      from '@/components/overview/TripOverview';
-import FilesTab          from '@/components/files/FilesTab';
-import OnTripScreen from '@/components/trips/OnTripScreen';
-import dynamic           from 'next/dynamic';
+import ArrowBackIcon       from '@mui/icons-material/ArrowBack';
+import EditIcon            from '@mui/icons-material/Edit';
+import DeleteForeverIcon   from '@mui/icons-material/DeleteForever';
+import WarningAmberIcon    from '@mui/icons-material/WarningAmber';
+import RefreshIcon         from '@mui/icons-material/Refresh';
+import FlightIcon          from '@mui/icons-material/Flight';
+import MapIcon             from '@mui/icons-material/Map';
+import BackpackIcon        from '@mui/icons-material/Backpack';
+import LightbulbIcon       from '@mui/icons-material/Lightbulb';
+import WbSunnyIcon         from '@mui/icons-material/WbSunny';
+import GridViewIcon        from '@mui/icons-material/GridView';
+import FolderOpenIcon      from '@mui/icons-material/FolderOpen';
+import HotelIcon           from '@mui/icons-material/Hotel';
+import PlaceIcon           from '@mui/icons-material/Place';
+import AddLocationAltIcon  from '@mui/icons-material/AddLocationAlt';
+import PlaylistAddIcon     from '@mui/icons-material/PlaylistAdd';
+import NoteAddIcon         from '@mui/icons-material/NoteAdd';
+import AssignmentIcon      from '@mui/icons-material/Assignment';
+import LinkIcon            from '@mui/icons-material/Link';
+import PersonAddIcon       from '@mui/icons-material/PersonAdd';
+import UploadFileIcon      from '@mui/icons-material/UploadFile';
+import LogisticsTab        from '@/components/logistics/LogisticsTab';
+import ItineraryTab        from '@/components/itinerary/ItineraryTab';
+import PackingTab          from '@/components/packing/PackingTab';
+import IntelligenceTab     from '@/components/intelligence/IntelligenceTab';
+import WeatherTab          from '@/components/weather/WeatherTab';
+import TripOverview        from '@/components/overview/TripOverview';
+import FilesTab            from '@/components/files/FilesTab';
+import OnTripScreen        from '@/components/trips/OnTripScreen';
+import dynamic             from 'next/dynamic';
 import { saveTripCache, getTripCache, queueAction } from '@/lib/offline/db';
 
 const MapTab = dynamic(() => import('@/components/map/MapTab'), { ssr: false });
@@ -92,11 +102,55 @@ const TAB_CONFIG = [
   { label: 'Logistics', Icon: FlightIcon },
   { label: 'Itinerary', Icon: MapIcon },
   { label: 'Packing',   Icon: BackpackIcon },
-  { label: 'Discover',   Icon: LightbulbIcon },
+  { label: 'Discover',  Icon: LightbulbIcon },
   { label: 'Weather',   Icon: WbSunnyIcon },
   { label: 'Map',       Icon: MapIcon },
   { label: 'Resources', Icon: FolderOpenIcon },
 ];
+
+export type FabTrigger = { action: string; seq: number };
+
+type FabActionConfig = { label: string; icon: React.ReactNode; action: string };
+
+const ACTION_TAB_MAP: Record<string, number> = {
+  transport: 1, accom: 1, venue: 1,
+  stop: 2,
+  item: 3,
+  note: 7, todo: 7, link: 7, contact: 7, file: 7,
+};
+
+const TAB_FAB_ACTIONS: Record<number, FabActionConfig[]> = {
+  0: [ // Overview — navigates to the right tab then fires
+    { label: 'Transport',     icon: <FlightIcon />,         action: 'transport' },
+    { label: 'Accommodation', icon: <HotelIcon />,          action: 'accom'     },
+    { label: 'Venue',         icon: <PlaceIcon />,          action: 'venue'     },
+    { label: 'Stop',          icon: <AddLocationAltIcon />, action: 'stop'      },
+    { label: 'Packing item',  icon: <PlaylistAddIcon />,    action: 'item'      },
+    { label: 'Note',          icon: <NoteAddIcon />,        action: 'note'      },
+    { label: 'To-do',         icon: <AssignmentIcon />,     action: 'todo'      },
+    { label: 'Link',          icon: <LinkIcon />,           action: 'link'      },
+    { label: 'Contact',       icon: <PersonAddIcon />,      action: 'contact'   },
+    { label: 'File',          icon: <UploadFileIcon />,     action: 'file'      },
+  ],
+  1: [ // Logistics
+    { label: 'Transport',     icon: <FlightIcon />,         action: 'transport' },
+    { label: 'Accommodation', icon: <HotelIcon />,          action: 'accom'     },
+    { label: 'Venue',         icon: <PlaceIcon />,          action: 'venue'     },
+  ],
+  2: [ // Itinerary
+    { label: 'Add stop',      icon: <AddLocationAltIcon />, action: 'stop'      },
+  ],
+  3: [ // Packing
+    { label: 'Add item',      icon: <PlaylistAddIcon />,    action: 'item'      },
+  ],
+  7: [ // Resources
+    { label: 'Note',          icon: <NoteAddIcon />,        action: 'note'      },
+    { label: 'To-do',         icon: <AssignmentIcon />,     action: 'todo'      },
+    { label: 'Link',          icon: <LinkIcon />,           action: 'link'      },
+    { label: 'Contact',       icon: <PersonAddIcon />,      action: 'contact'   },
+    { label: 'File',          icon: <UploadFileIcon />,     action: 'file'      },
+  ],
+};
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
@@ -112,6 +166,10 @@ export default function TripPage() {
   const [editForm,  setEditForm]  = useState({
     name: '', tripType: '', purpose: '', startDate: '', endDate: '', status: '',
   });
+
+  // ── FAB state ──
+  const [fabTrigger, setFabTrigger] = useState<FabTrigger | null>(null);
+  const [fabOpen,    setFabOpen]    = useState(false);
 
   // ── Delete state ──
   const [deletePreviewOpen,  setDeletePreviewOpen]  = useState(false);
@@ -228,6 +286,16 @@ export default function TripPage() {
     ? Math.ceil((new Date(trip.startDate).getTime() - Date.now()) / 86400000)
     : null;
 
+  // ── FAB fire helper ───────────────────────────────────────────────────────
+  const fireFab = (action: string) => {
+    if (activeTab === 0) {
+      const targetTab = ACTION_TAB_MAP[action];
+      if (targetTab !== undefined) setActiveTab(targetTab);
+    }
+    setFabTrigger({ action, seq: (fabTrigger?.seq ?? 0) + 1 });
+    setFabOpen(false);
+  };
+
   return (
     <Box sx={{ minHeight: '100vh', backgroundColor: 'background.default', pb: { xs: 6, sm: 0 } }}>
 
@@ -276,7 +344,6 @@ export default function TripPage() {
   </Typography>
 
   <Box sx={{ display: 'flex', alignItems: 'stretch', gap: 0 }}>
-    {/* Chiseled accent — thicker, taller, harder edge */}
     <Box sx={{
       width: 5,
       alignSelf: 'stretch',
@@ -292,12 +359,11 @@ export default function TripPage() {
       fontSize: { xs: '2.4rem', sm: '3.2rem', md: '3.8rem' },
       lineHeight: 1.05,
       letterSpacing: { xs: '-1px', sm: '-2px' },
-      // Chiseled: light catches top edge, dark drops below, ambient blur
       textShadow: [
-        '0 1px 0 rgba(255,255,255,0.07)',   // top ridge catch
-        '0 -1px 0 rgba(0,0,0,0.5)',          // bottom carved depth
-        '0 4px 20px rgba(0,0,0,0.55)',       // ambient depth shadow
-        '0 1px 2px rgba(0,0,0,0.8)',         // tight dark underline
+        '0 1px 0 rgba(255,255,255,0.07)',
+        '0 -1px 0 rgba(0,0,0,0.5)',
+        '0 4px 20px rgba(0,0,0,0.55)',
+        '0 1px 2px rgba(0,0,0,0.8)',
       ].join(', '),
       overflow: 'hidden',
       textOverflow: 'ellipsis',
@@ -333,7 +399,6 @@ export default function TripPage() {
       transition: 'all 0.18s ease',
       position: 'relative',
       overflow: 'hidden',
-      // Hover state — icon + label light up, subtle background wash
       '&:hover': {
         color: 'rgba(255,255,255,0.9)',
         backgroundColor: 'rgba(255,255,255,0.06)',
@@ -343,7 +408,6 @@ export default function TripPage() {
           filter: 'drop-shadow(0 0 6px rgba(201,82,27,0.7))',
         },
       },
-      // Selected state — full white, icon terracotta glowing
       '&.Mui-selected': {
         color: 'white',
         fontWeight: 800,
@@ -406,14 +470,62 @@ export default function TripPage() {
         {trip.status === 'active' && <OnTripScreen tripId={trip._id} trip={trip} />}
 
         {activeTab === 0 && <TripOverview trip={trip} onNavigate={setActiveTab} />}
-        {activeTab === 1 && <LogisticsTab tripId={trip._id} trip={trip} />}
-        {activeTab === 2 && <ItineraryTab tripId={trip._id} startDate={trip.startDate} endDate={trip.endDate} />}
-        {activeTab === 3 && <PackingTab tripId={trip._id} tripType={trip.tripType} nights={trip.nights} startDate={trip.startDate} />}
+        {activeTab === 1 && <LogisticsTab tripId={trip._id} trip={trip} fabTrigger={fabTrigger} />}
+        {activeTab === 2 && <ItineraryTab tripId={trip._id} startDate={trip.startDate} endDate={trip.endDate} fabTrigger={fabTrigger} />}
+        {activeTab === 3 && <PackingTab tripId={trip._id} tripType={trip.tripType} nights={trip.nights} startDate={trip.startDate} fabTrigger={fabTrigger} />}
         {activeTab === 4 && <IntelligenceTab tripId={trip._id} />}
         {activeTab === 5 && <WeatherTab tripId={trip._id} destinationCity={trip.destination?.city} />}
         {activeTab === 6 && <MapTab tripId={trip._id} trip={trip} />}
-        {activeTab === 7 && <FilesTab tripId={trip._id} />}
+        {activeTab === 7 && <FilesTab tripId={trip._id} fabTrigger={fabTrigger} />}
       </Container>
+
+      {/* ── Context-aware FAB ── */}
+      {TAB_FAB_ACTIONS[activeTab] && (() => {
+        const actions = TAB_FAB_ACTIONS[activeTab];
+        if (actions.length === 1) {
+          return (
+            <Tooltip title={actions[0].label} placement="left">
+              <Fab
+                onClick={() => fireFab(actions[0].action)}
+                sx={{
+                  position: 'fixed', bottom: { xs: 24, sm: 32 }, right: { xs: 16, sm: 32 }, zIndex: 1050,
+                  backgroundColor: '#55702C', color: 'white', boxShadow: '0 4px 20px rgba(0,0,0,0.25)',
+                  '&:hover': { backgroundColor: '#455f24' },
+                }}
+              >
+                {actions[0].icon}
+              </Fab>
+            </Tooltip>
+          );
+        }
+        return (
+          <SpeedDial
+            ariaLabel="Quick add"
+            open={fabOpen}
+            onOpen={() => setFabOpen(true)}
+            onClose={() => setFabOpen(false)}
+            icon={<SpeedDialIcon />}
+            sx={{
+              position: 'fixed', bottom: { xs: 24, sm: 32 }, right: { xs: 16, sm: 32 }, zIndex: 1050,
+              '& .MuiSpeedDial-fab': {
+                backgroundColor: '#55702C', color: 'white', boxShadow: '0 4px 20px rgba(0,0,0,0.25)',
+                '&:hover': { backgroundColor: '#455f24' },
+              },
+            }}
+          >
+            {actions.map(({ label, icon, action }) => (
+              <SpeedDialAction
+                key={action}
+                icon={icon}
+                tooltipTitle={label}
+                tooltipOpen={isMobile}
+                onClick={() => fireFab(action)}
+                sx={{ '& .MuiSpeedDialAction-fab': { color: '#55702C', '&:hover': { backgroundColor: alpha('#55702C', 0.1) } } }}
+              />
+            ))}
+          </SpeedDial>
+        );
+      })()}
 
       {/* ── Edit dialog ── */}
       <Dialog open={editOpen} onClose={() => setEditOpen(false)} maxWidth="sm" fullWidth fullScreen={isMobile}>
@@ -445,7 +557,6 @@ export default function TripPage() {
           </Box>
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 3, gap: 1, flexDirection: { xs: 'column-reverse', sm: 'row' } }}>
-          {/* Delete — left-aligned, destructive, unobtrusive until clicked */}
           <Button
             startIcon={<DeleteForeverIcon />}
             onClick={() => { setEditOpen(false); openDeletePreview(); }}
@@ -460,14 +571,11 @@ export default function TripPage() {
         </DialogActions>
       </Dialog>
 
-
       {/* ── Delete preview dialog (Step 1: audit) ── */}
       <Dialog
         open={deletePreviewOpen}
         onClose={() => !deleting && setDeletePreviewOpen(false)}
-        maxWidth="sm"
-        fullWidth
-        fullScreen={isMobile}
+        maxWidth="sm" fullWidth fullScreen={isMobile}
       >
         <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1.5, fontWeight: 700, color: '#dc2626' }}>
           <WarningAmberIcon />
@@ -566,15 +674,12 @@ export default function TripPage() {
           )}
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 3, gap: 1, flexDirection: { xs: 'column-reverse', sm: 'row' } }}>
-          <Button onClick={() => setDeletePreviewOpen(false)} fullWidth={isMobile} size="large">
-            Cancel
-          </Button>
+          <Button onClick={() => setDeletePreviewOpen(false)} fullWidth={isMobile} size="large">Cancel</Button>
           {deletePreview && (
             <Button
               variant="contained"
               onClick={() => { setDeletePreviewOpen(false); setDeleteConfirmOpen(true); }}
-              fullWidth={isMobile}
-              size="large"
+              fullWidth={isMobile} size="large"
               sx={{ backgroundColor: '#dc2626', '&:hover': { backgroundColor: '#b91c1c' } }}
               startIcon={<DeleteForeverIcon />}
             >
@@ -588,30 +693,21 @@ export default function TripPage() {
       <Dialog
         open={deleteConfirmOpen}
         onClose={() => !deleting && setDeleteConfirmOpen(false)}
-        maxWidth="xs"
-        fullWidth
+        maxWidth="xs" fullWidth
       >
-        <DialogTitle sx={{ fontWeight: 700, color: '#dc2626' }}>
-          Are you absolutely sure?
-        </DialogTitle>
+        <DialogTitle sx={{ fontWeight: 700, color: '#dc2626' }}>Are you absolutely sure?</DialogTitle>
         <DialogContent>
           <Typography variant="body2" color="text.secondary">
-            <strong>"{trip?.name}"</strong> and all its data will be permanently deleted.
-            There is no undo.
+            <strong>"{trip?.name}"</strong> and all its data will be permanently deleted. There is no undo.
           </Typography>
           {deleteError && (
             <Typography color="error" variant="body2" sx={{ mt: 1 }}>{deleteError}</Typography>
           )}
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 3, gap: 1 }}>
-          <Button onClick={() => setDeleteConfirmOpen(false)} disabled={deleting} size="large">
-            Cancel
-          </Button>
+          <Button onClick={() => setDeleteConfirmOpen(false)} disabled={deleting} size="large">Cancel</Button>
           <Button
-            variant="contained"
-            onClick={handleDeleteTrip}
-            disabled={deleting}
-            size="large"
+            variant="contained" onClick={handleDeleteTrip} disabled={deleting} size="large"
             sx={{ backgroundColor: '#dc2626', '&:hover': { backgroundColor: '#b91c1c' } }}
             startIcon={deleting ? <CircularProgress size={18} sx={{ color: 'white' }} /> : <DeleteForeverIcon />}
           >

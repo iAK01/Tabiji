@@ -105,6 +105,7 @@ interface Props {
   tripId:    string;
   startDate: string;
   endDate:   string;
+  fabTrigger?: { action: string; seq: number } | null;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -744,7 +745,7 @@ function AddStopDrawer({
 }
 
 // ─── Main ItineraryTab ────────────────────────────────────────────────────────
-export default function ItineraryTab({ tripId, startDate, endDate }: Props) {
+export default function ItineraryTab({ tripId, startDate, endDate, fabTrigger }: Props) {
   const theme    = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
 
@@ -794,6 +795,12 @@ export default function ItineraryTab({ tripId, startDate, endDate }: Props) {
 
   const openDrawer = (time: string, type = 'activity') =>
     setDrawer({ open: true, time, type });
+
+  useEffect(() => {
+  if (!fabTrigger) return;
+  if (fabTrigger.action === 'stop') openDrawer('09:00', 'activity');
+}, [fabTrigger]);
+
 
   // ── Add stop ──
   const addStop = async (stop: Partial<Stop>) => {

@@ -83,6 +83,7 @@ interface PackingTabProps {
   tripType:  string;
   nights:    number;
   startDate: string;
+  fabTrigger?: { action: string; seq: number } | null;
 }
 
 interface CatalogueEditState {
@@ -155,7 +156,7 @@ function TypeToggleGroup({
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export default function PackingTab({ tripId, tripType, nights, startDate }: PackingTabProps) {
+export default function PackingTab({ tripId, tripType, nights, startDate, fabTrigger }: PackingTabProps) {
   const theme  = useTheme();
   const mobile = useMediaQuery(theme.breakpoints.down('sm'));
 
@@ -192,6 +193,11 @@ export default function PackingTab({ tripId, tripType, nights, startDate }: Pack
     ? Math.floor((Date.now() - new Date(packing.generatedAt).getTime()) / 3600000)
     : 0;
   const showLiveRefresh = tripStartsInDays <= 14 && tripStartsInDays >= 0 && weatherAgeHours >= 24;
+
+  useEffect(() => {
+  if (!fabTrigger) return;
+  if (fabTrigger.action === 'item') setAddOpen(true);
+}, [fabTrigger]);
 
   // ── Actions ───────────────────────────────────────────────────────────────
 

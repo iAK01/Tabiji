@@ -43,6 +43,7 @@ import type { ResolvedAddress } from '@/components/ui/AddressSearch';
 
 interface LogisticsTabProps {
   tripId: string;
+  fabTrigger?: { action: string; seq: number } | null;
   trip: {
     origin:      { city: string; iataCode?: string };
     destination: { city: string; iataCode?: string };
@@ -505,7 +506,7 @@ function TripDateTimePicker({
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
-export default function LogisticsTab({ tripId, trip }: LogisticsTabProps) {
+export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabProps) {
   const theme  = useTheme();
   const mobile = useMediaQuery(theme.breakpoints.down('sm'));
 
@@ -567,6 +568,26 @@ export default function LogisticsTab({ tripId, trip }: LogisticsTabProps) {
       })
       .catch(() => {});
   }, []);
+
+  useEffect(() => {
+  if (!fabTrigger) return;
+  if (fabTrigger.action === 'transport') {
+    setSection(0);
+    setEditTransportIdx(null);
+    setTransport({ ...BLANK_TRANSPORT, details: { ...BLANK_TRANSPORT.details } });
+    setTransportOpen(true);
+  } else if (fabTrigger.action === 'accom') {
+    setSection(1);
+    setEditAccomIdx(null);
+    setAccom({ ...BLANK_ACCOM });
+    setAccomOpen(true);
+  } else if (fabTrigger.action === 'venue') {
+    setSection(2);
+    setEditVenueIdx(null);
+    setVenue({ ...BLANK_VENUE });
+    setVenueOpen(true);
+  }
+}, [fabTrigger]);
 
   // ── Saves ──────────────────────────────────────────────────────────────────
   const saveTransport = async () => {

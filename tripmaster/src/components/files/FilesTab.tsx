@@ -92,7 +92,10 @@ interface LinkableItem {
   group:      string;
 }
 
-interface FilesTabProps { tripId: string; }
+interface FilesTabProps {
+  tripId: string;
+  fabTrigger?: { action: string; seq: number } | null;
+}
 
 type Mode = 'file' | 'link' | 'contact' | 'note' | 'todo';
 
@@ -693,7 +696,7 @@ function ResourceCard({ file, onDelete, onEdit }: { file: TripFile; onDelete: (i
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
-export default function FilesTab({ tripId }: FilesTabProps) {
+export default function FilesTab({ tripId, fabTrigger }: FilesTabProps) {
   const theme  = useTheme();
   const mobile = useMediaQuery(theme.breakpoints.down('sm'));
 
@@ -749,6 +752,12 @@ export default function FilesTab({ tripId }: FilesTabProps) {
     setError(null);
     setDialogOpen(true);
   };
+
+  useEffect(() => {
+  if (!fabTrigger) return;
+  const validModes: Mode[] = ['file', 'link', 'contact', 'note', 'todo'];
+  if (validModes.includes(fabTrigger.action as Mode)) openDialog(fabTrigger.action as Mode);
+}, [fabTrigger]);
 
   const openEdit = (file: TripFile) => {
     setEditingFile(file);
@@ -1128,15 +1137,6 @@ export default function FilesTab({ tripId }: FilesTabProps) {
           })}
         </>
       )}
-
-      {/* ── Quick-capture FAB ── */}
-      <Fab
-        size="medium"
-        onClick={() => openDialog('note')}
-        sx={{ position: 'fixed', bottom: 24, right: 24, backgroundColor: '#55702C', color: 'white', '&:hover': { backgroundColor: '#455f24' }, zIndex: 1200 }}
-      >
-        <NoteAddIcon />
-      </Fab>
 
       {/* ── Dialog ── */}
       <Dialog
