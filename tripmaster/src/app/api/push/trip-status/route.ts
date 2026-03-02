@@ -32,7 +32,7 @@ export async function POST(req: Request) {
       status:    'confirmed',
       deleted:   false,
       startDate: { $lte: activationThreshold },
-      endDate:   { $gte: nowDate },
+      endDate: { $lt: now.minus({ hours: 48 }).toJSDate() },
     },
     { $set: { status: 'active' } }
   );
