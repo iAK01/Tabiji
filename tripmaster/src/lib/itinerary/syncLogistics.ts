@@ -150,8 +150,12 @@ export async function syncLogisticsToItinerary(tripId: string, logistics?: any) 
           duration,
           locked:         true,
           source:         'logistics',
-          address:     t.departureAddress ?? t.departureLocation ?? undefined,
-          coordinates: t.departureCoordinates ?? undefined,
+          address: ['car','taxi','private_transfer','bicycle'].includes(t.type)
+  ? (t.arrivalLocation ?? undefined)
+  : (t.departureAddress ?? t.departureLocation ?? undefined),
+coordinates: ['car','taxi','private_transfer','bicycle'].includes(t.type)
+  ? (t.arrivalCoordinates ?? undefined)
+  : (t.departureCoordinates ?? undefined),
           metadata: { transportType: t.type, phase: 'departure' },
         });
       }

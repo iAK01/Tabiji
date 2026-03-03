@@ -1085,8 +1085,8 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
     const isNavigable = NAVIGABLE_TRANSPORT_TYPES.has(t.type);
     const navDest = isNavigable ? {
       name:        getTransportLabel(t),
-      address:     t.departureLocation ?? t.details?.pickupLocation ?? '',
-      coordinates: t.departureCoordinates ?? t.details?.pickupCoordinates ?? null,
+      address:     t.arrivalLocation ?? t.details?.dropoffLocation ?? '',
+      coordinates: t.arrivalCoordinates ?? t.details?.dropoffCoordinates ?? null,
     } : null;
 
     return (

@@ -167,12 +167,18 @@ async function fetchForecast(
 }
 
 // ─── WeatherAPI.com overlay (first 3 days, highest accuracy) ───────────────
-async function fetchWeatherAPI(city: string, days: number): Promise<DayWeather[]> {
+// FIX: accepts lat/lon and uses coordinates in the q parameter instead of
+// a city name string. This prevents WeatherAPI resolving "Ballina" to
+// Ballina, NSW, Australia instead of Ballina, Co. Mayo, Ireland.
+async function fetchWeatherAPI(
+  lat: number, lon: number, days: number
+): Promise<DayWeather[]> {
   const key = process.env.WEATHER_API_KEY;
   if (!key) return [];
   try {
+    const q   = `${lat},${lon}`;
     const res  = await fetch(
-      `https://api.weatherapi.com/v1/forecast.json?key=${key}&q=${encodeURIComponent(city)}&days=${days}&aqi=no&alerts=no`
+      `https://api.weatherapi.com/v1/forecast.json?key=${key}&q=${encodeURIComponent(q)}&days=${days}&aqi=no&alerts=no`
     );
     const data = await res.json();
     if (data.error) return [];
@@ -273,7 +279,6 @@ async function fetchHistoricalAverage(
     const tMax = Math.round(slices.reduce((s, d) => s + d.tempMax, 0) / slices.length);
     const tMin = Math.round(slices.reduce((s, d) => s + d.tempMin, 0) / slices.length);
     const precip = slices.reduce((s, d) => s + d.precipMm, 0) / slices.length;
-    // Rain chance: fraction of years that had meaningful rain on this date
     const chanceOfRain = Math.round((slices.filter(d => d.precipMm > 1).length / slices.length) * 100);
 
     const windSlices = slices.filter(d => d.windKph !== null);
@@ -331,9 +336,6 @@ export async function fetchClimateNormals(
 }
 
 // ─── Count genuinely rainy days ──────────────────────────────────────────────
-// For forecast: a day is rainy if chance > 40%.
-// For historical: chanceOfRain is already derived from precipMm so use that
-// directly — don't double-fire on both conditions.
 function countRainyDays(days: DayWeather[]): number {
   return days.filter(d => {
     if (d.source === 'historical') return d.precipMm > 2;
@@ -342,15 +344,6 @@ function countRainyDays(days: DayWeather[]): number {
 }
 
 // ─── Summary + packing notes ────────────────────────────────────────────────
-// Rules:
-//   - Use tempMax (not tempAvg) for hot/cold feel — people experience the day
-//   - Use tempMin for cold nights — people feel this in evenings and mornings
-//   - Rain: use source-appropriate threshold, not both at once
-//   - No tempRange note — crossing the min of one day and the max of another
-//     is meaningless and will always produce a large number
-//   - Wind: flag only if genuinely windy (avg > 25 km/h on most days)
-//   - Don't generate a packing note if the signal is weak (e.g. 1 rain day
-//     in a 7-day trip isn't unusual enough to call out)
 function generateSummary(days: DayWeather[], mode: 'forecast' | 'historical'): {
   summary: string; packingNotes: string[];
 } {
@@ -360,7 +353,6 @@ function generateSummary(days: DayWeather[], mode: 'forecast' | 'historical'): {
   const nightLow    = Math.min(...days.map(d => d.tempMin));
   const rainyDays   = countRainyDays(days);
 
-  // How to describe the overall temperature feel
   let tempLabel: string;
   if (peakHigh > 28)         tempLabel = 'warm to hot';
   else if (peakHigh > 22)    tempLabel = 'mild to warm';
@@ -368,7 +360,6 @@ function generateSummary(days: DayWeather[], mode: 'forecast' | 'historical'): {
   else if (avgTempAvg >= 10) tempLabel = 'cool';
   else                       tempLabel = 'cold';
 
-  // Rain pattern
   let rainLabel: string;
   const rainFraction = rainyDays / tripLength;
   if (rainyDays === 0)         rainLabel = 'dry';
@@ -381,7 +372,6 @@ function generateSummary(days: DayWeather[], mode: 'forecast' | 'historical'): {
 
   const packingNotes: string[] = [];
 
-  // Rain — only worth calling out if 2+ days of genuine rain
   if (rainyDays >= 2) {
     packingNotes.push(
       `Rain expected on ${rainyDays} of ${tripLength} days — a compact umbrella or waterproof jacket is worth it`
@@ -390,8 +380,6 @@ function generateSummary(days: DayWeather[], mode: 'forecast' | 'historical'): {
     packingNotes.push(`One rainy day expected — worth having a light waterproof`);
   }
 
-  // Cold nights — flag if overnight lows drop below 8°C, which is actually
-  // chilly for evenings out regardless of warm daytime temps
   const coldNights = days.filter(d => d.tempMin < 8).length;
   if (coldNights >= 2) {
     packingNotes.push(
@@ -399,7 +387,6 @@ function generateSummary(days: DayWeather[], mode: 'forecast' | 'historical'): {
     );
   }
 
-  // Hot days — genuine heat above 28°C
   const hotDays = days.filter(d => d.tempMax > 28).length;
   if (hotDays >= 2) {
     packingNotes.push(
@@ -407,7 +394,6 @@ function generateSummary(days: DayWeather[], mode: 'forecast' | 'historical'): {
     );
   }
 
-  // Snow
   const snowDays = days.filter(d =>
     d.condition.toLowerCase().includes('snow') ||
     d.condition.toLowerCase().includes('blizzard')
@@ -416,7 +402,6 @@ function generateSummary(days: DayWeather[], mode: 'forecast' | 'historical'): {
     packingNotes.push(`Snow possible on ${snowDays} day${snowDays > 1 ? 's' : ''} — waterproof footwear advisable`);
   }
 
-  // Consistently windy — flag only if the majority of days are notably windy
   const windDays = days.filter(d => d.windKph !== null && d.windKph > 25).length;
   if (windDays >= Math.ceil(tripLength * 0.6)) {
     const avgWind = Math.round(
@@ -433,12 +418,12 @@ function generateSummary(days: DayWeather[], mode: 'forecast' | 'historical'): {
 
 // ─── Home comparison ────────────────────────────────────────────────────────
 async function buildHomeComparison(
-  homeCity:  string,
+  homeCity:   string,
   homeCoords: { lat: number; lon: number },
-  destCity:  string,
-  destDays:  DayWeather[],
-  startDate: string,
-  endDate:   string,
+  destCity:   string,
+  destDays:   DayWeather[],
+  startDate:  string,
+  endDate:    string,
 ): Promise<HomeComparison | null> {
   try {
     const { days: homeDays } = await fetchHistoricalAverage(
@@ -473,8 +458,6 @@ async function buildHomeComparison(
       ? `${destCity} in ${tripMonth} has similar temperatures to ${homeCity}, ${rainDesc}`
       : `${destCity} in ${tripMonth} is typically ${tempDeltaLabel} than ${homeCity}, ${rainDesc}`;
 
-    // Insights — each carries its own icon so it renders correctly regardless
-    // of how many there are or what order they appear in
     const insights: { icon: string; text: string }[] = [];
 
     if (absDelta >= 8) {
@@ -494,7 +477,6 @@ async function buildHomeComparison(
       });
     }
 
-    // Daytime high comparison — what you feel walking around during the day
     const destMaxTemp = Math.max(...destDays.map(d => d.tempMax));
     const homeMaxTemp = Math.max(...homeDays.map(d => d.tempMax));
     const dayDelta    = destMaxTemp - homeMaxTemp;
@@ -510,7 +492,6 @@ async function buildHomeComparison(
       });
     }
 
-    // Evening/night feel — what you feel going out for dinner
     const destMinTemp = Math.min(...destDays.map(d => d.tempMin));
     const homeMinTemp = Math.min(...homeDays.map(d => d.tempMin));
     const nightDelta  = destMinTemp - homeMinTemp;
@@ -526,7 +507,6 @@ async function buildHomeComparison(
       });
     }
 
-    // Rain comparison
     if (rainDelta <= -2) {
       insights.push({
         icon: '🌂',
@@ -539,7 +519,6 @@ async function buildHomeComparison(
       });
     }
 
-    // Wind — only flag if meaningfully different
     if (homeWindAvg !== null && destWindAvg !== null) {
       if (homeWindAvg - destWindAvg >= 15) {
         insights.push({
@@ -597,8 +576,14 @@ export async function fetchTripWeather(
     mode = 'forecast';
     const openMeteoDays = await fetchForecast(coords.lat, coords.lon, startDate, endDate);
 
-    if (daysUntil <= 3 && process.env.WEATHER_API_KEY) {
-      const waDays = await fetchWeatherAPI(city, Math.min(3 - daysUntil + 1, openMeteoDays.length));
+    // FIX: only overlay WeatherAPI for future or current-day trips (daysUntil >= 0).
+    // When daysUntil < 0 the trip is already in the past — WeatherAPI forecast
+    // for a past start date returns current/future data which is completely wrong.
+    if (daysUntil >= 0 && daysUntil <= 3 && process.env.WEATHER_API_KEY) {
+      const waDays = await fetchWeatherAPI(
+        coords.lat, coords.lon,
+        Math.min(3 - daysUntil + 1, openMeteoDays.length)
+      );
       const waMap  = new Map(waDays.map(d => [d.date, d]));
       tripDays = openMeteoDays.map(d => waMap.get(d.date) ?? d);
     } else {
@@ -614,13 +599,15 @@ export async function fetchTripWeather(
     forecastAvailableFrom = fd.toISOString().split('T')[0];
   }
 
-  // Current weather — always, regardless of trip dates
+  // Current weather — always, regardless of trip dates.
+  // FIX: always try WeatherAPI for current weather — the old daysUntil > 3
+  // guard meant active and imminent trips never got live chips here.
   const currentEnd = new Date(today);
   currentEnd.setDate(today.getDate() + 2);
   let currentWeather: DayWeather[] = [];
   try {
-    if (process.env.WEATHER_API_KEY && daysUntil > 3) {
-      currentWeather = await fetchWeatherAPI(city, 3);
+    if (process.env.WEATHER_API_KEY) {
+      currentWeather = await fetchWeatherAPI(coords.lat, coords.lon, 3);
     }
     if (!currentWeather.length) {
       currentWeather = await fetchForecast(

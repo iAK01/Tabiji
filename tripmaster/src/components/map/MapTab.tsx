@@ -152,6 +152,43 @@ async function geocode(query: string, token: string): Promise<Coordinates | null
   }
 }
 
+// ─── Road routing via Mapbox Directions ───────────────────────────────────────
+
+const ROAD_PROFILES: Record<string, 'driving' | 'cycling'> = {
+  car:              'driving',
+  car_hire:         'driving',
+  taxi:             'driving',
+  private_transfer: 'driving',
+  bus:              'driving',
+  bicycle:          'cycling',
+};
+
+async function fetchDirections(
+  from: Coordinates,
+  to: Coordinates,
+  profile: 'driving' | 'cycling',
+  token: string,
+): Promise<number[][] | null> {
+  try {
+    const url = `https://api.mapbox.com/directions/v5/mapbox/${profile}/${from.lng},${from.lat};${to.lng},${to.lat}?geometries=geojson&overview=full&access_token=${token}`;
+    const res  = await fetch(url);
+    const data = await res.json();
+    return data.routes?.[0]?.geometry?.coordinates ?? null;
+  } catch {
+    return null;
+  }
+}
+
+// ─── Short address label (first meaningful part before comma) ─────────────────
+
+function shortLocation(addr: string): string {
+  if (!addr) return '';
+  // If it looks like "IATA — City" keep as-is
+  if (addr.includes(' — ')) return addr;
+  // Otherwise take up to first comma
+  return addr.split(',')[0].trim();
+}
+
 // ─── Icon helpers ─────────────────────────────────────────────────────────────
 
 function TransportIcon({ type, size = 16 }: { type: string; size?: number }) {
@@ -208,6 +245,7 @@ function LegendItem({ color, label, confirmed }: { color: string; label: string;
 export default function MapTab({ tripId, trip }: MapTabProps) {
   const mapContainer   = useRef<HTMLDivElement>(null);
   const mapRef         = useRef<any>(null);
+  const mapboxglRef    = useRef<any>(null);
   const markersRef     = useRef<any[]>([]);
   const resolvedOrigin = useRef<Coordinates | null>(null);
   const resolvedDest   = useRef<Coordinates | null>(null);
@@ -244,6 +282,7 @@ export default function MapTab({ tripId, trip }: MapTabProps) {
     }
 
     import('mapbox-gl').then(async ({ default: mapboxgl }) => {
+      mapboxglRef.current  = mapboxgl;
       mapboxgl.accessToken = token;
 
       let originCoords = trip.origin?.coordinates;
@@ -313,71 +352,85 @@ export default function MapTab({ tripId, trip }: MapTabProps) {
   }, []);
 
   const drawLayers = useCallback(async () => {
-    const map = mapRef.current;
-    if (!map) return;
+    const map      = mapRef.current;
+    const mapboxgl = mapboxglRef.current;
+    if (!map || !mapboxgl) return;
 
-    import('mapbox-gl').then(async ({ default: mapboxgl }) => {
-      clearMarkers();
+    clearMarkers();
 
-      ['route-line', 'route-line-border'].forEach(id => {
-        if (map.getLayer(id)) map.removeLayer(id);
+    ['route-line', 'route-line-border'].forEach(id => {
+      if (map.getLayer(id)) map.removeLayer(id);
+    });
+    if (map.getSource('route')) map.removeSource('route');
+
+    const bounds = new mapboxgl.LngLatBounds();
+    const showTransport = layer === 'all' || layer === 'transport';
+    const showStays     = layer === 'all' || layer === 'stays';
+    const showVenues    = layer === 'all' || layer === 'venues';
+    const showItinerary = layer === 'all' || layer === 'itinerary';
+
+    // ── Route nodes ──────────────────────────────────────────────────────────
+    type RouteNode = { coords: Coordinates; city: string };
+    const nodes: RouteNode[] = [];
+
+    if (trip.origin?.coordinates || resolvedOrigin.current) {
+      nodes.push({
+        coords: trip.origin?.coordinates ?? resolvedOrigin.current!,
+        city: trip.origin.city,
       });
-      if (map.getSource('route')) map.removeSource('route');
+    }
 
-      const bounds = new mapboxgl.LngLatBounds();
-      const showTransport = layer === 'all' || layer === 'transport';
-      const showStays     = layer === 'all' || layer === 'stays';
-      const showVenues    = layer === 'all' || layer === 'venues';
-      const showItinerary = layer === 'all' || layer === 'itinerary';
+    const extra = (trip.additionalDestinations ?? []).slice().sort((a, b) =>
+      (a.arrivalDate ?? '') < (b.arrivalDate ?? '') ? -1 : 1
+    );
+    for (const d of extra) {
+      const c = d.coordinates ?? await geocode(`${d.city}, ${d.country}`, token);
+      if (c) nodes.push({ coords: c, city: d.city });
+    }
 
-      // ── Route nodes ──────────────────────────────────────────────────────────
-      type RouteNode = { coords: Coordinates; city: string };
-      const nodes: RouteNode[] = [];
+    if (trip.destination?.coordinates || resolvedDest.current) {
+      nodes.push({
+        coords: trip.destination?.coordinates ?? resolvedDest.current!,
+        city: trip.destination.city,
+      });
+    } else {
+      const c = await geocode(`${trip.destination?.city}, ${trip.destination?.country}`, token);
+      if (c) nodes.push({ coords: c, city: trip.destination?.city ?? '' });
+    }
 
-      if (trip.origin?.coordinates || resolvedOrigin.current) {
-        nodes.push({
-          coords: trip.origin?.coordinates ?? resolvedOrigin.current!,
-          city: trip.origin.city,
-        });
+    const transport: TransportEntry[] = logistics?.transportation ?? [];
+    const mainTransportConfirmed = transport.length > 0 && transport.some(t => STATUS_IS_CONFIRMED(t.status));
+
+    // ── Route lines ──────────────────────────────────────────────────────────
+    if (showTransport && nodes.length >= 2) {
+      // Try road routing if the primary transport mode supports it
+      const primaryTransport = transport[0];
+      const roadProfile = primaryTransport ? ROAD_PROFILES[primaryTransport.type] : undefined;
+
+      let routeCoordinates: number[][] | null = null;
+
+      if (roadProfile && nodes.length === 2) {
+        routeCoordinates = await fetchDirections(nodes[0].coords, nodes[1].coords, roadProfile, token);
       }
 
-      const extra = (trip.additionalDestinations ?? []).slice().sort((a, b) =>
-        (a.arrivalDate ?? '') < (b.arrivalDate ?? '') ? -1 : 1
-      );
-      for (const d of extra) {
-        const c = d.coordinates ?? await geocode(`${d.city}, ${d.country}`, token);
-        if (c) nodes.push({ coords: c, city: d.city });
+      // Fall back to straight line if no road route
+      if (!routeCoordinates) {
+        routeCoordinates = nodes.map(n => [n.coords.lng, n.coords.lat]);
       }
 
-      if (trip.destination?.coordinates || resolvedDest.current) {
-        nodes.push({
-          coords: trip.destination?.coordinates ?? resolvedDest.current!,
-          city: trip.destination.city,
-        });
-      } else {
-        const c = await geocode(`${trip.destination?.city}, ${trip.destination?.country}`, token);
-        if (c) nodes.push({ coords: c, city: trip.destination?.city ?? '' });
-      }
-
-      const transport: TransportEntry[] = logistics?.transportation ?? [];
-      const mainTransportConfirmed = transport.length > 0 && transport.some(t => STATUS_IS_CONFIRMED(t.status));
-
-      // ── Route lines ──────────────────────────────────────────────────────────
-      if (showTransport && nodes.length >= 2) {
-        const coordinates = nodes.map(n => [n.coords.lng, n.coords.lat]);
-        map.addSource('route', {
-          type: 'geojson',
-          data: { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates } },
-        });
-        map.addLayer({
-          id: 'route-line', type: 'line', source: 'route',
-          paint: {
-            'line-color': mainTransportConfirmed ? '#55702C' : '#C9521B',
-            'line-width': mainTransportConfirmed ? 2.5 : 2,
-            'line-opacity': 0.9,
-            'line-dasharray': mainTransportConfirmed ? [1] : [4, 3],
-          },
-        });
+      map.addSource('route', {
+        type: 'geojson',
+        data: { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: routeCoordinates } },
+      });
+      map.addLayer({
+        id: 'route-line', type: 'line', source: 'route',
+        paint: {
+          'line-color': mainTransportConfirmed ? '#55702C' : '#C9521B',
+          'line-width': mainTransportConfirmed ? 2.5 : 2,
+          'line-opacity': 0.9,
+          'line-dasharray': mainTransportConfirmed ? [1] : [4, 3],
+        },
+      });
         map.addLayer({
           id: 'route-line-border', type: 'line', source: 'route',
           paint: {
@@ -550,7 +603,6 @@ export default function MapTab({ tripId, trip }: MapTabProps) {
           duration: 800,
         });
       }
-    });
   }, [mapReady, loading, logistics, itinerary, layer, trip, token, clearMarkers]);
 
   // ── Derived data ──────────────────────────────────────────────────────────────
@@ -689,7 +741,7 @@ export default function MapTab({ tripId, trip }: MapTabProps) {
                       <Box sx={{ color, display: 'flex' }}><TransportIcon type={t.type} size={14} /></Box>
                       <Typography variant="caption" sx={{ fontSize: '0.78rem', flexGrow: 1 }}>
                         {t.departureLocation && t.arrivalLocation
-                          ? `${t.departureLocation} → ${t.arrivalLocation}`
+                          ? `${shortLocation(t.departureLocation)} → ${shortLocation(t.arrivalLocation)}`
                           : t.type.replace('_', ' ')}
                       </Typography>
                       {confirmed
