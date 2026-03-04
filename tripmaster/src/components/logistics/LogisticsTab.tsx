@@ -37,6 +37,7 @@ import AirlineSearch        from '@/components/ui/AirlineSearch';
 import AddressSearch        from '@/components/ui/AddressSearch';
 import NavigateButton       from '@/components/ui/NavigateButton';
 import BookingLinks         from '@/components/logistics/BookingLinks';
+import DestinationMap from '@/components/ui/DestinationMap';
 
 import { saveTripCache, getTripCache, queueAction } from '@/lib/offline/db';
 import type { ResolvedAddress } from '@/components/ui/AddressSearch';
@@ -1080,53 +1081,89 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
     );
   };
 
-  // ── Transport card ─────────────────────────────────────────────────────────
-  const TransportCard = ({ t, i }: { t: any; i: number }) => {
-    const isNavigable = NAVIGABLE_TRANSPORT_TYPES.has(t.type);
-    const navDest = isNavigable ? {
-      name:        getTransportLabel(t),
-      address:     t.arrivalLocation ?? t.details?.dropoffLocation ?? '',
-      coordinates: t.arrivalCoordinates ?? t.details?.dropoffCoordinates ?? null,
-    } : null;
+const TransportCard = ({ t, i }: { t: any; i: number }) => {
+  const isNavigable = NAVIGABLE_TRANSPORT_TYPES.has(t.type);
 
-    return (
+  const navDest = isNavigable ? {
+    name:        getTransportLabel(t),
+    address:     t.arrivalLocation ?? t.details?.dropoffLocation ?? '',
+    coordinates: t.arrivalCoordinates ?? t.details?.dropoffCoordinates ?? null,
+  } : null;
+
+  const mapAddress =
+    t.arrivalLocation ??
+    t.details?.dropoffLocation ??
+    '';
+
+  const mapCoordinates =
+    t.arrivalCoordinates ??
+    t.details?.dropoffCoordinates ??
+    null;
+
+  return (
+    <Box>
       <Paper sx={{ p: { xs: 2, sm: 2.5 }, mb: 2, backgroundColor: 'background.paper' }}>
         <Box sx={{ display: 'flex', gap: 1.5 }}>
           <Box sx={{ color: 'primary.main', mt: 0.25, flexShrink: 0 }}>
             {transportIcon(t.type, { fontSize: 'medium' })}
           </Box>
+
           <Box sx={{ flexGrow: 1, minWidth: 0 }}>
             <Typography fontWeight={700} sx={{ fontSize: '1rem' }}>
               {getTransportLabel(t)}
             </Typography>
+
             {getTransportSubtitle(t) && (
-              <Typography variant="body2" color="text.secondary">{getTransportSubtitle(t)}</Typography>
+              <Typography variant="body2" color="text.secondary">
+                {getTransportSubtitle(t)}
+              </Typography>
             )}
+
             {(t.departureTime || t.arrivalTime) && (
               <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
                 {t.departureTime ? fmtDateTime(t.departureTime) : ''}
                 {t.arrivalTime   ? ` → ${fmtDateTime(t.arrivalTime)}` : ''}
               </Typography>
             )}
+
             <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1.5, mt: 1 }}>
               {(t.details?.seat ?? t.seat) && (
                 <Typography variant="caption" color="text.secondary">
                   Seat {t.details?.seat ?? t.seat}
                 </Typography>
               )}
+
               {t.confirmationNumber && (
-                <Typography variant="caption" color="text.secondary">Ref: {t.confirmationNumber}</Typography>
+                <Typography variant="caption" color="text.secondary">
+                  Ref: {t.confirmationNumber}
+                </Typography>
               )}
-              {t.cost && <Typography variant="caption" color="text.secondary">€{t.cost}</Typography>}
+
+              {t.cost && (
+                <Typography variant="caption" color="text.secondary">
+                  €{t.cost}
+                </Typography>
+              )}
             </Box>
           </Box>
+
           <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 0.5, flexShrink: 0 }}>
-            <Chip label={t.status.replace('_', ' ')} color={STATUS_COLOUR[t.status]} size="medium"
-              sx={{ fontWeight: 700, fontSize: '0.7rem', textTransform: 'capitalize' }} />
+            <Chip
+              label={t.status.replace('_', ' ')}
+              color={STATUS_COLOUR[t.status]}
+              size="medium"
+              sx={{ fontWeight: 700, fontSize: '0.7rem', textTransform: 'capitalize' }}
+            />
+
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
               {navDest && (
-                <NavigateButton destination={navDest} suggestedMode="driving" size="medium" />
+                <NavigateButton
+                  destination={navDest}
+                  suggestedMode="driving"
+                  size="medium"
+                />
               )}
+
               <IconButton size="medium" onClick={e => openMenu(e, 'transport', i)}>
                 <MoreVertIcon fontSize="medium" />
               </IconButton>
@@ -1134,106 +1171,185 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
           </Box>
         </Box>
       </Paper>
-    );
-  };
 
-  // ── Accommodation card ─────────────────────────────────────────────────────
-  const AccomCard = ({ a, i }: { a: any; i: number }) => (
-    <Paper sx={{ p: { xs: 2, sm: 2.5 }, mb: 2, backgroundColor: 'background.paper' }}>
-      <Box sx={{ display: 'flex', gap: 1.5 }}>
-        <HotelIcon color="primary" sx={{ mt: 0.25, flexShrink: 0 }} />
-        <Box sx={{ flexGrow: 1, minWidth: 0 }}>
-          <Typography fontWeight={700} sx={{ fontSize: '1rem' }}>{a.name}</Typography>
-          {a.address && <Typography variant="body2" color="text.secondary">{a.address}</Typography>}
-          {(a.checkIn || a.checkOut) && (
-            <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-              {fmtDate(a.checkIn)} → {fmtDate(a.checkOut)}
-            </Typography>
-          )}
-          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1.5, mt: 1 }}>
-            {a.confirmationNumber && (
-              <Typography variant="caption" color="text.secondary">Ref: {a.confirmationNumber}</Typography>
-            )}
-            {a.cost && <Typography variant="caption" color="text.secondary">€{a.cost}</Typography>}
-          </Box>
+      {mapAddress && (
+        <Box sx={{ mt: 2 }}>
+          <DestinationMap
+            coordinates={mapCoordinates}
+            address={mapAddress}
+          />
         </Box>
-        <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 0.5, flexShrink: 0 }}>
-          <Chip label={a.status.replace('_', ' ')} color={STATUS_COLOUR[a.status]} size="medium"
-            sx={{ fontWeight: 700, fontSize: '0.7rem', textTransform: 'capitalize' }} />
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-            <NavigateButton
-              destination={{ name: a.name, address: a.address, coordinates: a.coordinates ?? null }}
-              suggestedMode="driving"
-              size="medium"
-            />
-            <IconButton size="medium" onClick={e => openMenu(e, 'accom', i)}>
-              <MoreVertIcon fontSize="medium" />
-            </IconButton>
-          </Box>
-        </Box>
-      </Box>
-    </Paper>
+      )}
+    </Box>
   );
+};
 
-  // ── Venue card ─────────────────────────────────────────────────────────────
-  const VenueCard = ({ v, i }: { v: any; i: number }) => {
-    const venueTypeLabel = VENUE_TYPES.find(vt => vt.value === v.type)?.label ?? 'Venue';
-    return (
+ const AccomCard = ({ a, i }: { a: any; i: number }) => {
+  const mapAddress = a.address ?? '';
+  const mapCoordinates = a.coordinates ?? null;
+
+  return (
+    <Box>
       <Paper sx={{ p: { xs: 2, sm: 2.5 }, mb: 2, backgroundColor: 'background.paper' }}>
         <Box sx={{ display: 'flex', gap: 1.5 }}>
-          <Box sx={{ color: 'primary.main', mt: 0.25, flexShrink: 0 }}>
-            {venueIcon(v.type, { fontSize: 'medium' })}
-          </Box>
+          <HotelIcon color="primary" sx={{ mt: 0.25, flexShrink: 0 }} />
+
           <Box sx={{ flexGrow: 1, minWidth: 0 }}>
-            <Typography fontWeight={700} sx={{ fontSize: '1rem' }}>{v.name || venueTypeLabel}</Typography>
-            {v.address && <Typography variant="body2" color="text.secondary">{v.address}</Typography>}
-            {v.date && (
-              <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-                {fmtDate(v.date)}
-                {v.time    ? ` · ${v.time}`    : ''}
-                {v.endTime ? ` → ${v.endTime}` : ''}
+            <Typography fontWeight={700} sx={{ fontSize: '1rem' }}>
+              {a.name}
+            </Typography>
+
+            {a.address && (
+              <Typography variant="body2" color="text.secondary">
+                {a.address}
               </Typography>
             )}
+
+            {(a.checkIn || a.checkOut) && (
+              <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                {fmtDate(a.checkIn)} → {fmtDate(a.checkOut)}
+              </Typography>
+            )}
+
             <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1.5, mt: 1 }}>
-              <Chip label={venueTypeLabel} size="medium" variant="outlined"
-                sx={{ fontSize: '0.65rem', height: 20 }} />
-              {v.confirmationNumber && (
-                <Typography variant="caption" color="text.secondary">Ref: {v.confirmationNumber}</Typography>
+              {a.confirmationNumber && (
+                <Typography variant="caption" color="text.secondary">
+                  Ref: {a.confirmationNumber}
+                </Typography>
               )}
-              {v.cost && <Typography variant="caption" color="text.secondary">€{v.cost}</Typography>}
-              {v.website && (
-                <Chip
-                  label="Website"
-                  size="medium"
-                  component="a"
-                  href={v.website}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  clickable
-                  icon={<LaunchIcon sx={{ fontSize: '0.75rem !important' }} />}
-                  sx={{ fontSize: '0.65rem', height: 24 }}
-                />
+
+              {a.cost && (
+                <Typography variant="caption" color="text.secondary">
+                  €{a.cost}
+                </Typography>
               )}
             </Box>
           </Box>
+
           <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 0.5, flexShrink: 0 }}>
-            <Chip label={v.status.replace('_', ' ')} color={STATUS_COLOUR[v.status]} size="medium"
-              sx={{ fontWeight: 700, fontSize: '0.7rem', textTransform: 'capitalize' }} />
+            <Chip
+              label={a.status.replace('_', ' ')}
+              color={STATUS_COLOUR[a.status]}
+              size="medium"
+              sx={{ fontWeight: 700, fontSize: '0.7rem', textTransform: 'capitalize' }}
+            />
+
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
               <NavigateButton
-                destination={{ name: v.name, address: v.address, coordinates: v.coordinates ?? null }}
-                suggestedMode="walking"
+                destination={{ name: a.name, address: a.address, coordinates: a.coordinates ?? null }}
+                suggestedMode="driving"
                 size="medium"
               />
-              <IconButton size="medium" onClick={e => openMenu(e, 'venue', i)}>
+
+              <IconButton size="medium" onClick={e => openMenu(e, 'accom', i)}>
                 <MoreVertIcon fontSize="medium" />
               </IconButton>
             </Box>
           </Box>
         </Box>
       </Paper>
-    );
-  };
+
+      {mapAddress && (
+        <Box sx={{ mt: 2 }}>
+          <DestinationMap
+            coordinates={mapCoordinates}
+            address={mapAddress}
+          />
+        </Box>
+      )}
+    </Box>
+  );
+};
+
+
+const VenueCard = ({ v, i }: { v: any; i: number }) => {
+  const venueTypeLabel = VENUE_TYPES.find(vt => vt.value === v.type)?.label ?? 'Venue';
+
+  return (
+    <Paper sx={{ p: { xs: 2, sm: 2.5 }, mb: 2, backgroundColor: 'background.paper' }}>
+
+      <Box sx={{ display: 'flex', gap: 1.5 }}>
+        <Box sx={{ color: 'primary.main', mt: 0.25, flexShrink: 0 }}>
+          {venueIcon(v.type, { fontSize: 'medium' })}
+        </Box>
+
+        <Box sx={{ flexGrow: 1, minWidth: 0 }}>
+          <Typography fontWeight={700} sx={{ fontSize: '1rem' }}>
+            {v.name || venueTypeLabel}
+          </Typography>
+
+          {v.address && (
+            <Typography variant="body2" color="text.secondary">
+              {v.address}
+            </Typography>
+          )}
+
+          {v.date && (
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+              {fmtDate(v.date)}
+              {v.time ? ` · ${v.time}` : ''}
+              {v.endTime ? ` → ${v.endTime}` : ''}
+            </Typography>
+          )}
+
+          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1.5, mt: 1 }}>
+            <Chip
+              label={venueTypeLabel}
+              size="medium"
+              variant="outlined"
+              sx={{ fontSize: '0.65rem', height: 20 }}
+            />
+
+            {v.confirmationNumber && (
+              <Typography variant="caption" color="text.secondary">
+                Ref: {v.confirmationNumber}
+              </Typography>
+            )}
+
+            {v.cost && (
+              <Typography variant="caption" color="text.secondary">
+                €{v.cost}
+              </Typography>
+            )}
+          </Box>
+        </Box>
+
+        <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 0.5 }}>
+          <Chip
+            label={v.status.replace('_', ' ')}
+            color={STATUS_COLOUR[v.status]}
+            size="medium"
+            sx={{ fontWeight: 700, fontSize: '0.7rem', textTransform: 'capitalize' }}
+          />
+
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+            <NavigateButton
+              destination={{ name: v.name, address: v.address, coordinates: v.coordinates ?? null }}
+              suggestedMode="walking"
+              size="medium"
+            />
+
+            <IconButton size="medium" onClick={e => openMenu(e, 'venue', i)}>
+              <MoreVertIcon fontSize="medium" />
+            </IconButton>
+          </Box>
+        </Box>
+      </Box>
+
+     {v.address && (
+  <Box sx={{ mt: 2 }}>
+    <DestinationMap
+      coordinates={
+        v.coordinates ?? null
+      }
+      address={v.address}
+    />
+  </Box>
+)}
+
+    </Paper>
+  );
+};
 
   // ─────────────────────────────────────────────────────────────────────────
   return (

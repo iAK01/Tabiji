@@ -34,6 +34,7 @@ import { useRouter }          from 'next/navigation';
 import { useEffect, useState } from 'react';
 import TripCalendar from '@/components/calendar/TripCalendar';
 import { saveTripList, getTripList, getQueue, clearQueue } from '@/lib/offline/db';
+import TripReadinessPanel from '@/components/dashboard/TripReadinessPanel';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -581,6 +582,9 @@ export default function Dashboard() {
             onOpen={() => router.push(`/trips/${activeTrip._id}`)}
           />
         )}
+        
+        {!loading && <TripReadinessPanel trips={trips} />}   {/* ← ADD */}
+
 
         {/* ── Action buttons ── */}
         <Box sx={{ display: 'flex', gap: 1.5, mb: 3, flexDirection: { xs: 'column', sm: 'row' } }}>

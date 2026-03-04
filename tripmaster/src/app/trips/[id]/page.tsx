@@ -40,6 +40,8 @@ import WeatherTab          from '@/components/weather/WeatherTab';
 import TripOverview        from '@/components/overview/TripOverview';
 import FilesTab            from '@/components/files/FilesTab';
 import OnTripScreen        from '@/components/trips/OnTripScreen';
+import ReceiptIcon         from '@mui/icons-material/Receipt';
+
 import dynamic             from 'next/dynamic';
 import { saveTripCache, getTripCache, queueAction } from '@/lib/offline/db';
 
@@ -244,6 +246,27 @@ export default function TripPage() {
     setEditOpen(false);
   };
 
+  const getTripFabActions = (tripType: string): Record<number, FabActionConfig[]> => {
+  const expenseAction: FabActionConfig = {
+    label: 'Log expense', icon: <ReceiptIcon />, action: 'expense',
+  };
+  const isWork = tripType === 'work' || tripType === 'mixed';
+
+  return {
+    0: [
+      ...(TAB_FAB_ACTIONS[0]),
+      ...(isWork ? [expenseAction] : []),
+    ],
+    1: [
+      ...(TAB_FAB_ACTIONS[1]),
+      ...(isWork ? [expenseAction] : []),
+    ],
+    2: TAB_FAB_ACTIONS[2],
+    3: TAB_FAB_ACTIONS[3],
+    7: TAB_FAB_ACTIONS[7],
+  };
+};
+
   const refreshPhoto = async () => {
     if (!trip) return;
     const res  = await fetch(`/api/trips/${trip._id}/cover-photo`, { method: 'POST' });
@@ -288,6 +311,11 @@ export default function TripPage() {
 
   // ── FAB fire helper ───────────────────────────────────────────────────────
   const fireFab = (action: string) => {
+      if (action === 'expense') {
+    window.open('https://imc.show/admin/expenses/new', '_blank');
+    setFabOpen(false);
+    return;
+  }
     if (activeTab === 0) {
       const targetTab = ACTION_TAB_MAP[action];
       if (targetTab !== undefined) setActiveTab(targetTab);
@@ -480,8 +508,8 @@ export default function TripPage() {
       </Container>
 
       {/* ── Context-aware FAB ── */}
-      {TAB_FAB_ACTIONS[activeTab] && (() => {
-        const actions = TAB_FAB_ACTIONS[activeTab];
+      {getTripFabActions(trip.tripType)[activeTab] && (() => {
+        const actions = getTripFabActions(trip.tripType)[activeTab];
         if (actions.length === 1) {
           return (
             <Tooltip title={actions[0].label} placement="left">
