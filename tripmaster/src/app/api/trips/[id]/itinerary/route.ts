@@ -12,7 +12,7 @@ function generateDays(startDate: string, endDate: string) {
   let current = new Date(start);
   let dayNumber = 1;
   while (current <= end) {
-    days.push({ date: current.toISOString(), dayNumber, stops: [] });
+    days.push({ date: current.toISOString().split('T')[0], dayNumber, stops: [] });
     current.setDate(current.getDate() + 1);
     dayNumber++;
   }

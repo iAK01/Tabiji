@@ -39,15 +39,13 @@ import AddressSearch      from '@/components/ui/AddressSearch';
 import NavigateButton     from '@/components/ui/NavigateButton';
 import type { ResolvedAddress } from '@/components/ui/AddressSearch';
 
-// ─── Constants ────────────────────────────────────────────────────────────────
 const DAY_START_HOUR     = 6;
 const DAY_END_HOUR       = 24;
 const PX_PER_MIN_MOBILE  = 1.0;
 const PX_PER_MIN_DESKTOP = 1.2;
 const TOTAL_MINS         = (DAY_END_HOUR - DAY_START_HOUR) * 60;
-const SNAP_MINS          = 15; // drag snaps to 15-min grid
+const SNAP_MINS          = 15;
 
-// ─── Stop type config ─────────────────────────────────────────────────────────
 const STOP_CONFIG: Record<string, { label: string; color: string; bg: string; Icon: any }> = {
   flight:      { label: '✈️ Flight',        color: '#C9521B', bg: '#FFF0EB', Icon: FlightIcon },
   hotel:       { label: '🏨 Accommodation', color: '#5c35a0', bg: '#F3EEFF', Icon: HotelIcon },
@@ -71,7 +69,6 @@ const DEFAULT_DURATIONS: Record<string, number> = {
   activity: 120, sightseeing: 90, transport: 45, work: 120, other: 60, gig: 120,
 };
 
-// ─── Interfaces ───────────────────────────────────────────────────────────────
 interface Stop {
   _id?: string;
   name: string;
@@ -79,7 +76,7 @@ interface Stop {
   address?: string;
   coordinates?: { lat: number; lng: number };
   scheduledStart?: string;
-  scheduledEnd?: string;  // logistics stops carry this — used to derive duration
+  scheduledEnd?: string;
   time?: string;
   duration: number;
   notes?: string;
@@ -101,14 +98,20 @@ interface Day {
   stops: Stop[];
 }
 
+interface KnownLocation {
+  label: string;
+  address?: string;
+  coordinates?: { lat: number; lng: number };
+  type: 'hotel' | 'venue' | 'airport';
+}
+
 interface Props {
-  tripId:    string;
-  startDate: string;
-  endDate:   string;
+  tripId:      string;
+  startDate:   string;
+  endDate:     string;
   fabTrigger?: { action: string; seq: number } | null;
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
 function stopStartMinutes(stop: Stop): number | null {
   const timeStr = stop.scheduledStart
     ? stop.scheduledStart.includes('T')
@@ -120,7 +123,6 @@ function stopStartMinutes(stop: Stop): number | null {
   return h * 60 + m;
 }
 
-// Derive duration: prefer explicit field, then calculate from scheduledEnd, fallback 60
 function stopDuration(stop: Stop): number {
   if (stop.duration && stop.duration > 0) return stop.duration;
   if (stop.scheduledEnd && stop.scheduledStart) {
@@ -173,18 +175,26 @@ function totalFreeMinutes(stops: Stop[]): number {
   return freeSlots(stops).reduce((s, f) => s + f.mins, 0);
 }
 
-// ─── Hour ruler ───────────────────────────────────────────────────────────────
 function HourRuler({ pxPerMin }: { pxPerMin: number }) {
   const hourH = 60 * pxPerMin;
   const hours = Array.from({ length: DAY_END_HOUR - DAY_START_HOUR + 1 }, (_, i) => DAY_START_HOUR + i);
   return (
     <Box sx={{ position: 'relative', width: 44, flexShrink: 0, userSelect: 'none' }}>
       {hours.map(h => (
-        <Box key={h} sx={{ position: 'absolute', top: (h - DAY_START_HOUR) * hourH - 9, right: 6 }}>
+        <Box
+          key={h}
+          sx={{
+            position: 'absolute', top: (h - DAY_START_HOUR) * hourH - 9, right: 6,
+            '&:hover .ruler-label': { fontSize: '0.92rem', color: 'text.primary', fontWeight: 700 },
+          }}
+        >
           <Typography
+            className="ruler-label"
             variant="caption"
-            color="text.disabled"
-            sx={{ fontSize: '0.65rem', fontVariantNumeric: 'tabular-nums', lineHeight: 1 }}
+            sx={{
+              fontSize: '0.65rem', fontVariantNumeric: 'tabular-nums', lineHeight: 1,
+              color: 'text.disabled', transition: 'font-size 0.1s, color 0.1s',
+            }}
           >
             {h === 24 ? '00:00' : `${String(h).padStart(2, '0')}:00`}
           </Typography>
@@ -194,7 +204,6 @@ function HourRuler({ pxPerMin }: { pxPerMin: number }) {
   );
 }
 
-// ─── Hour grid lines ──────────────────────────────────────────────────────────
 function GridLines({ pxPerMin }: { pxPerMin: number }) {
   const hourH = 60 * pxPerMin;
   const hours = Array.from({ length: DAY_END_HOUR - DAY_START_HOUR }, (_, i) => i);
@@ -216,16 +225,15 @@ function GridLines({ pxPerMin }: { pxPerMin: number }) {
   );
 }
 
-// ─── Single stop block ────────────────────────────────────────────────────────
 function StopBlock({
   stop, onDelete, onClick, onResize, pxPerMin, isMobile,
 }: {
-  stop:       Stop;
-  onDelete?:  () => void;
-  onClick?:   () => void;
-  onResize?:  (newStartMin: number, newDuration: number) => void;
-  pxPerMin:   number;
-  isMobile:   boolean;
+  stop:      Stop;
+  onDelete?: () => void;
+  onClick?:  () => void;
+  onResize?: (newStartMin: number, newDuration: number) => void;
+  pxPerMin:  number;
+  isMobile:  boolean;
 }) {
   const startMin = stopStartMinutes(stop);
   if (startMin === null) return null;
@@ -233,15 +241,12 @@ function StopBlock({
   const isLocked    = stop.source === 'logistics';
   const duration    = stopDuration(stop);
   const dragId      = stop._id ?? `${stop.name}-${stop.scheduledStart ?? stop.time ?? 'notime'}`;
-  const height      = Math.max(duration * pxPerMin, isMobile ? 36 : 28);
   const cfg         = STOP_CONFIG[stop.type] ?? STOP_CONFIG.other;
   const hasLocation = !!(stop.address || stop.coordinates);
   const displayName = stop.name?.trim() || 'Unnamed stop';
 
-  // ── Resize state (pointer-event driven, separate from dnd-kit) ──
   const [resize, setResize] = useState<{ edge: 'top' | 'bottom'; deltaY: number } | null>(null);
 
-  // Live values while resizing
   const rawDeltaMin  = resize ? Math.round((resize.deltaY / pxPerMin) / SNAP_MINS) * SNAP_MINS : 0;
   const liveStartMin = resize?.edge === 'top'
     ? Math.max(DAY_START_HOUR * 60, Math.min(startMin + duration - SNAP_MINS, startMin + rawDeltaMin))
@@ -262,14 +267,10 @@ function StopBlock({
     e.preventDefault();
     const startY = e.clientY;
     setResize({ edge, deltaY: 0 });
-
-    const onMove = (me: PointerEvent) => {
-      setResize({ edge, deltaY: me.clientY - startY });
-    };
-    const onUp = (ue: PointerEvent) => {
+    const onMove = (me: PointerEvent) => setResize({ edge, deltaY: me.clientY - startY });
+    const onUp   = (ue: PointerEvent) => {
       document.removeEventListener('pointermove', onMove);
       document.removeEventListener('pointerup', onUp);
-      // Commit on release
       const finalDeltaMin = Math.round(((ue.clientY - startY) / pxPerMin) / SNAP_MINS) * SNAP_MINS;
       const finalStartMin = edge === 'top'
         ? Math.max(DAY_START_HOUR * 60, Math.min(startMin + duration - SNAP_MINS, startMin + finalDeltaMin))
@@ -286,10 +287,9 @@ function StopBlock({
     document.addEventListener('pointerup', onUp);
   };
 
-  // ── DnD (move) ──
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id:       dragId,
-    disabled: isResizing, // disable dnd while resizing
+    disabled: isResizing,
   });
 
   const snappedPreviewMin = transform
@@ -303,163 +303,151 @@ function StopBlock({
 
   const translateY = transform ? transform.y : 0;
 
-  return (
-    <Box
-      ref={setNodeRef}
-      onClick={isDragging || isResizing ? undefined : onClick}
-      style={{
-        transform:   isDragging ? `translateY(${translateY}px)` : undefined,
-        willChange:  isDragging ? 'transform' : undefined,
-        touchAction: 'none',
-      }}
-      sx={{
-        position:        'absolute',
-        left:            0,
-        right:           isMobile ? 2 : 4,
-        top:             liveTop,
-        height:          liveHeight,
-        zIndex:          isDragging || isResizing ? 100 : 2,
-        backgroundColor: cfg.bg,
-        borderLeft:      `3px solid ${cfg.color}`,
-        borderRadius:    '0 6px 6px 0',
-        px:              1,
-        py:              isMobile ? 0.6 : 0.4,
-        display:         'flex',
-        alignItems:      'flex-start',
-        gap:             0.5,
-        boxShadow:       isDragging || isResizing
-          ? `0 8px 24px rgba(0,0,0,0.22), 0 0 0 2px ${cfg.color}`
-          : '0 1px 3px rgba(0,0,0,0.08)',
-        opacity:         isDragging ? 0.92 : 1,
-        cursor:          isDragging ? 'grabbing' : 'pointer',
-        overflow:        'hidden',
-        transition:      isDragging || isResizing ? 'none' : 'box-shadow 0.15s',
-        '&:hover':       !isMobile && !isDragging && !isResizing
-          ? { boxShadow: '0 2px 8px rgba(0,0,0,0.14)' }
-          : {},
-        minHeight:       isMobile ? 36 : 'unset',
-      }}
-    >
-      {/* ── Top resize handle ── */}
-      <Box
-        onPointerDown={e => handleResizePointerDown(e, 'top')}
-        sx={{
-          position: 'absolute', top: 0, left: 0, right: 0,
-          height: 6,
-          cursor: 'ns-resize',
-          zIndex: 10,
-          borderRadius: '0 6px 0 0',
-          backgroundColor: isResizing && resize?.edge === 'top'
-            ? alpha(cfg.color, 0.25)
-            : 'transparent',
-          '&:hover': { backgroundColor: alpha(cfg.color, 0.18) },
-        }}
-      />
+  const tooltipLines = stop.notes ? stop.notes.split(' · ').filter(Boolean) : [];
+  const tooltipTitle = tooltipLines.length > 0 ? (
+    <Box sx={{ py: 0.25 }}>
+      {tooltipLines.map((line, i) => (
+        <Typography key={i} variant="caption" display="block" sx={{ lineHeight: 1.7 }}>
+          {line}
+        </Typography>
+      ))}
+    </Box>
+  ) : '';
 
-      {/* ── Drag handle ── */}
+  return (
+    <Tooltip
+      title={tooltipTitle}
+      placement="right"
+      arrow
+      disableHoverListener={!stop.notes || isDragging || isResizing}
+      enterDelay={300}
+    >
       <Box
-        {...listeners}
-        {...attributes}
-        onClick={e => e.stopPropagation()}
-        sx={{
-          display:     'flex',
-          alignItems:  'center',
-          flexShrink:  0,
-          cursor:      isDragging ? 'grabbing' : 'grab',
-          color:       alpha(cfg.color, 0.35),
+        ref={setNodeRef}
+        onClick={isDragging || isResizing ? undefined : onClick}
+        style={{
+          transform:   isDragging ? `translateY(${translateY}px)` : undefined,
+          willChange:  isDragging ? 'transform' : undefined,
           touchAction: 'none',
-          px:          0.25,
-          mr:          0.25,
-          alignSelf:   'stretch',
-          minWidth:    isMobile ? 22 : 16,
-          '&:hover':   { color: cfg.color },
+        }}
+        sx={{
+          position:        'absolute',
+          left:            0,
+          right:           isMobile ? 2 : 4,
+          top:             liveTop,
+          height:          liveHeight,
+          zIndex:          isDragging || isResizing ? 100 : 2,
+          backgroundColor: cfg.bg,
+          borderLeft:      `3px solid ${cfg.color}`,
+          borderRadius:    '0 6px 6px 0',
+          px:              1,
+          py:              isMobile ? 0.6 : 0.4,
+          display:         'flex',
+          alignItems:      'flex-start',
+          gap:             0.5,
+          boxShadow:       isDragging || isResizing
+            ? `0 8px 24px rgba(0,0,0,0.22), 0 0 0 2px ${cfg.color}`
+            : '0 1px 3px rgba(0,0,0,0.08)',
+          opacity:         isDragging ? 0.92 : 1,
+          cursor:          isDragging ? 'grabbing' : 'pointer',
+          overflow:        'hidden',
+          transition:      isDragging || isResizing ? 'none' : 'box-shadow 0.15s',
+          '&:hover':       !isMobile && !isDragging && !isResizing
+            ? { boxShadow: '0 2px 8px rgba(0,0,0,0.14)' }
+            : {},
         }}
       >
-        <DragIndicatorIcon sx={{ fontSize: isMobile ? 15 : 13 }} />
-      </Box>
-
-      {/* ── Content ── */}
-      <Box sx={{ flexGrow: 1, overflow: 'hidden', minWidth: 0 }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-          {stop.icon && (
-            <Typography sx={{ fontSize: isMobile ? '0.85rem' : '0.8rem', lineHeight: 1, flexShrink: 0 }}>
-              {stop.icon}
+        <Box
+          onPointerDown={e => handleResizePointerDown(e, 'top')}
+          sx={{
+            position: 'absolute', top: 0, left: 0, right: 0, height: 6,
+            cursor: 'ns-resize', zIndex: 10, borderRadius: '0 6px 0 0',
+            backgroundColor: isResizing && resize?.edge === 'top' ? alpha(cfg.color, 0.25) : 'transparent',
+            '&:hover': { backgroundColor: alpha(cfg.color, 0.18) },
+          }}
+        />
+        <Box
+          {...listeners}
+          {...attributes}
+          onClick={e => e.stopPropagation()}
+          sx={{
+            display: 'flex', alignItems: 'center', flexShrink: 0,
+            cursor: isDragging ? 'grabbing' : 'grab',
+            color: alpha(cfg.color, 0.35), touchAction: 'none',
+            px: 0.25, mr: 0.25, alignSelf: 'stretch',
+            minWidth: isMobile ? 22 : 16,
+            '&:hover': { color: cfg.color },
+          }}
+        >
+          <DragIndicatorIcon sx={{ fontSize: isMobile ? 15 : 13 }} />
+        </Box>
+        <Box sx={{ flexGrow: 1, overflow: 'hidden', minWidth: 0 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+            {stop.icon && (
+              <Typography sx={{ fontSize: isMobile ? '0.85rem' : '0.8rem', lineHeight: 1, flexShrink: 0 }}>
+                {stop.icon}
+              </Typography>
+            )}
+            <Typography sx={{
+              fontSize: isMobile ? '0.8rem' : '0.75rem', fontWeight: 700,
+              color: cfg.color, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+            }}>
+              {displayName}
+            </Typography>
+            {isLocked && <LockIcon sx={{ fontSize: 10, color: cfg.color, opacity: 0.6, flexShrink: 0 }} />}
+          </Box>
+          {showDetail && (
+            <Typography sx={{ fontSize: '0.72rem', color: 'text.secondary', lineHeight: 1.4, mt: 0.25 }}>
+              {isDragging
+                ? `→ ${formatTime(snappedPreviewMin)}`
+                : isResizing
+                ? `${formatTime(liveStartMin)} · ${liveDuration}min`
+                : `${formatTime(startMin)} · ${duration}min`
+              }
             </Typography>
           )}
-          <Typography sx={{
-            fontSize:     isMobile ? '0.8rem' : '0.75rem',
-            fontWeight:   700,
-            color:        cfg.color,
-            whiteSpace:   'nowrap',
-            overflow:     'hidden',
-            textOverflow: 'ellipsis',
-          }}>
-            {displayName}
-          </Typography>
-          {isLocked && <LockIcon sx={{ fontSize: 10, color: cfg.color, opacity: 0.6, flexShrink: 0 }} />}
         </Box>
-
-        {showDetail && (
-          <Typography sx={{ fontSize: '0.68rem', color: 'text.secondary', lineHeight: 1.3, mt: 0.25 }}>
-            {isDragging
-              ? `→ ${formatTime(snappedPreviewMin)}`
-              : isResizing
-              ? `${formatTime(liveStartMin)} · ${liveDuration}min`
-              : `${formatTime(startMin)} · ${duration}min${stop.notes ? ` · ${stop.notes}` : ''}`
-            }
-          </Typography>
+        {!isDragging && !isResizing && (
+          <Box sx={{ display: 'flex', flexDirection: 'column', flexShrink: 0 }}>
+            {hasLocation && (
+              <NavigateButton
+                destination={{ name: displayName, address: stop.address, coordinates: stop.coordinates ?? null }}
+                suggestedMode="walking"
+                size="small"
+                sx={{ p: isMobile ? 0.75 : 0.2, minWidth: isMobile ? 32 : 24, minHeight: isMobile ? 32 : 24 }}
+              />
+            )}
+            {!isLocked && onDelete && (
+              <IconButton
+                size="small"
+                onClick={e => { e.stopPropagation(); onDelete(); }}
+                sx={{
+                  p: isMobile ? 0.75 : 0.2, flexShrink: 0,
+                  color: cfg.color, opacity: isMobile ? 0.55 : 0.5,
+                  '&:active': { opacity: 1, backgroundColor: alpha(cfg.color, 0.12) },
+                  '&:hover':  { opacity: 1 },
+                  ...(isMobile && { minWidth: 32, minHeight: 32, mr: -0.5 }),
+                }}
+              >
+                <DeleteIcon sx={{ fontSize: isMobile ? 15 : 13 }} />
+              </IconButton>
+            )}
+          </Box>
         )}
+        <Box
+          onPointerDown={e => handleResizePointerDown(e, 'bottom')}
+          sx={{
+            position: 'absolute', bottom: 0, left: 0, right: 0, height: 6,
+            cursor: 'ns-resize', zIndex: 10, borderRadius: '0 0 6px 0',
+            backgroundColor: isResizing && resize?.edge === 'bottom' ? alpha(cfg.color, 0.25) : 'transparent',
+            '&:hover': { backgroundColor: alpha(cfg.color, 0.18) },
+          }}
+        />
       </Box>
-
-      {/* ── Actions — hidden while dragging/resizing ── */}
-      {!isDragging && !isResizing && (
-        <Box sx={{ display: 'flex', flexDirection: 'column', flexShrink: 0 }}>
-          {hasLocation && (
-            <NavigateButton
-              destination={{ name: displayName, address: stop.address, coordinates: stop.coordinates ?? null }}
-              suggestedMode="walking"
-              size="small"
-              sx={{ p: isMobile ? 0.75 : 0.2, minWidth: isMobile ? 32 : 24, minHeight: isMobile ? 32 : 24 }}
-            />
-          )}
-          {!isLocked && onDelete && (
-            <IconButton
-              size="small"
-              onClick={e => { e.stopPropagation(); onDelete(); }}
-              sx={{
-                p: isMobile ? 0.75 : 0.2, flexShrink: 0,
-                color: cfg.color, opacity: isMobile ? 0.55 : 0.5,
-                '&:active': { opacity: 1, backgroundColor: alpha(cfg.color, 0.12) },
-                '&:hover':  { opacity: 1 },
-                ...(isMobile && { minWidth: 32, minHeight: 32, mr: -0.5 }),
-              }}
-            >
-              <DeleteIcon sx={{ fontSize: isMobile ? 15 : 13 }} />
-            </IconButton>
-          )}
-        </Box>
-      )}
-
-      {/* ── Bottom resize handle ── */}
-      <Box
-        onPointerDown={e => handleResizePointerDown(e, 'bottom')}
-        sx={{
-          position: 'absolute', bottom: 0, left: 0, right: 0,
-          height: 6,
-          cursor: 'ns-resize',
-          zIndex: 10,
-          borderRadius: '0 0 6px 0',
-          backgroundColor: isResizing && resize?.edge === 'bottom'
-            ? alpha(cfg.color, 0.25)
-            : 'transparent',
-          '&:hover': { backgroundColor: alpha(cfg.color, 0.18) },
-        }}
-      />
-    </Box>
+    </Tooltip>
   );
 }
 
-// ─── Free time gap label ──────────────────────────────────────────────────────
 function FreeGap({
   slot, onQuickAdd, pxPerMin, isMobile,
 }: {
@@ -481,26 +469,21 @@ function FreeGap({
       sx={{
         position: 'absolute', left: 0, right: isMobile ? 2 : 4, top, height,
         display: 'flex', alignItems: 'center', justifyContent: 'center',
-        cursor: 'pointer', zIndex: 1,
-        borderRadius: 1,
+        cursor: 'pointer', zIndex: 1, borderRadius: 1,
         '&:hover .free-label': { opacity: 1 },
-        '&:active':            { backgroundColor: alpha('#55702C', 0.06) },
-        '&:hover':             { backgroundColor: alpha('#55702C', 0.04) },
+        '&:active': { backgroundColor: alpha('#55702C', 0.06) },
+        '&:hover':  { backgroundColor: alpha('#55702C', 0.04) },
       }}
     >
       <Typography
         className="free-label"
         variant="caption"
         sx={{
-          opacity:         isMobile ? 0.45 : 0,
-          transition:      'opacity 0.15s',
-          color:           'text.disabled',
-          fontSize:        '0.7rem',
+          opacity: isMobile ? 0.45 : 0, transition: 'opacity 0.15s',
+          color: 'text.disabled', fontSize: '0.7rem',
           backgroundColor: 'background.paper',
-          border:          '1px dashed',
-          borderColor:     'divider',
-          px: 1, py: 0.25, borderRadius: 4,
-          pointerEvents:   'none',
+          border: '1px dashed', borderColor: 'divider',
+          px: 1, py: 0.25, borderRadius: 4, pointerEvents: 'none',
         }}
       >
         + {label}
@@ -509,7 +492,6 @@ function FreeGap({
   );
 }
 
-// ─── Travel connector ─────────────────────────────────────────────────────────
 function TravelConnector({ stop, pxPerMin }: { stop: Stop; pxPerMin: number }) {
   const t = stop.travelToNext;
   if (!t) return null;
@@ -549,17 +531,21 @@ function TravelConnector({ stop, pxPerMin }: { stop: Stop; pxPerMin: number }) {
   );
 }
 
-// ─── Add stop drawer ──────────────────────────────────────────────────────────
 function AddStopDrawer({
-  open, onClose, onAdd, defaultTime, defaultType, isMobile,
+  open, onClose, onAdd, onUpdate, defaultTime, defaultType, editStop, isMobile, knownLocations,
 }: {
-  open:        boolean;
-  onClose:     () => void;
-  onAdd:       (stop: Partial<Stop>) => Promise<void>;
-  defaultTime: string;
-  defaultType: string;
-  isMobile:    boolean;
+  open:           boolean;
+  onClose:        () => void;
+  onAdd:          (stop: Partial<Stop>) => Promise<void>;
+  onUpdate:       (stop: Partial<Stop>) => Promise<void>;
+  defaultTime:    string;
+  defaultType:    string;
+  editStop?:      Stop;
+  isMobile:       boolean;
+  knownLocations: KnownLocation[];
 }) {
+  const isEditing = !!editStop;
+
   const [form, setForm] = useState({
     name:           '',
     type:           defaultType,
@@ -572,29 +558,58 @@ function AddStopDrawer({
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    setForm(f => ({
-      ...f,
-      type:           defaultType,
-      scheduledStart: defaultTime,
-      duration:       DEFAULT_DURATIONS[defaultType] ?? 60,
-      address:        '',
-      coordinates:    undefined,
-    }));
-  }, [defaultTime, defaultType, open]);
+    if (editStop) {
+      const timeStr = editStop.scheduledStart
+        ? editStop.scheduledStart.includes('T')
+          ? editStop.scheduledStart.split('T')[1]?.slice(0, 5) ?? defaultTime
+          : editStop.scheduledStart
+        : defaultTime;
+      setForm({
+        name:           editStop.name ?? '',
+        type:           editStop.type ?? defaultType,
+        scheduledStart: timeStr,
+        duration:       stopDuration(editStop),
+        notes:          editStop.notes ?? '',
+        address:        editStop.address ?? '',
+        coordinates:    editStop.coordinates,
+      });
+    } else {
+      setForm({
+        name:           '',
+        type:           defaultType,
+        scheduledStart: defaultTime,
+        duration:       DEFAULT_DURATIONS[defaultType] ?? 60,
+        notes:          '',
+        address:        '',
+        coordinates:    undefined,
+      });
+    }
+  }, [defaultTime, defaultType, editStop, open]);
 
   const handleAddressChange = (result: ResolvedAddress | null) => {
     setForm(f => ({
       ...f,
       address:     result?.address     ?? '',
       coordinates: result?.coordinates ?? undefined,
-      // Auto-populate name from place text if still empty
       name: f.name || result?.address?.split(',')[0] || f.name,
+    }));
+  };
+
+  const handleLocationChip = (loc: KnownLocation) => {
+    setForm(f => ({
+      ...f,
+      address:     loc.address ?? loc.label,
+      coordinates: loc.coordinates,
     }));
   };
 
   const submit = async () => {
     setSaving(true);
-    await onAdd(form);
+    if (isEditing) {
+      await onUpdate({ ...editStop, ...form });
+    } else {
+      await onAdd(form);
+    }
     setSaving(false);
     onClose();
   };
@@ -603,18 +618,15 @@ function AddStopDrawer({
 
   const content = (
     <>
-      {/* Header */}
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-        <Typography variant="h6" fontWeight={700}>Add to day</Typography>
-        <IconButton
-          onClick={onClose}
-          sx={{ ...(isMobile && { p: 1, minWidth: 44, minHeight: 44 }) }}
-        >
+        <Typography variant="h6" fontWeight={700}>
+          {isEditing ? 'Edit stop' : 'Add to day'}
+        </Typography>
+        <IconButton onClick={onClose} sx={{ ...(isMobile && { p: 1, minWidth: 44, minHeight: 44 }) }}>
           <CloseIcon />
         </IconButton>
       </Box>
 
-      {/* Type picker */}
       <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 2.5 }}>
         {QUICK_ADD_TYPES.map(t => {
           const c = STOP_CONFIG[t];
@@ -630,10 +642,7 @@ function AddStopDrawer({
                 color:           c.color,
                 fontWeight:      form.type === t ? 700 : 400,
                 border:          '1px solid',
-                ...(isMobile && {
-                  height: 36,
-                  '& .MuiChip-label': { px: 1.5 },
-                }),
+                ...(isMobile && { height: 36, '& .MuiChip-label': { px: 1.5 } }),
               }}
             />
           );
@@ -672,11 +681,42 @@ function AddStopDrawer({
           />
         </Box>
 
-        {/* Location — Mapbox geocoded via AddressSearch component */}
+        {knownLocations.length > 0 && (
+          <Box>
+            <Typography variant="caption" color="text.secondary" sx={{ mb: 0.75, display: 'block' }}>
+              Trip locations
+            </Typography>
+            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.75 }}>
+              {knownLocations.map((loc, i) => {
+                const isSelected = form.address === (loc.address ?? loc.label);
+                const LocIcon = loc.type === 'hotel' ? HotelIcon : loc.type === 'airport' ? FlightIcon : EventIcon;
+                return (
+                  <Chip
+                    key={i}
+                    label={loc.label}
+                    size="small"
+                    icon={<LocIcon sx={{ fontSize: '14px !important' }} />}
+                    onClick={() => handleLocationChip(loc)}
+                    sx={{
+                      border:          '1px solid',
+                      borderColor:     isSelected ? '#1D2642' : alpha('#1D2642', 0.25),
+                      backgroundColor: isSelected ? alpha('#1D2642', 0.10) : 'transparent',
+                      color:           '#1D2642',
+                      fontWeight:      isSelected ? 700 : 400,
+                      '& .MuiChip-icon': { color: '#1D2642', opacity: isSelected ? 1 : 0.5 },
+                      ...(isMobile && { height: 32, '& .MuiChip-label': { px: 1.25 } }),
+                    }}
+                  />
+                );
+              })}
+            </Box>
+          </Box>
+        )}
+
         <AddressSearch
           label="Location (optional)"
           value={form.address}
-          placeholder="Search for a place…"
+          placeholder="Or search for a place…"
           onChange={handleAddressChange}
           noValidation
         />
@@ -697,18 +737,14 @@ function AddStopDrawer({
           onClick={submit}
           disabled={!form.name || saving}
           fullWidth
-          sx={{
-            mt: 1,
-            ...(isMobile && { py: 1.75, fontSize: '1rem', borderRadius: 2 }),
-          }}
+          sx={{ mt: 1, ...(isMobile && { py: 1.75, fontSize: '1rem', borderRadius: 2 }) }}
         >
-          {saving ? <CircularProgress size={20} /> : 'Add to itinerary'}
+          {saving ? <CircularProgress size={20} /> : isEditing ? 'Save changes' : 'Add to itinerary'}
         </Button>
       </Box>
     </>
   );
 
-  // Mobile: bottom sheet. Desktop: right drawer.
   if (isMobile) {
     return (
       <Drawer
@@ -717,16 +753,13 @@ function AddStopDrawer({
         onClose={onClose}
         PaperProps={{
           sx: {
-            borderTopLeftRadius:  16,
-            borderTopRightRadius: 16,
+            borderTopLeftRadius: 16, borderTopRightRadius: 16,
             px: 2.5, pt: 1.5,
             pb: 'max(env(safe-area-inset-bottom, 16px), 32px)',
-            maxHeight: '88vh',
-            overflowY: 'auto',
+            maxHeight: '88vh', overflowY: 'auto',
           },
         }}
       >
-        {/* Drag handle pill */}
         <Box sx={{ display: 'flex', justifyContent: 'center', mb: 1.5 }}>
           <Box sx={{ width: 40, height: 4, borderRadius: 2, backgroundColor: alpha('#000', 0.15) }} />
         </Box>
@@ -736,15 +769,12 @@ function AddStopDrawer({
   }
 
   return (
-    <Drawer anchor="right" open={open} onClose={onClose}
-      PaperProps={{ sx: { width: 380, p: 3 } }}
-    >
+    <Drawer anchor="right" open={open} onClose={onClose} PaperProps={{ sx: { width: 380, p: 3 } }}>
       {content}
     </Drawer>
   );
 }
 
-// ─── Main ItineraryTab ────────────────────────────────────────────────────────
 export default function ItineraryTab({ tripId, startDate, endDate, fabTrigger }: Props) {
   const theme    = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
@@ -752,25 +782,22 @@ export default function ItineraryTab({ tripId, startDate, endDate, fabTrigger }:
   const pxPerMin  = isMobile ? PX_PER_MIN_MOBILE : PX_PER_MIN_DESKTOP;
   const timelineH = TOTAL_MINS * pxPerMin;
 
-  const [days,          setDays]          = useState<Day[]>([]);
-  const [loading,       setLoading]       = useState(true);
-  const [activeDayIdx,  setActiveDayIdx]  = useState(0);
-  const [calculating,   setCalculating]   = useState(false);
-  const [showAllChips,  setShowAllChips]  = useState(false);
-  const [drawer, setDrawer] = useState<{ open: boolean; time: string; type: string }>({
-    open: false, time: '09:00', type: 'activity',
-  });
+  const [days,           setDays]           = useState<Day[]>([]);
+  const [loading,        setLoading]        = useState(true);
+  const [activeDayIdx,   setActiveDayIdx]   = useState(0);
+  const [calculating,    setCalculating]    = useState(false);
+  const [showAllChips,   setShowAllChips]   = useState(false);
+  const [knownLocations, setKnownLocations] = useState<KnownLocation[]>([]);
+  const [drawer, setDrawer] = useState<{
+    open:      boolean;
+    time:      string;
+    type:      string;
+    editStop?: Stop;
+  }>({ open: false, time: '09:00', type: 'activity' });
 
-  // ── DnD sensors ──
-  // Desktop: start dragging after 5px of movement
-  // Mobile: 200ms long-press (delay) + 8px tolerance so scroll still works freely
   const sensors = useSensors(
-    useSensor(PointerSensor, {
-      activationConstraint: { distance: 5 },
-    }),
-    useSensor(TouchSensor, {
-      activationConstraint: { delay: 200, tolerance: 8 },
-    }),
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(TouchSensor,   { activationConstraint: { delay: 200, tolerance: 8 } }),
   );
 
   useEffect(() => {
@@ -791,20 +818,44 @@ export default function ItineraryTab({ tripId, startDate, endDate, fabTrigger }:
     loadItinerary();
   }, [tripId]);
 
+  useEffect(() => {
+    fetch(`/api/trips/${tripId}/logistics`)
+      .then(r => r.json())
+      .then(data => {
+        const logistics = data.logistics ?? data;
+        const locs: KnownLocation[] = [];
+        (logistics.accommodation ?? []).forEach((a: any) => {
+          if (a.name) locs.push({ label: a.name, address: a.address, coordinates: a.coordinates, type: 'hotel' });
+        });
+        (logistics.venues ?? []).forEach((v: any) => {
+          if (v.name) locs.push({ label: v.name, address: v.address, coordinates: v.coordinates, type: 'venue' });
+        });
+        (logistics.transportation ?? []).forEach((t: any) => {
+          if (t.departureLocation) locs.push({ label: t.departureLocation, type: 'airport' });
+          if (t.arrivalLocation)   locs.push({ label: t.arrivalLocation, type: 'airport' });
+        });
+        const seen = new Set<string>();
+        setKnownLocations(locs.filter(l => {
+          if (seen.has(l.label)) return false;
+          seen.add(l.label);
+          return true;
+        }));
+      })
+      .catch(() => {});
+  }, [tripId]);
+
   const activeDay = days[activeDayIdx];
 
-  const openDrawer = (time: string, type = 'activity') =>
-    setDrawer({ open: true, time, type });
+  const openDrawer = (time: string, type = 'activity', editStop?: Stop) =>
+    setDrawer({ open: true, time, type, editStop });
 
   useEffect(() => {
-  if (!fabTrigger) return;
-  if (fabTrigger.action === 'stop') openDrawer('09:00', 'activity');
-}, [fabTrigger]);
+    if (!fabTrigger) return;
+    if (fabTrigger.action === 'stop') openDrawer('09:00', 'activity');
+  }, [fabTrigger]);
 
-
-  // ── Add stop ──
   const addStop = async (stop: Partial<Stop>) => {
-    const day = days[activeDayIdx];
+    const day         = days[activeDayIdx];
     const updatedDays = [...days];
     updatedDays[activeDayIdx] = {
       ...day,
@@ -826,18 +877,46 @@ export default function ItineraryTab({ tripId, startDate, endDate, fabTrigger }:
     }
 
     const res  = await fetch(`/api/trips/${tripId}/itinerary/stops`, {
-      method: 'POST',
+      method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
+      body:    JSON.stringify({
         dayDate: day.date,
-        stop: { ...stop, scheduledStart: `${day.date.split('T')[0]}T${stop.scheduledStart}:00` },
+        stop:    { ...stop, scheduledStart: `${day.date.split('T')[0]}T${stop.scheduledStart}:00` },
       }),
     });
     const data = await res.json();
     setDays(data.days);
   };
 
-  // ── Delete stop ──
+  const updateStop = async (stop: Partial<Stop>) => {
+    if (!stop._id) return;
+    const day               = days[activeDayIdx];
+    const dateStr           = day.date.split('T')[0];
+    const newScheduledStart = `${dateStr}T${stop.scheduledStart}:00`;
+
+    const updatedDays = days.map(d => ({
+      ...d,
+      stops: d.stops.map(s =>
+        s._id === stop._id ? { ...s, ...stop, scheduledStart: newScheduledStart } : s
+      ),
+    }));
+    setDays(updatedDays);
+    await saveTripCache(tripId, { ...(await getTripCache(tripId)), itinerary: updatedDays });
+
+    if (!navigator.onLine) {
+      await queueAction({ type: 'RESCHEDULE_STOP', tripId, payload: { stopId: stop._id, ...stop, scheduledStart: newScheduledStart } });
+      return;
+    }
+
+    const res  = await fetch(`/api/trips/${tripId}/itinerary/stops/${stop._id}`, {
+      method:  'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ ...stop, scheduledStart: newScheduledStart }),
+    });
+    const data = await res.json();
+    setDays(data.days);
+  };
+
   const deleteStop = async (stopId: string) => {
     const updatedDays = days.map(day => ({
       ...day,
@@ -856,13 +935,11 @@ export default function ItineraryTab({ tripId, startDate, endDate, fabTrigger }:
     setDays(data.days);
   };
 
-  // ── Reschedule stop (drag result) ──
   const rescheduleStop = async (stopId: string, newStartMin: number) => {
-    const day      = days[activeDayIdx];
-    const dateStr  = day.date.split('T')[0];
+    const day               = days[activeDayIdx];
+    const dateStr           = day.date.split('T')[0];
     const newScheduledStart = `${dateStr}T${formatTime(newStartMin)}:00`;
 
-    // Optimistic update
     const updatedDays = days.map(d => ({
       ...d,
       stops: d.stops.map(s =>
@@ -878,25 +955,24 @@ export default function ItineraryTab({ tripId, startDate, endDate, fabTrigger }:
     }
 
     const res  = await fetch(`/api/trips/${tripId}/itinerary/stops/${stopId}`, {
-      method: 'PATCH',
+      method:  'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ scheduledStart: newScheduledStart }),
+      body:    JSON.stringify({ scheduledStart: newScheduledStart }),
     });
     const data = await res.json();
     setDays(data.days);
   };
 
-  // ── Resize stop (drag top/bottom edge) ──
   const resizeStop = async (stop: Stop, newStartMin: number, newDuration: number) => {
-    const day    = days[activeDayIdx];
-    const dateStr = day.date.split('T')[0];
+    const day               = days[activeDayIdx];
+    const dateStr           = day.date.split('T')[0];
     const newScheduledStart = `${dateStr}T${formatTime(newStartMin)}:00`;
 
-    // Optimistic update
     const updatedDays = days.map(d => ({
       ...d,
       stops: d.stops.map(s => {
-        const isTarget = stop._id ? s._id === stop._id
+        const isTarget = stop._id
+          ? s._id === stop._id
           : `${s.name}-${s.scheduledStart ?? s.time ?? 'notime'}` ===
             `${stop.name}-${stop.scheduledStart ?? stop.time ?? 'notime'}`;
         return isTarget ? { ...s, scheduledStart: newScheduledStart, duration: newDuration } : s;
@@ -905,7 +981,7 @@ export default function ItineraryTab({ tripId, startDate, endDate, fabTrigger }:
     setDays(updatedDays);
     await saveTripCache(tripId, { ...(await getTripCache(tripId)), itinerary: updatedDays });
 
-    if (!stop._id) return; // no API call if no _id
+    if (!stop._id) return;
 
     if (!navigator.onLine) {
       await queueAction({ type: 'RESCHEDULE_STOP', tripId, payload: { stopId: stop._id, scheduledStart: newScheduledStart, duration: newDuration } });
@@ -921,26 +997,20 @@ export default function ItineraryTab({ tripId, startDate, endDate, fabTrigger }:
     setDays(data.days);
   };
 
-  // ── DnD drag end ──
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, delta } = event;
-    console.log('[DnD] handleDragEnd fired | active.id=', active.id, '| delta=', delta);
     const stopId = active.id as string;
-    // Match by _id first, then by the name+time fallback key
-    const stop = activeDay?.stops.find(s =>
+    const stop   = activeDay?.stops.find(s =>
       s._id === stopId ||
       `${s.name}-${s.scheduledStart ?? s.time ?? 'notime'}` === stopId
     );
-    console.log('[DnD] matched stop=', stop?._id, stop?.name);
-    if (!stop) { console.warn('[DnD] stop not found in activeDay'); return; }
+    if (!stop) return;
 
     const startMin = stopStartMinutes(stop);
-    console.log('[DnD] startMin=', startMin, '| pxPerMin=', pxPerMin);
-    if (startMin === null) { console.warn('[DnD] startMin is null'); return; }
+    if (startMin === null) return;
 
     const deltaMin = Math.round((delta.y / pxPerMin) / SNAP_MINS) * SNAP_MINS;
-    console.log('[DnD] deltaMin=', deltaMin);
-    if (deltaMin === 0) { console.log('[DnD] deltaMin=0, no move'); return; }
+    if (deltaMin === 0) return;
 
     const newStartMin = Math.max(
       DAY_START_HOUR * 60,
@@ -951,13 +1021,12 @@ export default function ItineraryTab({ tripId, startDate, endDate, fabTrigger }:
       if (stop._id) {
         rescheduleStop(stop._id, newStartMin);
       } else {
-        // No _id — optimistic UI only, no API call (logistics stops without _id)
-        const dateStr = days[activeDayIdx].date.split('T')[0];
+        const dateStr           = days[activeDayIdx].date.split('T')[0];
         const newScheduledStart = `${dateStr}T${formatTime(newStartMin)}:00`;
         const updatedDays = days.map(d => ({
           ...d,
           stops: d.stops.map(s =>
-            (`${s.name}-${s.scheduledStart ?? s.time ?? 'notime'}` === stopId)
+            `${s.name}-${s.scheduledStart ?? s.time ?? 'notime'}` === stopId
               ? { ...s, scheduledStart: newScheduledStart }
               : s
           ),
@@ -967,7 +1036,6 @@ export default function ItineraryTab({ tripId, startDate, endDate, fabTrigger }:
     }
   };
 
-  // ── Calculate travel ──
   const calculateTravel = async () => {
     setCalculating(true);
 
@@ -984,7 +1052,6 @@ export default function ItineraryTab({ tripId, startDate, endDate, fabTrigger }:
     setCalculating(false);
   };
 
-  // ── Loading / empty states ──
   if (loading) return (
     <Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}>
       <CircularProgress />
@@ -1006,13 +1073,8 @@ export default function ItineraryTab({ tripId, startDate, endDate, fabTrigger }:
 
   return (
     <Box>
-      {/* ── Top bar ── */}
-      <Box sx={{
-        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-        mb: 2.5, gap: 1,
-      }}>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2.5, gap: 1 }}>
         <Typography variant="h6" fontWeight={700}>Day by Day</Typography>
-
         <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
           {isMobile ? (
             <Tooltip title="Calculate A-to-B travel times">
@@ -1040,7 +1102,6 @@ export default function ItineraryTab({ tripId, startDate, endDate, fabTrigger }:
               {calculating ? 'Calculating...' : 'Calculate A-to-B'}
             </Button>
           )}
-
           <Button
             variant="contained"
             size={isMobile ? 'medium' : 'small'}
@@ -1053,7 +1114,6 @@ export default function ItineraryTab({ tripId, startDate, endDate, fabTrigger }:
         </Box>
       </Box>
 
-      {/* ── Day selector ── */}
       <Box sx={{
         display: 'flex', gap: isMobile ? 0.75 : 1, mb: 2.5,
         overflowX: 'auto', pb: 0.5,
@@ -1072,8 +1132,7 @@ export default function ItineraryTab({ tripId, startDate, endDate, fabTrigger }:
               key={day.date}
               onClick={() => setActiveDayIdx(i)}
               sx={{
-                flexShrink: 0,
-                px: 2, py: isMobile ? 1.5 : 1.25,
+                flexShrink: 0, px: 2, py: isMobile ? 1.5 : 1.25,
                 borderRadius: 2, cursor: 'pointer',
                 border: '2px solid', transition: 'all 0.15s',
                 borderColor:     active ? 'primary.main' : 'divider',
@@ -1105,7 +1164,6 @@ export default function ItineraryTab({ tripId, startDate, endDate, fabTrigger }:
         })}
       </Box>
 
-      {/* ── Day header ── */}
       {activeDay && (
         <Box sx={{
           display: 'flex', justifyContent: 'space-between',
@@ -1145,7 +1203,6 @@ export default function ItineraryTab({ tripId, startDate, endDate, fabTrigger }:
               )}
             </Box>
           </Box>
-
           {!isMobile && (
             <Button variant="outlined" size="small" startIcon={<AddIcon />}
               onClick={() => openDrawer('09:00', 'meeting')} sx={{ flexShrink: 0 }}>
@@ -1155,7 +1212,6 @@ export default function ItineraryTab({ tripId, startDate, endDate, fabTrigger }:
         </Box>
       )}
 
-      {/* ── Quick add chip row ── */}
       <Box sx={{ display: 'flex', gap: 1, mb: 2.5, flexWrap: 'wrap', alignItems: 'center' }}>
         {visibleChips.map(t => {
           const c = STOP_CONFIG[t];
@@ -1191,29 +1247,19 @@ export default function ItineraryTab({ tripId, startDate, endDate, fabTrigger }:
         )}
       </Box>
 
-      {/* ── Timeline ── */}
       {activeDay && (
         <Paper sx={{
           backgroundColor: 'background.paper', overflow: 'hidden',
           borderRadius: 2, border: '1px solid', borderColor: 'divider',
         }}>
-          {/* DndContext scoped to timeline only */}
-          <DndContext
-            sensors={sensors}
-            modifiers={[restrictToVerticalAxis]}
-            onDragEnd={handleDragEnd}
-          >
+          <DndContext sensors={sensors} modifiers={[restrictToVerticalAxis]} onDragEnd={handleDragEnd}>
             <Box sx={{ display: 'flex', position: 'relative', height: timelineH + 32 }}>
-
-              {/* Hour ruler */}
               <Box sx={{
                 flexShrink: 0, width: 44, position: 'relative',
                 borderRight: '1px solid', borderColor: 'divider', pt: 2,
               }}>
                 <HourRuler pxPerMin={pxPerMin} />
               </Box>
-
-              {/* Timeline column */}
               <Box
                 sx={{
                   flex: 1, position: 'relative', pt: 2, pb: 2,
@@ -1230,24 +1276,18 @@ export default function ItineraryTab({ tripId, startDate, endDate, fabTrigger }:
                 }}
               >
                 <GridLines pxPerMin={pxPerMin} />
-
                 {freeSlots(activeDay.stops).map((slot, i) => (
-                  <FreeGap key={i} slot={slot}
-                    onQuickAdd={time => openDrawer(time)}
-                    pxPerMin={pxPerMin}
-                    isMobile={isMobile}
-                  />
+                  <FreeGap key={i} slot={slot} onQuickAdd={time => openDrawer(time)} pxPerMin={pxPerMin} isMobile={isMobile} />
                 ))}
-
                 {activeDay.stops.map((stop, i) => (
                   <Box key={stop._id ?? i}>
                     <StopBlock
                       stop={stop}
                       onDelete={stop._id ? () => deleteStop(stop._id!) : undefined}
                       onClick={() => {
-                        if (stop.source !== 'logistics') {
+                        if (stop.source !== 'logistics' && stop._id) {
                           const t = stopStartMinutes(stop);
-                          openDrawer(t ? formatTime(t) : '09:00', stop.type);
+                          openDrawer(t ? formatTime(t) : '09:00', stop.type, stop);
                         }
                       }}
                       onResize={(newStartMin, newDuration) => resizeStop(stop, newStartMin, newDuration)}
@@ -1257,7 +1297,6 @@ export default function ItineraryTab({ tripId, startDate, endDate, fabTrigger }:
                     <TravelConnector stop={stop} pxPerMin={pxPerMin} />
                   </Box>
                 ))}
-
                 {activeDay.stops.length === 0 && (
                   <Box sx={{
                     position: 'absolute', inset: 0,
@@ -1284,14 +1323,16 @@ export default function ItineraryTab({ tripId, startDate, endDate, fabTrigger }:
         </Paper>
       )}
 
-      {/* ── Add stop drawer ── */}
       <AddStopDrawer
         open={drawer.open}
-        onClose={() => setDrawer(d => ({ ...d, open: false }))}
+        onClose={() => setDrawer(d => ({ ...d, open: false, editStop: undefined }))}
         onAdd={addStop}
+        onUpdate={updateStop}
         defaultTime={drawer.time}
         defaultType={drawer.type}
+        editStop={drawer.editStop}
         isMobile={isMobile}
+        knownLocations={knownLocations}
       />
     </Box>
   );

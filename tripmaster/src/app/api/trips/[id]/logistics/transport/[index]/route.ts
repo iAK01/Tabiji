@@ -29,6 +29,7 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
   if (!logistics) return NextResponse.json({ error: 'Not found' }, { status: 404 });
   logistics.transportation[Number(index)] = body;
   logistics.markModified('transportation');
-  await logistics.save();
+await logistics.save();
+await syncLogisticsToItinerary(id, logistics);
   return NextResponse.json({ logistics });
 }

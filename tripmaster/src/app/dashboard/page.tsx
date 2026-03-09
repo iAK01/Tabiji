@@ -2,7 +2,7 @@
 
 import { useSession, signOut } from 'next-auth/react';
 import {
-  Box, Typography, Button, Card, CardContent, Chip,
+  Box, Typography, Button, Chip,
   Container, AppBar, Toolbar, IconButton, Avatar, Skeleton,
   ToggleButtonGroup, ToggleButton, Tabs, Tab, Paper, alpha, CircularProgress,
 } from '@mui/material';
@@ -77,6 +77,18 @@ interface RightNow {
   inProgress: boolean;
 }
 
+// ─── Design tokens ────────────────────────────────────────────────────────────
+
+const D = {
+  green:   '#6B7C5C',
+  terra:   '#C4714A',
+  navy:    '#2C3E50',
+  bg:      '#F5F0E8',
+  paper:   '#FDFAF5',
+  display: '"Archivo Black", sans-serif',
+  body:    '"Archivo", "Inter", sans-serif',
+} as const;
+
 // ─── Config ───────────────────────────────────────────────────────────────────
 
 const STOP_CONFIG: Record<string, { label: string; color: string; Icon: any }> = {
@@ -100,13 +112,18 @@ const STOP_CONFIG: Record<string, { label: string; color: string; Icon: any }> =
   other:       { label: 'Other',         color: '#6b7280', Icon: EventIcon },
 };
 
-const STATUS_COLOURS: Record<string, 'default' | 'primary' | 'secondary' | 'error' | 'warning' | 'success'> = {
-  idea: 'default', planning: 'warning', confirmed: 'primary',
-  active: 'success', completed: 'default', cancelled: 'error',
-};
-
 const TRIP_TYPE_LABEL: Record<string, string> = {
   leisure: 'Leisure', work: 'Work', mixed: 'Mixed',
+};
+
+// Status dot colours for the custom chip
+const STATUS_DOT: Record<string, string> = {
+  confirmed: '#6B7C5C',
+  active:    '#6B7C5C',
+  planning:  '#C4714A',
+  idea:      '#9ca3af',
+  completed: '#9ca3af',
+  cancelled: '#ef4444',
 };
 
 type TabValue = 'upcoming' | 'planning' | 'confirmed' | 'past' | 'cancelled';
@@ -183,33 +200,25 @@ function mapsLinks(name: string, address?: string, coords?: { lat: number; lng: 
 function deriveRightNow(days: ItineraryDay[]): RightNow | null {
   const today = new Date().toISOString().split('T')[0];
   const nowMins = new Date().getHours() * 60 + new Date().getMinutes();
-
   const todayDay = days.find(d => d.date.split('T')[0] === today);
   if (!todayDay) return null;
-
   const timed = todayDay.stops
     .map(s => ({ stop: s, startM: stopStartMinutes(s) }))
     .filter(x => x.startM !== null)
     .sort((a, b) => a.startM! - b.startM!);
-
   const inProg = timed.find(x => {
     const endM = x.startM! + x.stop.duration;
     return nowMins >= x.startM! && nowMins < endM;
   });
-
   if (inProg) return { stop: inProg.stop, startM: inProg.startM, inProgress: true };
-
   const nextUp = timed.find(x => x.startM! > nowMins);
   if (nextUp) return { stop: nextUp.stop, startM: nextUp.startM, inProgress: false };
-
-  // Fall back to first untimed stop of the day
   const untimed = todayDay.stops.find(s => stopStartMinutes(s) === null);
   if (untimed) return { stop: untimed, startM: null, inProgress: false };
-
   return null;
 }
 
-// ─── Map buttons ──────────────────────────────────────────────────────────────
+// ─── MapButtons ───────────────────────────────────────────────────────────────
 
 function MapButtons({ name, address, coordinates, stopPropagation }: {
   name: string;
@@ -221,7 +230,7 @@ function MapButtons({ name, address, coordinates, stopPropagation }: {
   return (
     <Box sx={{ display: 'flex', gap: 0.75, mt: 1, flexWrap: 'wrap' }}>
       {[
-        { label: 'Apple Maps',  href: links.apple,  color: '#1D2642' },
+        { label: 'Apple Maps',  href: links.apple,  color: D.navy },
         { label: 'Google Maps', href: links.google, color: '#0369a1' },
         { label: 'Waze',        href: links.waze,   color: '#00838f' },
       ].map(({ label, href, color }) => (
@@ -235,9 +244,10 @@ function MapButtons({ name, address, coordinates, stopPropagation }: {
           onClick={stopPropagation ? (e: React.MouseEvent) => e.stopPropagation() : undefined}
           startIcon={<NavigationIcon sx={{ fontSize: '0.85rem !important' }} />}
           sx={{
+            fontFamily: D.body,
             fontSize: '0.72rem', fontWeight: 700, py: 0.4, px: 1, minHeight: 28,
             backgroundColor: alpha(color, 0.09), color,
-            border: `1px solid ${alpha(color, 0.2)}`,
+            border: `1px solid ${alpha(color, 0.2)}`, borderRadius: 1.5,
             '&:hover': { backgroundColor: alpha(color, 0.18) },
           }}
         >
@@ -251,10 +261,7 @@ function MapButtons({ name, address, coordinates, stopPropagation }: {
 // ─── Active trip banner ───────────────────────────────────────────────────────
 
 function ActiveTripBanner({
-  trip,
-  rightNow,
-  rightNowLoading,
-  onOpen,
+  trip, rightNow, rightNowLoading, onOpen,
 }: {
   trip: Trip;
   rightNow: RightNow | null;
@@ -264,108 +271,105 @@ function ActiveTripBanner({
   const dayNum    = dayOfTrip(trip.startDate);
   const totalDays = trip.nights + 1;
   const pct       = Math.round(((dayNum - 1) / Math.max(totalDays - 1, 1)) * 100);
-  const isPast    = new Date(trip.endDate) < new Date(new Date().setHours(0,0,0,0));
-
-  const nowMins = new Date().getHours() * 60 + new Date().getMinutes();
-  const cfg     = rightNow ? (STOP_CONFIG[rightNow.stop.type] ?? STOP_CONFIG.other) : null;
-  const StopIcon = cfg?.Icon ?? null;
-  const endM     = rightNow?.startM !== null && rightNow?.startM !== undefined
-    ? rightNow.startM + rightNow.stop.duration
-    : null;
+  const isPast    = new Date(trip.endDate) < new Date(new Date().setHours(0, 0, 0, 0));
+  const nowMins   = new Date().getHours() * 60 + new Date().getMinutes();
+  const cfg       = rightNow ? (STOP_CONFIG[rightNow.stop.type] ?? STOP_CONFIG.other) : null;
+  const StopIcon  = cfg?.Icon ?? null;
+  const endM      = rightNow?.startM !== null && rightNow?.startM !== undefined
+    ? rightNow.startM + rightNow.stop.duration : null;
   const remaining = rightNow?.inProgress && endM !== null ? endM - nowMins : null;
 
   return (
-    <Paper
-      elevation={0}
-      onClick={onOpen}
-      sx={{
-        mb: 3, borderRadius: 3, overflow: 'hidden', cursor: 'pointer',
-        border: '2px solid #55702C',
-        transition: 'box-shadow 0.15s, transform 0.15s',
-        '&:hover': { boxShadow: 6, transform: 'translateY(-1px)' },
-        '&:active': { transform: 'scale(0.995)' },
-      }}
-    >
-      {/* Cover photo / gradient header */}
+    <Paper elevation={0} onClick={onOpen} sx={{
+      mb: 4, borderRadius: 2.5, overflow: 'hidden', cursor: 'pointer',
+      border: `2px solid ${D.green}`,
+      transition: 'box-shadow 0.2s, transform 0.2s',
+      '&:hover': { boxShadow: `0 12px 40px ${alpha(D.navy, 0.14)}`, transform: 'translateY(-2px)' },
+      '&:active': { transform: 'scale(0.998)' },
+    }}>
+      {/* Cover photo */}
       <Box sx={{
-        height: { xs: 110, sm: 140 },
+        height: { xs: 170, sm: 220 },
         background: trip.coverPhotoUrl
-          ? `linear-gradient(to bottom, ${alpha('#000', 0.1)}, ${alpha('#000', 0.65)}), url(${trip.coverPhotoUrl}) center/cover no-repeat`
-          : `linear-gradient(135deg, #1D2642 0%, #55702C 100%)`,
+          ? `linear-gradient(to bottom, ${alpha('#000', 0.05)}, ${alpha('#000', 0.7)}), url(${trip.coverPhotoUrl}) center/cover no-repeat`
+          : `linear-gradient(135deg, ${D.navy} 0%, ${D.green} 100%)`,
         display: 'flex', alignItems: 'flex-end',
-        p: { xs: 2, sm: 2.5 },
+        p: { xs: 2.5, sm: 3 }, position: 'relative',
       }}>
-        <Box sx={{ flexGrow: 1 }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
-            <Chip
-              label={isPast ? '✈ Recently on trip' : new Date(trip.startDate) <= new Date() ? '✈ On trip' : '✈ Departing soon'}
-              size="small"
-              sx={{ height: 22, fontSize: '0.72rem', fontWeight: 800,
-                backgroundColor: '#55702C', color: 'white' }}
-            />
-            {new Date(trip.startDate) <= new Date() && !isPast && (
-              <Chip
-                label={`Day ${dayNum} of ${totalDays}`}
-                size="small"
-                sx={{ height: 22, fontSize: '0.72rem', fontWeight: 700,
-                  backgroundColor: alpha('#fff', 0.2), color: 'white',
-                  border: `1px solid ${alpha('#fff', 0.3)}` }}
-              />
-            )}
+        {/* Status label */}
+        <Box sx={{ position: 'absolute', top: 16, right: 16,
+          backgroundColor: D.green, borderRadius: 10, px: 1.5, py: 0.5 }}>
+          <Typography sx={{ fontFamily: D.body, color: 'white', fontSize: '0.65rem',
+            fontWeight: 800, letterSpacing: '0.14em', textTransform: 'uppercase' }}>
+            {isPast ? 'Recently on trip' : new Date(trip.startDate) <= new Date() ? 'On trip' : 'Departing soon'}
+          </Typography>
+        </Box>
+
+        {/* Day counter (top-left on active trips) */}
+        {new Date(trip.startDate) <= new Date() && !isPast && (
+          <Box sx={{ position: 'absolute', top: 14, left: 20 }}>
+            <Typography sx={{
+              fontFamily: D.display, color: 'white', lineHeight: 1,
+              fontSize: { xs: '2.8rem', sm: '3.8rem' }, letterSpacing: '-0.04em',
+            }}>
+              {dayNum}
+            </Typography>
+            <Typography sx={{ fontFamily: D.body, color: alpha('#fff', 0.65),
+              fontSize: '0.58rem', letterSpacing: '0.2em', textTransform: 'uppercase', fontWeight: 600 }}>
+              of {totalDays} days
+            </Typography>
           </Box>
-          <Typography variant="h6" fontWeight={900}
-            sx={{ color: 'white', fontSize: { xs: '1.1rem', sm: '1.3rem' }, lineHeight: 1.2 }}>
+        )}
+
+        {/* Trip name + destination */}
+        <Box sx={{ flexGrow: 1 }}>
+          <Typography sx={{
+            fontFamily: D.display, color: 'white', lineHeight: 1.05,
+            fontSize: { xs: '1.7rem', sm: '2.4rem' }, letterSpacing: '-0.03em', mb: 0.5,
+          }}>
             {trip.name}
           </Typography>
-          <Typography variant="body2" sx={{ color: alpha('#fff', 0.8), fontWeight: 600 }}>
+          <Typography sx={{ fontFamily: D.body, color: alpha('#fff', 0.72), fontWeight: 600,
+            fontSize: '0.72rem', letterSpacing: '0.16em', textTransform: 'uppercase' }}>
             {trip.destination.city}, {trip.destination.country}
           </Typography>
         </Box>
-        <KeyboardArrowRightIcon sx={{ color: 'white', fontSize: 28, flexShrink: 0 }} />
+        <KeyboardArrowRightIcon sx={{ color: 'white', fontSize: 28, flexShrink: 0, ml: 1 }} />
       </Box>
 
       {/* Progress bar */}
-      <Box sx={{ height: 4, backgroundColor: alpha('#55702C', 0.15) }}>
-        <Box sx={{ height: '100%', width: `${pct}%`, backgroundColor: '#55702C', transition: 'width 0.3s ease' }} />
+      <Box sx={{ height: 3, backgroundColor: alpha(D.green, 0.12) }}>
+        <Box sx={{ height: '100%', width: `${pct}%`, backgroundColor: D.green, transition: 'width 0.4s ease' }} />
       </Box>
 
-      {/* Next action card */}
-      <Box sx={{ px: { xs: 2, sm: 2.5 }, pt: 1.75, pb: 2 }}>
-
-        {/* Label row */}
-        <Typography variant="overline" sx={{
-          fontSize: '0.68rem', fontWeight: 800, letterSpacing: 1.2,
-          color: 'text.disabled', display: 'block', mb: 1,
-        }}>
-          {isPast ? '✅ Trip complete' : rightNow?.inProgress ? '🔴 Right now' : '⏭ Up next'}
+      {/* Next action panel */}
+      <Box sx={{ px: { xs: 2.5, sm: 3 }, pt: 2.25, pb: 2.75 }}>
+        <Typography sx={{ fontFamily: D.body, fontSize: '0.62rem', fontWeight: 800,
+          letterSpacing: '0.22em', color: 'text.disabled', textTransform: 'uppercase',
+          display: 'block', mb: 1.5 }}>
+          {isPast ? 'Trip complete' : rightNow?.inProgress ? 'Right now' : 'Up next'}
         </Typography>
 
-        {/* Past trip wrap-up */}
         {isPast && (
-          <Typography variant="body2" fontWeight={600} color="text.secondary" sx={{ fontSize: '0.88rem' }}>
+          <Typography sx={{ fontFamily: D.body, fontWeight: 600, color: 'text.secondary', fontSize: '0.88rem' }}>
             Anything to log or wrap up? Check your notes, expenses, or packing list.
           </Typography>
         )}
-
-        {/* Loading state */}
         {!isPast && rightNowLoading && (
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, py: 0.5 }}>
-            <CircularProgress size={18} sx={{ color: '#55702C' }} />
-            <Typography variant="body2" color="text.secondary" fontWeight={600}>Loading schedule…</Typography>
+            <CircularProgress size={16} sx={{ color: D.green }} />
+            <Typography sx={{ fontFamily: D.body, fontSize: '0.85rem', fontWeight: 600, color: 'text.secondary' }}>
+              Loading schedule…
+            </Typography>
           </Box>
         )}
-
-        {/* No stop found */}
         {!isPast && !rightNowLoading && !rightNow && (
-          <Typography variant="body2" color="text.disabled" fontWeight={600} sx={{ py: 0.5 }}>
+          <Typography sx={{ fontFamily: D.body, fontWeight: 600, color: 'text.disabled', py: 0.5, fontSize: '0.88rem' }}>
             Nothing else scheduled today
           </Typography>
         )}
-
-        {/* Stop card */}
         {!isPast && !rightNowLoading && rightNow && cfg && StopIcon && (
           <Box sx={{ display: 'flex', gap: 1.5, alignItems: 'flex-start' }}>
-            {/* Icon pill */}
             <Box sx={{
               width: 40, height: 40, borderRadius: 2, flexShrink: 0,
               backgroundColor: alpha(cfg.color, 0.12),
@@ -373,61 +377,46 @@ function ActiveTripBanner({
             }}>
               <StopIcon sx={{ fontSize: 20, color: cfg.color }} />
             </Box>
-
             <Box sx={{ flexGrow: 1, minWidth: 0 }}>
-              {/* Stop name + time chip */}
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-                <Typography variant="body1" fontWeight={800} sx={{ fontSize: '0.95rem', lineHeight: 1.3 }}>
+                <Typography sx={{ fontFamily: D.display, fontSize: '1.05rem', lineHeight: 1.3, letterSpacing: '-0.02em' }}>
                   {rightNow.stop.name}
                 </Typography>
                 {rightNow.inProgress
-                  ? <Chip label="In progress" size="small" sx={{ height: 20, fontSize: '0.67rem', fontWeight: 700, backgroundColor: alpha(cfg.color, 0.12), color: cfg.color }} />
+                  ? <Chip label="In progress" size="small" sx={{ height: 20, fontSize: '0.65rem', fontWeight: 700, fontFamily: D.body, backgroundColor: alpha(cfg.color, 0.12), color: cfg.color }} />
                   : rightNow.startM !== null
-                    ? <Chip label={`at ${fmtMins(rightNow.startM)}`} size="small" sx={{ height: 20, fontSize: '0.67rem', fontWeight: 700, backgroundColor: alpha(cfg.color, 0.1), color: cfg.color }} />
-                    : null
-                }
+                    ? <Chip label={`at ${fmtMins(rightNow.startM)}`} size="small" sx={{ height: 20, fontSize: '0.65rem', fontWeight: 700, fontFamily: D.body, backgroundColor: alpha(cfg.color, 0.1), color: cfg.color }} />
+                    : null}
               </Box>
-
-              {/* Remaining / until time */}
               {remaining !== null && (
-                <Typography variant="body2" sx={{ color: cfg.color, fontWeight: 700, fontSize: '0.82rem', mt: 0.2 }}>
-                  {remaining < 60
-                    ? `${remaining} min${remaining !== 1 ? 's' : ''} remaining`
-                    : `${Math.floor(remaining / 60)}h ${remaining % 60}m remaining`}
+                <Typography sx={{ fontFamily: D.body, color: cfg.color, fontWeight: 700, fontSize: '0.82rem', mt: 0.25 }}>
+                  {remaining < 60 ? `${remaining} min${remaining !== 1 ? 's' : ''} remaining` : `${Math.floor(remaining / 60)}h ${remaining % 60}m remaining`}
                 </Typography>
               )}
               {!rightNow.inProgress && rightNow.startM !== null && endM !== null && (
-                <Typography variant="body2" color="text.secondary" sx={{ fontSize: '0.78rem', mt: 0.2 }}>
+                <Typography sx={{ fontFamily: D.body, fontSize: '0.78rem', color: 'text.secondary', mt: 0.25 }}>
                   Until {fmtMins(endM)}
                 </Typography>
               )}
-
-              {/* Address */}
               {rightNow.stop.address && (
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mt: 0.5 }}>
                   <LocationOnIcon sx={{ fontSize: 13, color: 'text.disabled' }} />
-                  <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.76rem' }}>
+                  <Typography sx={{ fontFamily: D.body, fontSize: '0.76rem', color: 'text.secondary' }}>
                     {rightNow.stop.address}
                   </Typography>
                 </Box>
               )}
-
-              {/* Navigation buttons — stop propagation so tapping a map button doesn't open the trip */}
               {(rightNow.stop.address || rightNow.stop.coordinates) && !isPast && (
-                <MapButtons
-                  name={rightNow.stop.name}
-                  address={rightNow.stop.address}
-                  coordinates={rightNow.stop.coordinates}
-                  stopPropagation
-                />
+                <MapButtons name={rightNow.stop.name} address={rightNow.stop.address}
+                  coordinates={rightNow.stop.coordinates} stopPropagation />
               )}
             </Box>
           </Box>
         )}
 
-        {/* Open trip link */}
-        <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: rightNow ? 1.5 : 0 }}>
-          <Typography variant="caption" sx={{ color: '#55702C', fontWeight: 800, fontSize: '0.78rem', display: 'flex', alignItems: 'center', gap: 0.5 }}>
+        <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: rightNow ? 2 : 0.5 }}>
+          <Typography sx={{ fontFamily: D.body, color: D.green, fontWeight: 800, fontSize: '0.72rem',
+            display: 'flex', alignItems: 'center', gap: 0.5, letterSpacing: '0.1em', textTransform: 'uppercase' }}>
             Open trip <KeyboardArrowRightIcon sx={{ fontSize: 15 }} />
           </Typography>
         </Box>
@@ -448,7 +437,6 @@ export default function Dashboard() {
   const [rightNow,        setRightNow]        = useState<RightNow | null>(null);
   const [rightNowLoading, setRightNowLoading] = useState(false);
 
-  // Load trip list
   useEffect(() => {
     async function loadTrips() {
       try {
@@ -466,11 +454,9 @@ export default function Dashboard() {
     loadTrips();
   }, []);
 
-  // Once we have trips, load today's itinerary for the active trip
   useEffect(() => {
     const activeTrip = trips.find(t => t.status === 'active') ?? null;
     if (!activeTrip) return;
-
     async function loadRightNow() {
       setRightNowLoading(true);
       try {
@@ -486,7 +472,6 @@ export default function Dashboard() {
     loadRightNow();
   }, [trips]);
 
-  // Offline sync queue
   useEffect(() => {
     async function syncQueue() {
       if (!navigator.onLine) return;
@@ -530,291 +515,454 @@ export default function Dashboard() {
   const firstName = session?.user?.name?.split(' ')[0] ?? '';
 
   return (
-    <Box sx={{ minHeight: '100vh', backgroundColor: 'background.default', pb: 10 }}>
+    <>
+      {/* ── Font injection ── */}
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Archivo+Black&family=Archivo:wght@300;400;500;600;700&display=swap');
+      `}</style>
 
-      {/* ── AppBar ── */}
-      <AppBar position="static" sx={{ backgroundColor: 'text.primary' }} elevation={0}>
-        <Toolbar sx={{ minHeight: { xs: 56, sm: 64 } }}>
-          <Box component="img" src="/Logo.jpeg" alt="Logo"
-            sx={{ mr: 1, width: { xs: 64, sm: 144 }, height: { xs: 64, sm: 144 }, objectFit: 'contain' }} />
-          <Box sx={{ ml: 'auto', display: 'flex', alignItems: 'center' }}>
-            <Typography variant="body2" sx={{ mr: 1.5, opacity: 0.8, display: { xs: 'none', sm: 'block' } }}>
-              {session?.user?.name}
+      <Box sx={{ minHeight: '100vh', backgroundColor: D.bg, pb: 12 }}>
+
+        {/* ── AppBar ── */}
+        <AppBar position="static" elevation={0} sx={{
+          backgroundColor: D.navy,
+          borderBottom: `3px solid ${D.terra}`,
+        }}>
+          <Toolbar sx={{ minHeight: { xs: 56, sm: 64 } }}>
+            <Box component="img" src="/Logo.jpeg" alt="Logo"
+              sx={{ mr: 1, width: { xs: 64, sm: 144 }, height: { xs: 64, sm: 144 }, objectFit: 'contain' }} />
+            <Box sx={{ ml: 'auto', display: 'flex', alignItems: 'center', gap: 0.5 }}>
+              <Typography sx={{ mr: 1.5, opacity: 0.65, display: { xs: 'none', sm: 'block' },
+                fontFamily: D.body, fontSize: '0.85rem', fontWeight: 500, color: 'white' }}>
+                {session?.user?.name}
+              </Typography>
+              <IconButton size="small" onClick={() => router.push('/profile')} sx={{ p: 0.5 }}>
+                <Avatar src={session?.user?.image ?? undefined}
+                  sx={{ width: 32, height: 32, fontSize: '0.8rem', backgroundColor: D.green }}>
+                  {firstName[0]}
+                </Avatar>
+              </IconButton>
+              <IconButton color="inherit" size="small" onClick={() => signOut({ callbackUrl: '/signin' })}>
+                <LogoutIcon fontSize="small" />
+              </IconButton>
+            </Box>
+          </Toolbar>
+        </AppBar>
+
+        <Container maxWidth="lg" sx={{ px: { xs: 2, sm: 3 } }}>
+
+          {/* ── Hero ── */}
+          <Box sx={{ pt: { xs: 4, sm: 6 }, pb: { xs: 3, sm: 4 } }}>
+            <Typography sx={{
+              fontFamily: D.display,
+              fontSize: { xs: '3rem', sm: '5rem', md: '6.5rem' },
+              lineHeight: 0.9,
+              letterSpacing: '-0.04em',
+              color: D.navy,
+            }}>
+              {activeTrip
+                ? new Date(activeTrip.endDate) < new Date(new Date().setHours(0, 0, 0, 0))
+                  ? `You've been in ${activeTrip.destination.city}`
+                  : new Date(activeTrip.startDate) <= new Date()
+                    ? `You're in ${activeTrip.destination.city}`
+                    : `Leaving for ${activeTrip.destination.city} tomorrow`
+                : 'My Trips'}
             </Typography>
-            <IconButton color="inherit" size="small" onClick={() => router.push('/profile')} sx={{ mr: 0.5 }}>
-              <Avatar src={session?.user?.image ?? undefined}
-                sx={{ width: 30, height: 30, fontSize: '0.8rem', backgroundColor: 'primary.main' }}>
-                {firstName[0]}
-              </Avatar>
-            </IconButton>
-            <IconButton color="inherit" size="small" onClick={() => signOut({ callbackUrl: '/signin' })}>
-              <LogoutIcon fontSize="small" />
-            </IconButton>
-          </Box>
-        </Toolbar>
-      </AppBar>
-
-      <Container maxWidth="lg" sx={{ px: { xs: 2, sm: 3 } }}>
-
-        {/* ── Hero header ── */}
-        <Box sx={{ pt: { xs: 3, sm: 4 }, pb: { xs: 2, sm: 3 } }}>
-          <Typography variant="h4" fontWeight={800} color="text.primary"
-            sx={{ fontSize: { xs: '1.75rem', sm: '2.125rem' } }}>
-            {activeTrip
-              ? new Date(activeTrip.endDate) < new Date(new Date().setHours(0,0,0,0))
-                ? `You've recently been in ${activeTrip.destination.city}`
-                : new Date(activeTrip.startDate) <= new Date()
-                  ? `You're in ${activeTrip.destination.city}`
-                  : `Leaving for ${activeTrip.destination.city} tomorrow`
-              : 'My Trips'}
-          </Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-            {loading ? '…' : `${counts.upcoming} upcoming · ${trips.length} total`}
-          </Typography>
-        </Box>
-
-        {/* ── Active trip banner ── */}
-        {!loading && activeTrip && (
-          <ActiveTripBanner
-            trip={activeTrip}
-            rightNow={rightNow}
-            rightNowLoading={rightNowLoading}
-            onOpen={() => router.push(`/trips/${activeTrip._id}`)}
-          />
-        )}
-        
-        {!loading && <TripReadinessPanel trips={trips} />}   {/* ← ADD */}
-
-
-        {/* ── Action buttons ── */}
-        <Box sx={{ display: 'flex', gap: 1.5, mb: 3, flexDirection: { xs: 'column', sm: 'row' } }}>
-          <Button variant="contained" startIcon={<AddIcon />} size="large"
-            onClick={() => router.push('/trips/new')}
-            fullWidth sx={{ fontWeight: 700, py: { xs: 1.5, sm: 1 } }}>
-            Plan a Trip
-          </Button>
-          <Button variant="outlined" startIcon={<BackpackIcon />}
-            onClick={() => router.push('/packing/catalogue')}
-            fullWidth sx={{ py: { xs: 1.25, sm: 1 } }}>
-            Packing Catalogue
-          </Button>
-          <Button variant="outlined" startIcon={<PersonIcon />}
-            onClick={() => router.push('/profile')}
-            fullWidth sx={{ py: { xs: 1.25, sm: 1 } }}>
-            Profile
-          </Button>
-        </Box>
-
-        {/* ── Tabs ── */}
-        {!loading && (
-          <Box sx={{
-            borderBottom: 1, borderColor: 'divider', mb: 3,
-            '& .MuiTabs-root': { minHeight: 40 },
-            '& .MuiTab-root': {
-              minHeight: 40,
-              fontSize: { xs: '0.72rem', sm: '0.8rem' },
-              fontWeight: 700,
-              textTransform: 'none',
-              letterSpacing: 0,
-              px: { xs: 1.5, sm: 2 },
-            },
-          }}>
-            <Tabs value={tab} onChange={(_, v) => setTab(v)} variant="scrollable"
-              scrollButtons="auto" allowScrollButtonsMobile>
-              <Tab value="upcoming" label={
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
-                  Upcoming
-                  {counts.upcoming > 0 && (
-                    <Chip label={counts.upcoming} size="small" color="primary"
-                      sx={{ height: 18, fontSize: '0.65rem', fontWeight: 700, '& .MuiChip-label': { px: 0.75 } }} />
-                  )}
-                </Box>
-              } />
-              <Tab value="planning" label={
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
-                  Planning
-                  {counts.planning > 0 && (
-                    <Chip label={counts.planning} size="small" color="warning"
-                      sx={{ height: 18, fontSize: '0.65rem', fontWeight: 700, '& .MuiChip-label': { px: 0.75 } }} />
-                  )}
-                </Box>
-              } />
-              <Tab value="confirmed" label={
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
-                  Confirmed
-                  {counts.confirmed > 0 && (
-                    <Chip label={counts.confirmed} size="small" color="success"
-                      sx={{ height: 18, fontSize: '0.65rem', fontWeight: 700, '& .MuiChip-label': { px: 0.75 } }} />
-                  )}
-                </Box>
-              } />
-              <Tab value="past" label="Past" />
-              <Tab value="cancelled" label={
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
-                  Cancelled
-                  {counts.cancelled > 0 && (
-                    <Chip label={counts.cancelled} size="small" color="error"
-                      sx={{ height: 18, fontSize: '0.65rem', fontWeight: 700, '& .MuiChip-label': { px: 0.75 } }} />
-                  )}
-                </Box>
-              } />
-            </Tabs>
-          </Box>
-        )}
-
-        {/* ── View toggle ── */}
-        {!loading && visibleTrips.length > 0 && (
-          <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 2 }}>
-            <ToggleButtonGroup value={view} exclusive onChange={(_, v) => v && setView(v)} size="small"
-              sx={{ '& .MuiToggleButton-root': { px: 2, py: 0.75, fontSize: '0.72rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', gap: 0.5 } }}>
-              <ToggleButton value="list"><ViewListIcon sx={{ fontSize: '1rem' }} /> Cards</ToggleButton>
-              <ToggleButton value="calendar"><CalendarMonthIcon sx={{ fontSize: '1rem' }} /> Calendar</ToggleButton>
-            </ToggleButtonGroup>
-          </Box>
-        )}
-
-        {/* ── Skeleton ── */}
-        {loading && (
-          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            {[1, 2].map(i => <Skeleton key={i} variant="rounded" height={200} sx={{ borderRadius: 2 }} />)}
-          </Box>
-        )}
-
-        {/* ── Empty states ── */}
-        {!loading && visibleTrips.length === 0 && tab === 'upcoming' && (
-          <Box sx={{ textAlign: 'center', py: { xs: 8, sm: 12 },
-            display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2.5 }}>
-            <FlightTakeoffIcon sx={{ fontSize: 64, color: 'primary.main', opacity: 0.3 }} />
-            <Typography variant="h5" fontWeight={700}>No upcoming trips</Typography>
-            <Typography variant="body2" color="text.secondary" maxWidth={320}>
-              Plan your next adventure — flights, hotels, day-by-day itinerary, and a smart packing list.
+            {/* Terracotta accent rule */}
+            <Box sx={{ width: { xs: 44, sm: 60 }, height: 4, backgroundColor: D.terra, mt: 2.5, mb: 2, borderRadius: 1 }} />
+            <Typography sx={{ fontFamily: D.body, fontSize: '0.8rem', color: 'text.secondary',
+              letterSpacing: '0.08em', fontWeight: 500 }}>
+              {loading ? '…' : `${counts.upcoming} upcoming · ${trips.length} total`}
             </Typography>
+          </Box>
+
+          {/* ── Active trip banner ── */}
+          {!loading && activeTrip && (
+            <ActiveTripBanner
+              trip={activeTrip}
+              rightNow={rightNow}
+              rightNowLoading={rightNowLoading}
+              onOpen={() => router.push(`/trips/${activeTrip._id}`)}
+            />
+          )}
+
+          {!loading && <TripReadinessPanel trips={trips} />}
+
+          {/* ── Action buttons ── */}
+          <Box sx={{ display: 'flex', gap: 1.5, mb: 4, flexDirection: { xs: 'column', sm: 'row' } }}>
             <Button variant="contained" startIcon={<AddIcon />} size="large"
-              onClick={() => router.push('/trips/new')}>
-              Plan a trip
+              onClick={() => router.push('/trips/new')}
+              sx={{
+                fontFamily: D.display,
+                fontSize: { xs: '1rem', sm: '0.95rem' },
+                letterSpacing: '-0.01em',
+                py: { xs: 1.75, sm: 1.5 },
+                px: 3,
+                backgroundColor: D.navy,
+                color: 'white',
+                borderRadius: 1.5,
+                boxShadow: 'none',
+                flexBasis: { sm: '44%' },
+                flexShrink: 0,
+                '&:hover': { backgroundColor: alpha(D.navy, 0.88), boxShadow: `0 6px 24px ${alpha(D.navy, 0.28)}` },
+              }}>
+              Plan a Trip
+            </Button>
+            <Button variant="outlined" startIcon={<BackpackIcon />}
+              onClick={() => router.push('/packing/catalogue')}
+              sx={{
+                fontFamily: D.body, fontWeight: 600, py: { xs: 1.5, sm: 1.25 }, px: 2.5,
+                borderColor: alpha(D.navy, 0.18), color: D.navy, borderRadius: 1.5, flex: 1,
+                '&:hover': { borderColor: alpha(D.navy, 0.45), backgroundColor: alpha(D.navy, 0.04) },
+              }}>
+              Packing Catalogue
+            </Button>
+            <Button variant="outlined" startIcon={<PersonIcon />}
+              onClick={() => router.push('/profile')}
+              sx={{
+                fontFamily: D.body, fontWeight: 600, py: { xs: 1.5, sm: 1.25 }, px: 2.5,
+                borderColor: alpha(D.navy, 0.18), color: D.navy, borderRadius: 1.5, flex: 1,
+                '&:hover': { borderColor: alpha(D.navy, 0.45), backgroundColor: alpha(D.navy, 0.04) },
+              }}>
+              Profile
             </Button>
           </Box>
-        )}
 
-        {!loading && visibleTrips.length === 0 && tab !== 'upcoming' && (
-          <Box sx={{ textAlign: 'center', py: 8 }}>
-            <Typography variant="body1" color="text.secondary">No {tab} trips</Typography>
-          </Box>
-        )}
+          {/* ── Tabs ── */}
+          {!loading && (
+            <Box sx={{
+              borderBottom: `2px solid ${alpha(D.navy, 0.1)}`,
+              mb: 4,
+              '& .MuiTabs-indicator': { backgroundColor: D.terra, height: 3 },
+              '& .MuiTabs-root': { minHeight: 44 },
+              '& .MuiTab-root': {
+                fontFamily: D.body,
+                minHeight: 44,
+                fontSize: { xs: '0.75rem', sm: '0.82rem' },
+                fontWeight: 700,
+                textTransform: 'none',
+                letterSpacing: '0.01em',
+                color: alpha(D.navy, 0.45),
+                px: { xs: 1.5, sm: 2.5 },
+                '&.Mui-selected': { color: D.navy },
+              },
+            }}>
+              <Tabs value={tab} onChange={(_, v) => setTab(v)} variant="scrollable"
+                scrollButtons="auto" allowScrollButtonsMobile>
+                <Tab value="upcoming" label={
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+                    Upcoming
+                    {counts.upcoming > 0 && (
+                      <Box sx={{ minWidth: 18, height: 18, borderRadius: 9, backgroundColor: D.terra,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', px: 0.5 }}>
+                        <Typography sx={{ fontFamily: D.body, color: 'white', fontSize: '0.62rem', fontWeight: 800 }}>
+                          {counts.upcoming}
+                        </Typography>
+                      </Box>
+                    )}
+                  </Box>
+                } />
+                <Tab value="planning" label={
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+                    Planning
+                    {counts.planning > 0 && (
+                      <Box sx={{ minWidth: 18, height: 18, borderRadius: 9, backgroundColor: alpha(D.terra, 0.18),
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', px: 0.5 }}>
+                        <Typography sx={{ fontFamily: D.body, color: D.terra, fontSize: '0.62rem', fontWeight: 800 }}>
+                          {counts.planning}
+                        </Typography>
+                      </Box>
+                    )}
+                  </Box>
+                } />
+                <Tab value="confirmed" label={
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+                    Confirmed
+                    {counts.confirmed > 0 && (
+                      <Box sx={{ minWidth: 18, height: 18, borderRadius: 9, backgroundColor: alpha(D.green, 0.18),
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', px: 0.5 }}>
+                        <Typography sx={{ fontFamily: D.body, color: D.green, fontSize: '0.62rem', fontWeight: 800 }}>
+                          {counts.confirmed}
+                        </Typography>
+                      </Box>
+                    )}
+                  </Box>
+                } />
+                <Tab value="past" label="Past" />
+                <Tab value="cancelled" label={
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+                    Cancelled
+                    {counts.cancelled > 0 && (
+                      <Box sx={{ minWidth: 18, height: 18, borderRadius: 9, backgroundColor: alpha('#ef4444', 0.12),
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', px: 0.5 }}>
+                        <Typography sx={{ fontFamily: D.body, color: '#ef4444', fontSize: '0.62rem', fontWeight: 800 }}>
+                          {counts.cancelled}
+                        </Typography>
+                      </Box>
+                    )}
+                  </Box>
+                } />
+              </Tabs>
+            </Box>
+          )}
 
-        {/* ── Calendar view ── */}
-        {!loading && visibleTrips.length > 0 && view === 'calendar' && <TripCalendar />}
-
-        {/* ── Card grid view ── */}
-        {!loading && visibleTrips.length > 0 && view === 'list' && (
-          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            {Object.entries(groupedTrips).map(([month, monthTrips]) => (
-              <Box key={month}>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
-                  <Typography variant="overline" fontWeight={800} color="text.secondary"
-                    sx={{ fontSize: { xs: '0.9rem', sm: '1.8rem' }, letterSpacing: '0.3em', whiteSpace: 'nowrap' }}>
-                    {month}
-                  </Typography>
-                  <Box sx={{ flex: 1, height: '1px', backgroundColor: 'divider' }} />
-                </Box>
-
-                <Box sx={{
-                  display: 'grid', gap: 2,
-                  gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, 1fr)', md: 'repeat(3, 1fr)' },
+          {/* ── View toggle ── */}
+          {!loading && visibleTrips.length > 0 && (
+            <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 3 }}>
+              <ToggleButtonGroup value={view} exclusive onChange={(_, v) => v && setView(v)} size="small"
+                sx={{
+                  border: `1.5px solid ${alpha(D.navy, 0.14)}`,
+                  borderRadius: 1.5,
+                  overflow: 'hidden',
+                  '& .MuiToggleButton-root': {
+                    border: 'none',
+                    px: 2, py: 0.75,
+                    fontFamily: D.body,
+                    fontSize: '0.72rem', fontWeight: 700,
+                    textTransform: 'uppercase', letterSpacing: '0.08em',
+                    gap: 0.75,
+                    color: alpha(D.navy, 0.45),
+                    '&.Mui-selected': { backgroundColor: D.navy, color: 'white' },
+                    '&.Mui-selected:hover': { backgroundColor: alpha(D.navy, 0.9) },
+                  },
                 }}>
-                  {monthTrips.map(trip => {
-                    const daysUntil = trip.startDate
-                      ? Math.ceil((new Date(trip.startDate).getTime() - Date.now()) / 86400000)
-                      : null;
+                <ToggleButton value="list"><ViewListIcon sx={{ fontSize: '1rem' }} /> Cards</ToggleButton>
+                <ToggleButton value="calendar"><CalendarMonthIcon sx={{ fontSize: '1rem' }} /> Calendar</ToggleButton>
+              </ToggleButtonGroup>
+            </Box>
+          )}
 
-                    return (
-                      <Card key={trip._id} onClick={() => router.push(`/trips/${trip._id}`)}
-                        sx={{
-                          cursor: 'pointer', backgroundColor: 'background.paper',
-                          borderRadius: 2, overflow: 'hidden', border: '1px solid', borderColor: 'divider',
-                          ...(trip.status === 'active' && { borderColor: '#55702C', borderWidth: 2 }),
-                          transition: 'transform 0.15s, box-shadow 0.15s',
-                          '&:hover': { transform: 'translateY(-2px)', boxShadow: 4 },
-                          '&:active': { transform: 'scale(0.99)' },
-                          opacity: trip.status === 'cancelled' ? 0.6 : 1,
-                        }}>
-                        <Box sx={{
-                          height: { xs: 160, sm: 140 },
-                          backgroundImage: trip.coverPhotoThumb ? `url(${trip.coverPhotoThumb})` : undefined,
-                          backgroundSize: 'cover', backgroundPosition: 'center',
-                          backgroundColor: trip.coverPhotoThumb ? undefined : 'action.hover',
-                          display: 'flex', alignItems: 'center', justifyContent: 'center',
-                          position: 'relative',
-                        }}>
-                          {!trip.coverPhotoThumb && (
-                            <FlightTakeoffIcon sx={{ fontSize: 40, color: 'text.disabled' }} />
-                          )}
-                          <Box sx={{ position: 'absolute', top: 10, right: 10 }}>
-                            <Chip label={trip.status} color={STATUS_COLOURS[trip.status]}
-                              size="small" sx={{ fontWeight: 700, fontSize: '0.7rem' }} />
-                          </Box>
-                          {daysUntil !== null && daysUntil > 0 && trip.status !== 'cancelled' && (
-                            <Box sx={{ position: 'absolute', bottom: 10, left: 10,
-                              backgroundColor: 'rgba(0,0,0,0.55)', borderRadius: 2, px: 1.25, py: 0.4 }}>
-                              <Typography sx={{ color: 'white', fontSize: { xs: '1.4rem', sm: '2rem' },
-                                lineHeight: 1, fontWeight: 800, letterSpacing: '-0.02em' }}>
-                                {daysUntil === 1 ? 'Tomorrow' : daysUntil}
+          {/* ── Skeleton ── */}
+          {loading && (
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+              {[1, 2].map(i => <Skeleton key={i} variant="rounded" height={200} sx={{ borderRadius: 2 }} />)}
+            </Box>
+          )}
+
+          {/* ── Empty states ── */}
+          {!loading && visibleTrips.length === 0 && tab === 'upcoming' && (
+            <Box sx={{ py: { xs: 8, sm: 12 }, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
+              <Typography sx={{
+                fontFamily: D.display,
+                fontSize: { xs: '3.5rem', sm: '5rem' },
+                letterSpacing: '-0.04em', lineHeight: 0.9,
+                color: alpha(D.navy, 0.1),
+                textAlign: 'center',
+              }}>
+                No Trips Yet
+              </Typography>
+              <Typography variant="body2" color="text.secondary" maxWidth={320} sx={{ fontFamily: D.body, textAlign: 'center' }}>
+                Plan your next adventure — flights, hotels, day-by-day itinerary, and a smart packing list.
+              </Typography>
+              <Button variant="contained" startIcon={<AddIcon />} size="large"
+                onClick={() => router.push('/trips/new')}
+                sx={{ fontFamily: D.display, letterSpacing: '-0.01em', backgroundColor: D.navy,
+                  borderRadius: 1.5, px: 3, boxShadow: 'none',
+                  '&:hover': { backgroundColor: alpha(D.navy, 0.88), boxShadow: 'none' } }}>
+                Plan a trip
+              </Button>
+            </Box>
+          )}
+
+          {!loading && visibleTrips.length === 0 && tab !== 'upcoming' && (
+            <Box sx={{ textAlign: 'center', py: 8 }}>
+              <Typography sx={{ fontFamily: D.body, color: 'text.secondary' }}>No {tab} trips</Typography>
+            </Box>
+          )}
+
+          {/* ── Calendar view ── */}
+          {!loading && visibleTrips.length > 0 && view === 'calendar' && <TripCalendar />}
+
+          {/* ── Card list view ── */}
+          {!loading && visibleTrips.length > 0 && view === 'list' && (
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {Object.entries(groupedTrips).map(([month, monthTrips]) => (
+                <Box key={month}>
+
+                  {/* ── Editorial month header ── */}
+                  <Box sx={{ mb: { xs: 2.5, sm: 3 }, position: 'relative' }}>
+                    {/* Ghost display text — the "art" layer */}
+                    <Typography sx={{
+                      fontFamily: D.display,
+                      fontSize: { xs: '3.5rem', sm: '6rem', md: '7.5rem' },
+                      letterSpacing: '-0.04em',
+                      lineHeight: 0.85,
+                      color: alpha(D.navy, 0.07),
+                      userSelect: 'none',
+                      pointerEvents: 'none',
+                      mb: { xs: -2, sm: -3 },
+                    }}>
+                      {month.toUpperCase()}
+                    </Typography>
+                    {/* Labelled rule — the readable layer */}
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                      <Typography sx={{
+                        fontFamily: D.body,
+                        fontSize: '0.68rem', fontWeight: 800,
+                        letterSpacing: '0.28em', textTransform: 'uppercase',
+                        color: alpha(D.navy, 0.4),
+                        whiteSpace: 'nowrap', pr: 1.5,
+                      }}>
+                        {month}
+                      </Typography>
+                      <Box sx={{ flex: 1, height: '1px', backgroundColor: alpha(D.navy, 0.1) }} />
+                    </Box>
+                  </Box>
+
+                  {/* ── Trip cards ── */}
+                  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                    {monthTrips.map(trip => {
+                      const daysUntil = trip.startDate
+                        ? Math.ceil((new Date(trip.startDate).getTime() - Date.now()) / 86400000)
+                        : null;
+
+                      return (
+                        <Box
+                          key={trip._id}
+                          onClick={() => router.push(`/trips/${trip._id}`)}
+                          sx={{
+                            cursor: 'pointer',
+                            display: 'flex',
+                            flexDirection: { xs: 'column', sm: 'row' },
+                            backgroundColor: D.paper,
+                            borderRadius: 2,
+                            overflow: 'hidden',
+                            border: `1.5px solid ${alpha(D.navy, 0.08)}`,
+                            ...(trip.status === 'active' && { border: `2px solid ${D.green}` }),
+                            transition: 'transform 0.15s, box-shadow 0.15s',
+                            '&:hover': { transform: 'translateY(-2px)', boxShadow: `0 10px 32px ${alpha(D.navy, 0.1)}` },
+                            '&:active': { transform: 'scale(0.998)' },
+                            opacity: trip.status === 'cancelled' ? 0.55 : 1,
+                          }}
+                        >
+                          {/* Photo panel */}
+                          <Box sx={{
+                            width: { xs: '100%', sm: '36%' },
+                            height: { xs: 190, sm: 'auto' },
+                            minHeight: { sm: 190 },
+                            flexShrink: 0,
+                            backgroundImage: trip.coverPhotoThumb ? `url(${trip.coverPhotoThumb})` : undefined,
+                            backgroundSize: 'cover', backgroundPosition: 'center',
+                            backgroundColor: trip.coverPhotoThumb ? undefined : alpha(D.navy, 0.06),
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            position: 'relative',
+                          }}>
+                            {!trip.coverPhotoThumb && (
+                              <FlightTakeoffIcon sx={{ fontSize: 36, color: alpha(D.navy, 0.18) }} />
+                            )}
+                            {/* Status pill */}
+                            <Box sx={{
+                              position: 'absolute', top: 12, right: 12,
+                              display: 'flex', alignItems: 'center', gap: 0.6,
+                              backgroundColor: alpha(D.navy, 0.62),
+                              backdropFilter: 'blur(6px)',
+                              borderRadius: 10, px: 1.25, py: 0.45,
+                            }}>
+                              <Box sx={{
+                                width: 6, height: 6, borderRadius: '50%',
+                                backgroundColor: STATUS_DOT[trip.status] ?? alpha('#fff', 0.5),
+                              }} />
+                              <Typography sx={{ fontFamily: D.body, color: 'white', fontSize: '0.63rem',
+                                fontWeight: 800, textTransform: 'capitalize', letterSpacing: '0.05em' }}>
+                                {trip.status}
                               </Typography>
-                              {daysUntil > 1 && (
-                                <Typography sx={{ color: 'white', fontSize: '0.65rem', fontWeight: 600, opacity: 0.85 }}>
-                                  days away
-                                </Typography>
-                              )}
                             </Box>
-                          )}
-                          {daysUntil === 0 && trip.status !== 'cancelled' && (
-                            <Box sx={{ position: 'absolute', bottom: 10, left: 10,
-                              backgroundColor: 'success.main', borderRadius: 2, px: 1.25, py: 0.4 }}>
-                              <Typography sx={{ color: 'white', fontSize: '0.72rem', fontWeight: 700 }}>Today</Typography>
-                            </Box>
-                          )}
-                        </Box>
+                          </Box>
 
-                        <CardContent sx={{ p: { xs: 2, sm: 2 }, '&:last-child': { pb: 2 } }}>
-                          <Typography variant="h6" fontWeight={800}
-                            sx={{ fontSize: { xs: '1.6rem', sm: '1.8rem' }, mb: 0.2 }}>
-                            {trip.name}
-                          </Typography>
-                          <Typography variant="body2" color="secondary.main" fontWeight={600}>
-                            {trip.destination?.city}, {trip.destination?.country}
-                          </Typography>
-                          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mt: 1.5 }}>
+                          {/* Content panel */}
+                          <Box sx={{
+                            flex: 1,
+                            p: { xs: 2.5, sm: 3 },
+                            display: 'flex', flexDirection: 'column',
+                            justifyContent: 'space-between',
+                            minHeight: { sm: 190 },
+                          }}>
+                            {/* Top: name + city */}
                             <Box>
-                              <Typography variant="subtitle2" sx={{
-                                display: 'block', fontWeight: 600,
-                                fontSize: { xs: '1rem', sm: '1.3rem' }, letterSpacing: 0.3, color: 'text.primary',
+                              <Typography sx={{
+                                fontFamily: D.display,
+                                fontSize: { xs: '1.8rem', sm: '2.1rem', md: '2.4rem' },
+                                letterSpacing: '-0.03em', lineHeight: 1.0,
+                                color: D.navy, mb: 0.75,
                               }}>
-                                {trip.startDate
-                                  ? new Date(trip.startDate).toLocaleDateString('en-IE', {
-                                      weekday: 'short', day: 'numeric', month: 'short', year: 'numeric',
-                                    })
-                                  : '—'}
+                                {trip.name}
                               </Typography>
-                              <Typography variant="caption" color="text.secondary">
-                                {trip.nights} nights · {TRIP_TYPE_LABEL[trip.tripType] ?? trip.tripType}
+                              <Typography sx={{
+                                fontFamily: D.body, fontSize: '0.68rem', fontWeight: 700,
+                                letterSpacing: '0.2em', textTransform: 'uppercase', color: D.terra,
+                              }}>
+                                {trip.destination?.city}, {trip.destination?.country}
                               </Typography>
                             </Box>
-                            <Typography variant="caption" color="primary.main" fontWeight={700}
-                              sx={{ textTransform: 'uppercase', letterSpacing: 0.5 }}>
-                              View →
-                            </Typography>
-                          </Box>
-                        </CardContent>
-                      </Card>
-                    );
-                  })}
-                </Box>
-              </Box>
-            ))}
-          </Box>
-        )}
 
-      </Container>
-    </Box>
+                            {/* Bottom: days counter + date/meta */}
+                            <Box sx={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', mt: 2.5 }}>
+
+                              {/* Days counter — the typographic art element */}
+                              <Box sx={{ lineHeight: 1 }}>
+                                {daysUntil !== null && daysUntil > 1 && trip.status !== 'cancelled' ? (
+                                  <>
+                                    <Typography sx={{
+                                      fontFamily: D.display,
+                                      fontSize: { xs: '3.5rem', sm: '4.5rem' },
+                                      lineHeight: 1, letterSpacing: '-0.05em',
+                                      color: D.terra,
+                                    }}>
+                                      {daysUntil}
+                                    </Typography>
+                                    <Typography sx={{ fontFamily: D.body, fontSize: '0.58rem', fontWeight: 800,
+                                      letterSpacing: '0.2em', textTransform: 'uppercase', color: alpha(D.terra, 0.55) }}>
+                                      days away
+                                    </Typography>
+                                  </>
+                                ) : daysUntil === 1 ? (
+                                  <Typography sx={{ fontFamily: D.display, color: D.terra,
+                                    fontSize: { xs: '2rem', sm: '2.5rem' }, letterSpacing: '-0.03em', lineHeight: 1 }}>
+                                    Tomorrow
+                                  </Typography>
+                                ) : daysUntil === 0 ? (
+                                  <Box sx={{ backgroundColor: D.green, borderRadius: 1.5, px: 1.5, py: 0.6, display: 'inline-flex' }}>
+                                    <Typography sx={{ fontFamily: D.display, color: 'white',
+                                      fontSize: '1.1rem', letterSpacing: '-0.02em' }}>
+                                      Today
+                                    </Typography>
+                                  </Box>
+                                ) : (
+                                  <Box />
+                                )}
+                              </Box>
+
+                              {/* Date + meta + view link */}
+                              <Box sx={{ textAlign: 'right' }}>
+                                <Typography sx={{ fontFamily: D.body, fontWeight: 700,
+                                  fontSize: { xs: '0.88rem', sm: '0.95rem' }, color: D.navy, letterSpacing: '-0.01em' }}>
+                                  {trip.startDate
+                                    ? new Date(trip.startDate).toLocaleDateString('en-IE', {
+                                        weekday: 'short', day: 'numeric', month: 'short', year: 'numeric',
+                                      })
+                                    : '—'}
+                                </Typography>
+                                <Typography sx={{ fontFamily: D.body, fontSize: '0.72rem', color: 'text.secondary', mt: 0.3 }}>
+                                  {trip.nights} nights · {TRIP_TYPE_LABEL[trip.tripType] ?? trip.tripType}
+                                </Typography>
+                                <Typography sx={{ fontFamily: D.body, fontSize: '0.7rem', color: D.green,
+                                  fontWeight: 800, letterSpacing: '0.1em', textTransform: 'uppercase', mt: 1 }}>
+                                  View →
+                                </Typography>
+                              </Box>
+                            </Box>
+                          </Box>
+                        </Box>
+                      );
+                    })}
+                  </Box>
+                </Box>
+              ))}
+            </Box>
+          )}
+
+        </Container>
+      </Box>
+    </>
   );
 }

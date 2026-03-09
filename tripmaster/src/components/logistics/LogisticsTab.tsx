@@ -5,7 +5,7 @@ import {
   Box, Typography, Button, Paper, Tabs, Tab, TextField,
   Select, MenuItem, FormControl, InputLabel, Chip, IconButton,
   Dialog, DialogTitle, DialogContent, DialogActions,
-  Menu, useMediaQuery, useTheme, Alert,
+  Menu, useMediaQuery, useTheme, Alert, Switch, FormControlLabel,
 } from '@mui/material';
 import AddIcon              from '@mui/icons-material/Add';
 import FlightIcon           from '@mui/icons-material/Flight';
@@ -37,7 +37,7 @@ import AirlineSearch        from '@/components/ui/AirlineSearch';
 import AddressSearch        from '@/components/ui/AddressSearch';
 import NavigateButton       from '@/components/ui/NavigateButton';
 import BookingLinks         from '@/components/logistics/BookingLinks';
-import DestinationMap from '@/components/ui/DestinationMap';
+import DestinationMap       from '@/components/ui/DestinationMap';
 
 import { saveTripCache, getTripCache, queueAction } from '@/lib/offline/db';
 import type { ResolvedAddress } from '@/components/ui/AddressSearch';
@@ -147,6 +147,8 @@ const BLANK_ACCOM = {
   confirmationNumber: '',
   cost:               '',
   notes:              '',
+  includesBreakfast:  false,
+  breakfastTime:      '08:00',
 };
 
 const BLANK_VENUE = {
@@ -237,9 +239,94 @@ const MONTH_NAMES = [
 ];
 const DAY_HEADERS = ['Mo','Tu','We','Th','Fr','Sa','Su'];
 
+// ─── Gap detection ────────────────────────────────────────────────────────────
+// Runs after saving a flight. Checks whether the user has ground transport covering
+// the airport at each end. If not, surfaces a contextual prompt.
+
+interface GapPromptItem {
+  type: 'to_airport' | 'from_airport';
+  label: string;    // human-readable airport name, e.g. "DUB — Dublin"
+  time: string;     // ISO datetime — flight departure (to_airport) or arrival (from_airport)
+  prefill: {
+    type: TransportType;
+    departureLocation?: string;
+    arrivalLocation?: string;
+    departureTime?: string;
+  };
+}
+
+// Extract the IATA code from a stored location string, e.g. "DUB — Dublin" → "DUB"
+function extractIata(location: string): string {
+  return (location ?? '').split('—')[0].trim().split(' ')[0].trim().toUpperCase();
+}
+
+function detectTransportGaps(
+  savedFlight: typeof BLANK_TRANSPORT,
+  allTransport: any[],
+): GapPromptItem[] {
+  if (savedFlight.type !== 'flight') return [];
+
+  const gaps: GapPromptItem[] = [];
+  // Only non-flight items can serve as airport ground transfers
+  const transfers = allTransport.filter(t => t.type !== 'flight');
+
+  // ── Gap: nothing getting user TO the departure airport ────────────────────
+  if (savedFlight.departureLocation && savedFlight.departureTime) {
+    const depIata    = extractIata(savedFlight.departureLocation);
+    const flightDepMs = new Date(savedFlight.departureTime).getTime();
+
+    const covered = transfers.some(t => {
+      const arrLoc = (t.arrivalLocation ?? t.details?.dropoffLocation ?? '').toUpperCase();
+      if (!arrLoc.includes(depIata)) return false;
+      const arrMs = t.arrivalTime ? new Date(t.arrivalTime).getTime() : null;
+      // Must arrive at airport within 8 hours before flight
+      return arrMs !== null && arrMs <= flightDepMs && (flightDepMs - arrMs) <= 8 * 3600000;
+    });
+
+    if (!covered) {
+      gaps.push({
+        type: 'to_airport',
+        label: savedFlight.departureLocation,
+        time: savedFlight.departureTime,
+        prefill: {
+          type: 'taxi',
+          arrivalLocation: savedFlight.departureLocation,
+        },
+      });
+    }
+  }
+
+  // ── Gap: nothing taking user FROM the arrival airport ─────────────────────
+  if (savedFlight.arrivalLocation && savedFlight.arrivalTime) {
+    const arrIata     = extractIata(savedFlight.arrivalLocation);
+    const flightArrMs = new Date(savedFlight.arrivalTime).getTime();
+
+    const covered = transfers.some(t => {
+      const depLoc = (t.departureLocation ?? '').toUpperCase();
+      if (!depLoc.includes(arrIata)) return false;
+      const depMs = t.departureTime ? new Date(t.departureTime).getTime() : null;
+      // Must depart from airport within 8 hours after landing
+      return depMs !== null && depMs >= flightArrMs && (depMs - flightArrMs) <= 8 * 3600000;
+    });
+
+    if (!covered) {
+      gaps.push({
+        type: 'from_airport',
+        label: savedFlight.arrivalLocation,
+        time: savedFlight.arrivalTime,
+        prefill: {
+          type: 'taxi',
+          departureLocation: savedFlight.arrivalLocation,
+          departureTime: savedFlight.arrivalTime,
+        },
+      });
+    }
+  }
+
+  return gaps;
+}
+
 // ─── TripDateTimePicker ───────────────────────────────────────────────────────
-// A calendar-based date+time picker that is aware of trip date boundaries.
-// Replaces the browser-native datetime-local input throughout logistics forms.
 function TripDateTimePicker({
   label,
   value,
@@ -266,20 +353,17 @@ function TripDateTimePicker({
   const [selDate, setSelDate] = useState(initDate);
   const [selTime, setSelTime] = useState(initTime);
 
-  // Sync when value changes externally (e.g. on edit open)
   useEffect(() => {
     const { date, time } = parseValue(value);
     setSelDate(date);
     setSelTime(time);
   }, [value]);
 
-  // Seed month from initialMonth or minDate, not today — strip time portion defensively
   const seedStr  = toDateOnly(initialMonth || minDate || toISO(new Date()));
   const seedDate = new Date(seedStr + 'T12:00:00');
   const [year,  setYear]  = useState(seedDate.getFullYear());
   const [month, setMonth] = useState(seedDate.getMonth());
 
-  // Re-seed month when initialMonth changes (e.g. departure drives arrival month)
   useEffect(() => {
     const src = initialMonth || minDate;
     if (src) {
@@ -299,8 +383,8 @@ function TripDateTimePicker({
   };
 
   const daysInMonth = new Date(year, month + 1, 0).getDate();
-  const firstDow    = new Date(year, month, 1).getDay(); // 0 = Sun
-  const offset      = (firstDow + 6) % 7;               // convert to Mon-start
+  const firstDow    = new Date(year, month, 1).getDay();
+  const offset      = (firstDow + 6) % 7;
 
   const today = toISO(new Date());
 
@@ -310,7 +394,6 @@ function TripDateTimePicker({
     return false;
   };
 
-  // Build grid cells: null = empty padding
   const cells: Array<string | null> = [];
   for (let i = 0; i < offset; i++) cells.push(null);
   for (let d = 1; d <= daysInMonth; d++) {
@@ -348,7 +431,6 @@ function TripDateTimePicker({
 
   return (
     <Box>
-      {/* ── Trigger ── */}
       <Box
         onClick={() => setOpen(o => !o)}
         sx={{
@@ -387,7 +469,6 @@ function TripDateTimePicker({
         </Typography>
       </Box>
 
-      {/* ── Calendar panel ── */}
       {open && (
         <Paper
           elevation={4}
@@ -399,7 +480,6 @@ function TripDateTimePicker({
             borderRadius: 2,
           }}
         >
-          {/* Month navigation */}
           <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1.5 }}>
             <IconButton onClick={prevMonth} size="small" sx={{ border: '1px solid', borderColor: 'divider' }}>
               <ChevronLeftIcon fontSize="small" />
@@ -412,7 +492,6 @@ function TripDateTimePicker({
             </IconButton>
           </Box>
 
-          {/* Day-of-week headers */}
           <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', mb: 0.5 }}>
             {DAY_HEADERS.map(d => (
               <Typography key={d} align="center" variant="caption" color="text.secondary" fontWeight={600}>
@@ -421,7 +500,6 @@ function TripDateTimePicker({
             ))}
           </Box>
 
-          {/* Day cells */}
           <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 0.25 }}>
             {cells.map((iso, idx) => {
               if (!iso) return <Box key={idx} />;
@@ -458,7 +536,6 @@ function TripDateTimePicker({
             })}
           </Box>
 
-          {/* Time input — appears once a date is selected */}
           {selDate && (
             <Box sx={{ mt: 2, pt: 2, borderTop: '1px solid', borderColor: 'divider' }}>
               <Typography
@@ -486,7 +563,6 @@ function TripDateTimePicker({
             </Box>
           )}
 
-          {/* Actions */}
           <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1, mt: 2 }}>
             <Button size="small" onClick={handleClear} color="inherit">
               Clear
@@ -515,7 +591,6 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
   const [logistics,     setLogistics]     = useState<any>(null);
   const [saving,        setSaving]        = useState(false);
 
-  // Home location — fetched once from the user profile, used to pre-fill car departure
   const [homeLocation,  setHomeLocation]  = useState<{
     address:     string;
     coordinates: { lat: number; lng: number } | null;
@@ -536,6 +611,9 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
   const [editTransportIdx, setEditTransportIdx] = useState<number | null>(null);
   const [editAccomIdx,     setEditAccomIdx]     = useState<number | null>(null);
   const [editVenueIdx,     setEditVenueIdx]     = useState<number | null>(null);
+
+  // ── Gap detection prompts ──────────────────────────────────────────────────
+  const [gapPrompts, setGapPrompts] = useState<GapPromptItem[]>([]);
 
   // ── Load logistics ─────────────────────────────────────────────────────────
   useEffect(() => {
@@ -571,24 +649,24 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
   }, []);
 
   useEffect(() => {
-  if (!fabTrigger) return;
-  if (fabTrigger.action === 'transport') {
-    setSection(0);
-    setEditTransportIdx(null);
-    setTransport({ ...BLANK_TRANSPORT, details: { ...BLANK_TRANSPORT.details } });
-    setTransportOpen(true);
-  } else if (fabTrigger.action === 'accom') {
-    setSection(1);
-    setEditAccomIdx(null);
-    setAccom({ ...BLANK_ACCOM });
-    setAccomOpen(true);
-  } else if (fabTrigger.action === 'venue') {
-    setSection(2);
-    setEditVenueIdx(null);
-    setVenue({ ...BLANK_VENUE });
-    setVenueOpen(true);
-  }
-}, [fabTrigger]);
+    if (!fabTrigger) return;
+    if (fabTrigger.action === 'transport') {
+      setSection(0);
+      setEditTransportIdx(null);
+      setTransport({ ...BLANK_TRANSPORT, details: { ...BLANK_TRANSPORT.details } });
+      setTransportOpen(true);
+    } else if (fabTrigger.action === 'accom') {
+      setSection(1);
+      setEditAccomIdx(null);
+      setAccom({ ...BLANK_ACCOM });
+      setAccomOpen(true);
+    } else if (fabTrigger.action === 'venue') {
+      setSection(2);
+      setEditVenueIdx(null);
+      setVenue({ ...BLANK_VENUE });
+      setVenueOpen(true);
+    }
+  }, [fabTrigger]);
 
   // ── Saves ──────────────────────────────────────────────────────────────────
   const saveTransport = async () => {
@@ -617,6 +695,13 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
     const res    = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(transport) });
     const data   = await res.json();
     setLogistics(data.logistics);
+
+    // ── Gap detection — runs after every flight save ─────────────────────────
+    if (transport.type === 'flight') {
+      const gaps = detectTransportGaps(transport, data.logistics?.transportation ?? []);
+      if (gaps.length > 0) setGapPrompts(gaps);
+    }
+
     setTransportOpen(false);
     setTransport({ ...BLANK_TRANSPORT, details: { ...BLANK_TRANSPORT.details } });
     setEditTransportIdx(null);
@@ -763,7 +848,6 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
   const setDetail = (key: string, val: any) =>
     setTransport(p => ({ ...p, details: { ...p.details, [key]: val } }));
 
-  // When changing transport type, reset fields — and for car, pre-fill home departure
   const changeType = (newType: TransportType) => {
     const base = {
       ...BLANK_TRANSPORT,
@@ -778,7 +862,6 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
     setTransport(base);
   };
 
-  // Departure date for driving arrival min constraint
   const departureDateOnly = transport.departureTime ? transport.departureTime.split('T')[0] : '';
 
   // ── Transport form fields ──────────────────────────────────────────────────
@@ -898,7 +981,6 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
           </FormControl>
         </>)}
 
-        {/* ── Car — both fields geocoded; From pre-filled from home ── */}
         {type === 'car' && (<>
           {homeLocation && transport.departureLocation === homeLocation.address && (
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
@@ -1012,7 +1094,6 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
             value={transport.details.vehicle} onChange={e => setDetail('vehicle', e.target.value)} />
         </>)}
 
-        {/* ── Bicycle — both fields geocoded ── */}
         {type === 'bicycle' && (<>
           <AddressSearch
             label="From" value={transport.departureLocation}
@@ -1035,13 +1116,10 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
         </>)}
 
         {/* ── Common fields ── */}
-
-        {/* Departure — constrained to trip date range, seeded to trip start */}
         <TripDateTimePicker
           label="Departure date & time"
           value={transport.departureTime}
           onChange={val => {
-            // If new departure is after current arrival, clear arrival
             const newArrival = transport.arrivalTime && val > transport.arrivalTime ? '' : transport.arrivalTime;
             setTransport(p => ({ ...p, departureTime: val, arrivalTime: newArrival }));
           }}
@@ -1050,7 +1128,6 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
           initialMonth={toDateOnly(trip.startDate)}
         />
 
-        {/* Arrival — min is the chosen departure date; can extend a day past trip end */}
         <TripDateTimePicker
           label="Arrival date & time"
           value={transport.arrivalTime}
@@ -1081,275 +1158,264 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
     );
   };
 
-const TransportCard = ({ t, i }: { t: any; i: number }) => {
-  const isNavigable = NAVIGABLE_TRANSPORT_TYPES.has(t.type);
+  const TransportCard = ({ t, i }: { t: any; i: number }) => {
+    const isNavigable = NAVIGABLE_TRANSPORT_TYPES.has(t.type);
 
-  const navDest = isNavigable ? {
-    name:        getTransportLabel(t),
-    address:     t.arrivalLocation ?? t.details?.dropoffLocation ?? '',
-    coordinates: t.arrivalCoordinates ?? t.details?.dropoffCoordinates ?? null,
-  } : null;
+    const navDest = isNavigable ? {
+      name:        getTransportLabel(t),
+      address:     t.arrivalLocation ?? t.details?.dropoffLocation ?? '',
+      coordinates: t.arrivalCoordinates ?? t.details?.dropoffCoordinates ?? null,
+    } : null;
 
-  const mapAddress =
-    t.arrivalLocation ??
-    t.details?.dropoffLocation ??
-    '';
+    const mapAddress =
+      t.arrivalLocation ??
+      t.details?.dropoffLocation ??
+      '';
 
-  const mapCoordinates =
-    t.arrivalCoordinates ??
-    t.details?.dropoffCoordinates ??
-    null;
+    const mapCoordinates =
+      t.arrivalCoordinates ??
+      t.details?.dropoffCoordinates ??
+      null;
 
-  return (
-    <Box>
-      <Paper sx={{ p: { xs: 2, sm: 2.5 }, mb: 2, backgroundColor: 'background.paper' }}>
-        <Box sx={{ display: 'flex', gap: 1.5 }}>
-          <Box sx={{ color: 'primary.main', mt: 0.25, flexShrink: 0 }}>
-            {transportIcon(t.type, { fontSize: 'medium' })}
-          </Box>
+    return (
+      <Box>
+        <Paper sx={{ p: { xs: 2, sm: 2.5 }, mb: 2, backgroundColor: 'background.paper' }}>
+          <Box sx={{ display: 'flex', gap: 1.5 }}>
+            <Box sx={{ color: 'primary.main', mt: 0.25, flexShrink: 0 }}>
+              {transportIcon(t.type, { fontSize: 'medium' })}
+            </Box>
 
-          <Box sx={{ flexGrow: 1, minWidth: 0 }}>
-            <Typography fontWeight={700} sx={{ fontSize: '1rem' }}>
-              {getTransportLabel(t)}
-            </Typography>
-
-            {getTransportSubtitle(t) && (
-              <Typography variant="body2" color="text.secondary">
-                {getTransportSubtitle(t)}
+            <Box sx={{ flexGrow: 1, minWidth: 0 }}>
+              <Typography fontWeight={700} sx={{ fontSize: '1rem' }}>
+                {getTransportLabel(t)}
               </Typography>
-            )}
 
-            {(t.departureTime || t.arrivalTime) && (
-              <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-                {t.departureTime ? fmtDateTime(t.departureTime) : ''}
-                {t.arrivalTime   ? ` → ${fmtDateTime(t.arrivalTime)}` : ''}
-              </Typography>
-            )}
-
-            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1.5, mt: 1 }}>
-              {(t.details?.seat ?? t.seat) && (
-                <Typography variant="caption" color="text.secondary">
-                  Seat {t.details?.seat ?? t.seat}
+              {getTransportSubtitle(t) && (
+                <Typography variant="body2" color="text.secondary">
+                  {getTransportSubtitle(t)}
                 </Typography>
               )}
 
-              {t.confirmationNumber && (
-                <Typography variant="caption" color="text.secondary">
-                  Ref: {t.confirmationNumber}
+              {(t.departureTime || t.arrivalTime) && (
+                <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                  {t.departureTime ? fmtDateTime(t.departureTime) : ''}
+                  {t.arrivalTime   ? ` → ${fmtDateTime(t.arrivalTime)}` : ''}
                 </Typography>
               )}
 
-              {t.cost && (
-                <Typography variant="caption" color="text.secondary">
-                  €{t.cost}
-                </Typography>
-              )}
+              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1.5, mt: 1 }}>
+                {(t.details?.seat ?? t.seat) && (
+                  <Typography variant="caption" color="text.secondary">
+                    Seat {t.details?.seat ?? t.seat}
+                  </Typography>
+                )}
+                {t.confirmationNumber && (
+                  <Typography variant="caption" color="text.secondary">
+                    Ref: {t.confirmationNumber}
+                  </Typography>
+                )}
+                {t.cost && (
+                  <Typography variant="caption" color="text.secondary">
+                    €{t.cost}
+                  </Typography>
+                )}
+              </Box>
+            </Box>
+
+            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 0.5, flexShrink: 0 }}>
+              <Chip
+                label={t.status.replace('_', ' ')}
+                color={STATUS_COLOUR[t.status]}
+                size="medium"
+                sx={{ fontWeight: 700, fontSize: '0.7rem', textTransform: 'capitalize' }}
+              />
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                {navDest && (
+                  <NavigateButton
+                    destination={navDest}
+                    suggestedMode="driving"
+                    size="medium"
+                  />
+                )}
+                <IconButton size="medium" onClick={e => openMenu(e, 'transport', i)}>
+                  <MoreVertIcon fontSize="medium" />
+                </IconButton>
+              </Box>
             </Box>
           </Box>
+        </Paper>
 
-          <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 0.5, flexShrink: 0 }}>
-            <Chip
-              label={t.status.replace('_', ' ')}
-              color={STATUS_COLOUR[t.status]}
-              size="medium"
-              sx={{ fontWeight: 700, fontSize: '0.7rem', textTransform: 'capitalize' }}
+        {mapAddress && (
+          <Box sx={{ mt: 2 }}>
+            <DestinationMap
+              coordinates={mapCoordinates}
+              address={mapAddress}
             />
+          </Box>
+        )}
+      </Box>
+    );
+  };
 
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-              {navDest && (
+  const AccomCard = ({ a, i }: { a: any; i: number }) => {
+    const mapAddress     = a.address ?? '';
+    const mapCoordinates = a.coordinates ?? null;
+
+    return (
+      <Box>
+        <Paper sx={{ p: { xs: 2, sm: 2.5 }, mb: 2, backgroundColor: 'background.paper' }}>
+          <Box sx={{ display: 'flex', gap: 1.5 }}>
+            <HotelIcon color="primary" sx={{ mt: 0.25, flexShrink: 0 }} />
+
+            <Box sx={{ flexGrow: 1, minWidth: 0 }}>
+              <Typography fontWeight={700} sx={{ fontSize: '1rem' }}>
+                {a.name}
+              </Typography>
+
+              {a.address && (
+                <Typography variant="body2" color="text.secondary">
+                  {a.address}
+                </Typography>
+              )}
+
+              {(a.checkIn || a.checkOut) && (
+                <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                  {fmtDate(a.checkIn)} → {fmtDate(a.checkOut)}
+                </Typography>
+              )}
+
+              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1.5, mt: 1 }}>
+                {a.includesBreakfast && (
+                  <Typography variant="caption" color="text.secondary">
+                    Breakfast {a.breakfastTime ?? '08:00'}
+                  </Typography>
+                )}
+                {a.confirmationNumber && (
+                  <Typography variant="caption" color="text.secondary">
+                    Ref: {a.confirmationNumber}
+                  </Typography>
+                )}
+                {a.cost && (
+                  <Typography variant="caption" color="text.secondary">
+                    €{a.cost}
+                  </Typography>
+                )}
+              </Box>
+            </Box>
+
+            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 0.5, flexShrink: 0 }}>
+              <Chip
+                label={a.status.replace('_', ' ')}
+                color={STATUS_COLOUR[a.status]}
+                size="medium"
+                sx={{ fontWeight: 700, fontSize: '0.7rem', textTransform: 'capitalize' }}
+              />
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
                 <NavigateButton
-                  destination={navDest}
+                  destination={{ name: a.name, address: a.address, coordinates: a.coordinates ?? null }}
                   suggestedMode="driving"
                   size="medium"
                 />
-              )}
-
-              <IconButton size="medium" onClick={e => openMenu(e, 'transport', i)}>
-                <MoreVertIcon fontSize="medium" />
-              </IconButton>
+                <IconButton size="medium" onClick={e => openMenu(e, 'accom', i)}>
+                  <MoreVertIcon fontSize="medium" />
+                </IconButton>
+              </Box>
             </Box>
           </Box>
-        </Box>
-      </Paper>
+        </Paper>
 
-      {mapAddress && (
-        <Box sx={{ mt: 2 }}>
-          <DestinationMap
-            coordinates={mapCoordinates}
-            address={mapAddress}
-          />
-        </Box>
-      )}
-    </Box>
-  );
-};
+        {mapAddress && (
+          <Box sx={{ mt: 2 }}>
+            <DestinationMap
+              coordinates={mapCoordinates}
+              address={mapAddress}
+            />
+          </Box>
+        )}
+      </Box>
+    );
+  };
 
- const AccomCard = ({ a, i }: { a: any; i: number }) => {
-  const mapAddress = a.address ?? '';
-  const mapCoordinates = a.coordinates ?? null;
+  const VenueCard = ({ v, i }: { v: any; i: number }) => {
+    const venueTypeLabel = VENUE_TYPES.find(vt => vt.value === v.type)?.label ?? 'Venue';
 
-  return (
-    <Box>
+    return (
       <Paper sx={{ p: { xs: 2, sm: 2.5 }, mb: 2, backgroundColor: 'background.paper' }}>
         <Box sx={{ display: 'flex', gap: 1.5 }}>
-          <HotelIcon color="primary" sx={{ mt: 0.25, flexShrink: 0 }} />
+          <Box sx={{ color: 'primary.main', mt: 0.25, flexShrink: 0 }}>
+            {venueIcon(v.type, { fontSize: 'medium' })}
+          </Box>
 
           <Box sx={{ flexGrow: 1, minWidth: 0 }}>
             <Typography fontWeight={700} sx={{ fontSize: '1rem' }}>
-              {a.name}
+              {v.name || venueTypeLabel}
             </Typography>
 
-            {a.address && (
+            {v.address && (
               <Typography variant="body2" color="text.secondary">
-                {a.address}
+                {v.address}
               </Typography>
             )}
 
-            {(a.checkIn || a.checkOut) && (
+            {v.date && (
               <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-                {fmtDate(a.checkIn)} → {fmtDate(a.checkOut)}
+                {fmtDate(v.date)}
+                {v.time ? ` · ${v.time}` : ''}
+                {v.endTime ? ` → ${v.endTime}` : ''}
               </Typography>
             )}
 
             <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1.5, mt: 1 }}>
-              {a.confirmationNumber && (
+              <Chip
+                label={venueTypeLabel}
+                size="medium"
+                variant="outlined"
+                sx={{ fontSize: '0.65rem', height: 20 }}
+              />
+              {v.confirmationNumber && (
                 <Typography variant="caption" color="text.secondary">
-                  Ref: {a.confirmationNumber}
+                  Ref: {v.confirmationNumber}
                 </Typography>
               )}
-
-              {a.cost && (
+              {v.cost && (
                 <Typography variant="caption" color="text.secondary">
-                  €{a.cost}
+                  €{v.cost}
                 </Typography>
               )}
             </Box>
           </Box>
 
-          <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 0.5, flexShrink: 0 }}>
+          <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 0.5 }}>
             <Chip
-              label={a.status.replace('_', ' ')}
-              color={STATUS_COLOUR[a.status]}
+              label={v.status.replace('_', ' ')}
+              color={STATUS_COLOUR[v.status]}
               size="medium"
               sx={{ fontWeight: 700, fontSize: '0.7rem', textTransform: 'capitalize' }}
             />
-
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
               <NavigateButton
-                destination={{ name: a.name, address: a.address, coordinates: a.coordinates ?? null }}
-                suggestedMode="driving"
+                destination={{ name: v.name, address: v.address, coordinates: v.coordinates ?? null }}
+                suggestedMode="walking"
                 size="medium"
               />
-
-              <IconButton size="medium" onClick={e => openMenu(e, 'accom', i)}>
+              <IconButton size="medium" onClick={e => openMenu(e, 'venue', i)}>
                 <MoreVertIcon fontSize="medium" />
               </IconButton>
             </Box>
           </Box>
         </Box>
+
+        {v.address && (
+          <Box sx={{ mt: 2 }}>
+            <DestinationMap
+              coordinates={v.coordinates ?? null}
+              address={v.address}
+            />
+          </Box>
+        )}
       </Paper>
-
-      {mapAddress && (
-        <Box sx={{ mt: 2 }}>
-          <DestinationMap
-            coordinates={mapCoordinates}
-            address={mapAddress}
-          />
-        </Box>
-      )}
-    </Box>
-  );
-};
-
-
-const VenueCard = ({ v, i }: { v: any; i: number }) => {
-  const venueTypeLabel = VENUE_TYPES.find(vt => vt.value === v.type)?.label ?? 'Venue';
-
-  return (
-    <Paper sx={{ p: { xs: 2, sm: 2.5 }, mb: 2, backgroundColor: 'background.paper' }}>
-
-      <Box sx={{ display: 'flex', gap: 1.5 }}>
-        <Box sx={{ color: 'primary.main', mt: 0.25, flexShrink: 0 }}>
-          {venueIcon(v.type, { fontSize: 'medium' })}
-        </Box>
-
-        <Box sx={{ flexGrow: 1, minWidth: 0 }}>
-          <Typography fontWeight={700} sx={{ fontSize: '1rem' }}>
-            {v.name || venueTypeLabel}
-          </Typography>
-
-          {v.address && (
-            <Typography variant="body2" color="text.secondary">
-              {v.address}
-            </Typography>
-          )}
-
-          {v.date && (
-            <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-              {fmtDate(v.date)}
-              {v.time ? ` · ${v.time}` : ''}
-              {v.endTime ? ` → ${v.endTime}` : ''}
-            </Typography>
-          )}
-
-          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1.5, mt: 1 }}>
-            <Chip
-              label={venueTypeLabel}
-              size="medium"
-              variant="outlined"
-              sx={{ fontSize: '0.65rem', height: 20 }}
-            />
-
-            {v.confirmationNumber && (
-              <Typography variant="caption" color="text.secondary">
-                Ref: {v.confirmationNumber}
-              </Typography>
-            )}
-
-            {v.cost && (
-              <Typography variant="caption" color="text.secondary">
-                €{v.cost}
-              </Typography>
-            )}
-          </Box>
-        </Box>
-
-        <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 0.5 }}>
-          <Chip
-            label={v.status.replace('_', ' ')}
-            color={STATUS_COLOUR[v.status]}
-            size="medium"
-            sx={{ fontWeight: 700, fontSize: '0.7rem', textTransform: 'capitalize' }}
-          />
-
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-            <NavigateButton
-              destination={{ name: v.name, address: v.address, coordinates: v.coordinates ?? null }}
-              suggestedMode="walking"
-              size="medium"
-            />
-
-            <IconButton size="medium" onClick={e => openMenu(e, 'venue', i)}>
-              <MoreVertIcon fontSize="medium" />
-            </IconButton>
-          </Box>
-        </Box>
-      </Box>
-
-     {v.address && (
-  <Box sx={{ mt: 2 }}>
-    <DestinationMap
-      coordinates={
-        v.coordinates ?? null
-      }
-      address={v.address}
-    />
-  </Box>
-)}
-
-    </Paper>
-  );
-};
+    );
+  };
 
   // ─────────────────────────────────────────────────────────────────────────
   return (
@@ -1532,6 +1598,34 @@ const VenueCard = ({ v, i }: { v: any; i: number }) => {
               value={accom.checkIn} onChange={e => setAccom(p => ({ ...p, checkIn: e.target.value }))} />
             <TextField label="Check out" type="date" fullWidth InputLabelProps={{ shrink: true }}
               value={accom.checkOut} onChange={e => setAccom(p => ({ ...p, checkOut: e.target.value }))} />
+
+            {/* ── Breakfast ── */}
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={accom.includesBreakfast}
+                    onChange={e => setAccom(p => ({ ...p, includesBreakfast: e.target.checked }))}
+                  />
+                }
+                label={
+                  <Typography variant="body2" fontWeight={600}>
+                    Breakfast included
+                  </Typography>
+                }
+              />
+              {accom.includesBreakfast && (
+                <TextField
+                  label="Breakfast time"
+                  type="time"
+                  fullWidth
+                  InputLabelProps={{ shrink: true }}
+                  value={accom.breakfastTime}
+                  onChange={e => setAccom(p => ({ ...p, breakfastTime: e.target.value }))}
+                />
+              )}
+            </Box>
+
             <TextField label="Confirmation ref" fullWidth value={accom.confirmationNumber}
               onChange={e => setAccom(p => ({ ...p, confirmationNumber: e.target.value }))} />
             <TextField label="Cost (€)" type="number" fullWidth value={accom.cost}
@@ -1623,6 +1717,70 @@ const VenueCard = ({ v, i }: { v: any; i: number }) => {
           <Button variant="contained" onClick={saveVenue} disabled={saving} fullWidth={mobile} size="large">
             Save venue
           </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* ── Gap detection prompt ──────────────────────────────────────────────── */}
+      {/* Fires after saving a flight when ground transport is missing at either end */}
+      <Dialog
+        open={gapPrompts.length > 0}
+        onClose={() => setGapPrompts([])}
+        maxWidth="sm"
+        fullWidth
+        fullScreen={mobile}
+      >
+        <DialogTitle fontWeight={700}>A few things to sort</DialogTitle>
+        <DialogContent>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, pt: 1 }}>
+            {gapPrompts.map((gap, i) => (
+              <Paper
+                key={i}
+                variant="outlined"
+                sx={{
+                  p: 2,
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  gap: 2,
+                  borderColor: 'warning.light',
+                }}
+              >
+                <Box sx={{ flexGrow: 1, minWidth: 0 }}>
+                  <Typography fontWeight={700} variant="body2">
+                    {gap.type === 'to_airport'
+                      ? `Getting to ${gap.label}`
+                      : `Getting from ${gap.label}`}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    {gap.type === 'to_airport'
+                      ? `Flight departs ${fmtDateTime(gap.time)} — no transfer booked`
+                      : `Flight arrives ${fmtDateTime(gap.time)} — no onward transfer booked`}
+                  </Typography>
+                </Box>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  sx={{ flexShrink: 0 }}
+                  onClick={() => {
+                    setGapPrompts(prev => prev.filter((_, j) => j !== i));
+                    setTransport({
+                      ...BLANK_TRANSPORT,
+                      details: { ...BLANK_TRANSPORT.details },
+                      ...gap.prefill,
+                    });
+                    setEditTransportIdx(null);
+                    setSection(0);
+                    setTransportOpen(true);
+                  }}
+                >
+                  Add
+                </Button>
+              </Paper>
+            ))}
+          </Box>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 3 }}>
+          <Button onClick={() => setGapPrompts([])}>Dismiss</Button>
         </DialogActions>
       </Dialog>
 

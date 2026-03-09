@@ -26,8 +26,9 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
   const user = await User.findOne({ email: session.user.email });
   const logistics = await TripLogistics.findOne({ tripId: id });
   if (!logistics) return NextResponse.json({ error: 'Not found' }, { status: 404 });
- logistics.accommodation[Number(index)] = body
+  logistics.accommodation[Number(index)] = body;
   logistics.markModified('accommodation');
   await logistics.save();
+  await syncLogisticsToItinerary(id, logistics);
   return NextResponse.json({ logistics });
 }

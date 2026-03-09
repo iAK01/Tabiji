@@ -103,18 +103,37 @@ export async function syncLogisticsToItinerary(tripId: string, logistics?: any) 
     const log = logistics ?? await TripLogistics.findOne({ tripId });
     if (!log) return;
 
-    const itinerary = await TripItinerary.findOne({ tripId });
-    if (!itinerary) return;
+    const itineraryDoc = await TripItinerary.findOne({ tripId });
+    if (!itineraryDoc) return;
 
-    // Normalise all existing day dates to YYYY-MM-DD to prevent duplicate day
-    // creation when MongoDB has stored them as full ISO strings (e.g. "2026-03-02T00:00:00.000Z")
+    const itinerary = itineraryDoc.toObject() as { _id: any; days: any[] };
+
     for (const day of itinerary.days) {
       if (day.date) day.date = toDateString(day.date);
     }
 
-    // Strip all existing logistics-sourced stops
     for (const day of itinerary.days) {
       day.stops = (day.stops ?? []).filter((s: any) => s.source !== 'logistics');
+    }
+
+    {
+      const dayMap = new Map<string, any>();
+      for (const day of itinerary.days) {
+        if (!day.date) continue;
+        const existing = dayMap.get(day.date);
+        if (!existing) {
+          dayMap.set(day.date, day);
+        } else {
+          const keeper = existing.dayNumber != null ? existing : day;
+          const other  = existing.dayNumber != null ? day : existing;
+          keeper.stops = [
+            ...(keeper.stops ?? []),
+            ...(other.stops ?? []).filter((s: any) => s.source !== 'logistics'),
+          ];
+          dayMap.set(day.date, keeper);
+        }
+      }
+      itinerary.days = Array.from(dayMap.values());
     }
 
     const newStops: any[] = [];
@@ -127,7 +146,6 @@ export async function syncLogisticsToItinerary(tripId: string, logistics?: any) 
       const color   = stopColor(t.type ?? 'flight');
       const type    = t.type === 'flight' ? 'flight' : 'transport';
 
-      // Duration from dep→arr if both present on same day
       let duration = 60;
       if (depTime && arrTime) {
         const diff = Math.round(
@@ -138,6 +156,36 @@ export async function syncLogisticsToItinerary(tripId: string, logistics?: any) 
 
       if (depTime) {
         const time = toTimeString(depTime);
+
+        // Airport check-in stop: 2 hours before every flight departure
+        if (t.type === 'flight') {
+          const checkInMs      = new Date(depTime).getTime() - 2 * 60 * 60 * 1000;
+          const checkInDt      = new Date(checkInMs).toISOString();
+          const checkInTime    = toTimeString(checkInDt);
+          const checkInDateStr = toDateString(checkInDt);
+          newStops.push({
+            _id:            new mongoose.Types.ObjectId(),
+            date:           checkInDateStr,
+            name:           `Airport check-in — ${t.departureLocation ?? 'Airport'}`,
+            type:           'transport',
+            color:          '#455a64',
+            time:           checkInTime,
+            scheduledStart: `${checkInDateStr}T${checkInTime}:00`,
+            duration:       120,
+            locked:         false,
+            source:         'logistics',
+            address:        t.departureLocation ?? undefined,
+            coordinates:    t.departureCoordinates ?? undefined,
+            metadata:       { transportType: 'flight', phase: 'airport_checkin' },
+          });
+        }
+
+        const flightNotes = t.type === 'flight' ? [
+          t.confirmationNumber ? `Ref: ${t.confirmationNumber}` : null,
+          t.details?.seat ? `Seat: ${t.details.seat}` : null,
+          (t.status === 'confirmed' || t.status === 'booked') ? '✅ Confirmed' : '⏳ Not confirmed',
+        ].filter(Boolean).join(' · ') || undefined : undefined;
+
         newStops.push({
           _id:            new mongoose.Types.ObjectId(),
           date:           toDateString(depTime),
@@ -150,17 +198,17 @@ export async function syncLogisticsToItinerary(tripId: string, logistics?: any) 
           duration,
           locked:         true,
           source:         'logistics',
+          notes:          flightNotes,
           address: ['car','taxi','private_transfer','bicycle'].includes(t.type)
-  ? (t.arrivalLocation ?? undefined)
-  : (t.departureAddress ?? t.departureLocation ?? undefined),
-coordinates: ['car','taxi','private_transfer','bicycle'].includes(t.type)
-  ? (t.arrivalCoordinates ?? undefined)
-  : (t.departureCoordinates ?? undefined),
+            ? (t.arrivalLocation ?? undefined)
+            : (t.departureAddress ?? t.departureLocation ?? undefined),
+          coordinates: ['car','taxi','private_transfer','bicycle'].includes(t.type)
+            ? (t.arrivalCoordinates ?? undefined)
+            : (t.departureCoordinates ?? undefined),
           metadata: { transportType: t.type, phase: 'departure' },
         });
       }
 
-      // Only add arrival stop if it lands on a different date (long-haul)
       if (arrTime) {
         const arrDate = toDateString(arrTime);
         const depDate = depTime ? toDateString(depTime) : null;
@@ -188,6 +236,11 @@ coordinates: ['car','taxi','private_transfer','bicycle'].includes(t.type)
 
     // ── Accommodation ─────────────────────────────────────────────────────────
     for (const a of log.accommodation ?? []) {
+      const accomNotes = [
+        a.confirmationNumber ? `Ref: ${a.confirmationNumber}` : null,
+        (a.status === 'confirmed' || a.status === 'booked') ? '✅ Confirmed' : '⏳ Not confirmed',
+      ].filter(Boolean).join(' · ') || undefined;
+
       if (a.checkIn) {
         const time = '15:00';
         newStops.push({
@@ -201,11 +254,13 @@ coordinates: ['car','taxi','private_transfer','bicycle'].includes(t.type)
           duration:       30,
           locked:         true,
           source:         'logistics',
+          notes:          accomNotes,
           address:        a.address ?? undefined,
           coordinates:    a.coordinates ?? undefined,
           metadata: { accommodationType: a.type, phase: 'checkin' },
         });
       }
+
       if (a.checkOut) {
         const time = '11:00';
         newStops.push({
@@ -219,10 +274,37 @@ coordinates: ['car','taxi','private_transfer','bicycle'].includes(t.type)
           duration:       30,
           locked:         true,
           source:         'logistics',
+          notes:          accomNotes,
           address:        a.address ?? undefined,
           coordinates:    a.coordinates ?? undefined,
           metadata: { accommodationType: a.type, phase: 'checkout' },
         });
+      }
+
+      if (a.includesBreakfast && a.checkIn && a.checkOut) {
+        const bfTime = a.breakfastTime ?? '08:00';
+        const cur = new Date(toDateString(a.checkIn) + 'T12:00:00');
+        cur.setDate(cur.getDate() + 1);
+        const endDate = new Date(toDateString(a.checkOut) + 'T12:00:00');
+        while (cur <= endDate) {
+          const date = toDateString(cur);
+          newStops.push({
+            _id:            new mongoose.Types.ObjectId(),
+            date,
+            name:           `Breakfast — ${a.name ?? 'Hotel'}`,
+            type:           'meal',
+            color:          '#b45309',
+            time:           bfTime,
+            scheduledStart: `${date}T${bfTime}:00`,
+            duration:       45,
+            locked:         false,
+            source:         'logistics',
+            address:        a.address ?? undefined,
+            coordinates:    a.coordinates ?? undefined,
+            metadata:       { accommodationType: a.type, phase: 'breakfast' },
+          });
+          cur.setDate(cur.getDate() + 1);
+        }
       }
     }
 
@@ -263,7 +345,7 @@ coordinates: ['car','taxi','private_transfer','bicycle'].includes(t.type)
         notes: [
           v.confirmationNumber ? `Ref: ${v.confirmationNumber}` : null,
           v.website            ? `🔗 ${v.website}`              : null,
-          v.status === 'confirmed' ? '✅ Confirmed' : '⏳ Not booked',
+          (v.status === 'confirmed' || v.status === 'booked') ? '✅ Confirmed' : '⏳ Not booked',
         ].filter(Boolean).join(' · '),
         metadata: { venueType: v.type },
       });
