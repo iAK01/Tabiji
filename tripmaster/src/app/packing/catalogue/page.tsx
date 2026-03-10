@@ -6,7 +6,7 @@ import {
   Box, Container, Typography, AppBar, Toolbar, IconButton, Button,
   Paper, Grid, TextField, Select, MenuItem, FormControl, InputLabel,
   Chip, Switch, FormControlLabel, Dialog, DialogTitle, DialogContent,
-  DialogActions, Card, CardContent, CardActions, Tooltip,
+  DialogActions, Card, CardContent, CardActions, Tooltip, Modal,
   ToggleButton, ToggleButtonGroup, CircularProgress,
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
   Divider,
@@ -29,26 +29,26 @@ import HomeIcon              from '@mui/icons-material/Home';
 import GroupIcon             from '@mui/icons-material/Group';
 import NaturePeopleIcon      from '@mui/icons-material/NaturePeople';
 import OtherHousesIcon       from '@mui/icons-material/OtherHouses';
+import CloseIcon             from '@mui/icons-material/Close';
 // Category icons
 import ArticleIcon           from '@mui/icons-material/Article';
 import DevicesIcon           from '@mui/icons-material/Devices';
 import CableIcon             from '@mui/icons-material/Cable';
 import CheckroomIcon         from '@mui/icons-material/Checkroom';
 import HikingIcon            from '@mui/icons-material/Hiking';
-import ShoesIcon             from '@mui/icons-material/DriveEta'; // fallback
 import ChildCareIcon         from '@mui/icons-material/ChildCare';
 import SportsEsportsIcon     from '@mui/icons-material/SportsEsports';
 import PaletteIcon           from '@mui/icons-material/Palette';
 import FavoriteIcon          from '@mui/icons-material/Favorite';
 import BlenderIcon           from '@mui/icons-material/Blender';
-import SpaIcon               from '@mui/icons-material/Spa';
+import SpaIcon               from '@mui/icons-material/CleanHands';
 import MedicationIcon        from '@mui/icons-material/Medication';
 import BusinessCenterIcon    from '@mui/icons-material/BusinessCenter';
 import LuggageIcon           from '@mui/icons-material/Luggage';
-import WatchIcon             from '@mui/icons-material/Watch';
+import DiamondIcon           from '@mui/icons-material/Style';
 import CoffeeIcon            from '@mui/icons-material/Coffee';
 import CategoryIcon          from '@mui/icons-material/Category';
-import DirectionsWalkIcon    from '@mui/icons-material/DirectionsWalk';
+import DirectionsWalkIcon    from '@mui/icons-material/DirectionsRun';
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 
@@ -67,24 +67,24 @@ const D = {
 // ─── Category → MUI icon map ──────────────────────────────────────────────────
 
 const CATEGORY_ICONS: Record<string, React.ElementType> = {
-  'Documents':        ArticleIcon,
-  'Electronics':      DevicesIcon,
-  'Tech Accessories': CableIcon,
-  'Clothes':          CheckroomIcon,
-  'Sport / Outdoor':  HikingIcon,
-  'Footwear':         DirectionsWalkIcon,
-  'Baby / Kids':      ChildCareIcon,
-  'Entertainment':    SportsEsportsIcon,
-  'Hobby / Creative': PaletteIcon,
-  'Health & Recovery':FavoriteIcon,
+  'Documents':          ArticleIcon,
+  'Electronics':        DevicesIcon,
+  'Tech Accessories':   CableIcon,
+  'Clothes':            CheckroomIcon,
+  'Sport / Outdoor':    HikingIcon,
+  'Footwear':           DirectionsWalkIcon,
+  'Baby / Kids':        ChildCareIcon,
+  'Entertainment':      SportsEsportsIcon,
+  'Hobby / Creative':   PaletteIcon,
+  'Health & Recovery':  FavoriteIcon,
   'Food / Supplements': BlenderIcon,
-  'Toiletries':       SpaIcon,
-  'Medicines':        MedicationIcon,
-  'Work Gear':        BusinessCenterIcon,
-  'Luggage':          LuggageIcon,
-  'Accessories':      WatchIcon,
-  'Coffee':           CoffeeIcon,
-  'Other':            CategoryIcon,
+  'Toiletries':         SpaIcon,
+  'Medicines':          MedicationIcon,
+  'Work Gear':          BusinessCenterIcon,
+  'Luggage':            LuggageIcon,
+  'Accessories':        DiamondIcon,
+  'Coffee':             CoffeeIcon,
+  'Other':              CategoryIcon,
 };
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -194,15 +194,61 @@ function CategoryGhost({ category }: { category: string }) {
   const Icon = CATEGORY_ICONS[category] ?? CategoryIcon;
   return (
     <Box sx={{
-      position: 'absolute',
-      bottom: -12, right: -8,
-      pointerEvents: 'none',
-      zIndex: 0,
-      color: D.navy,
-      opacity: 0.055,
+      position: 'absolute', bottom: -12, right: -8,
+      pointerEvents: 'none', zIndex: 0, color: D.navy, opacity: 0.055,
     }}>
       <Icon sx={{ fontSize: 120 }} />
     </Box>
+  );
+}
+
+// ─── Photo lightbox ───────────────────────────────────────────────────────────
+
+function PhotoLightbox({ src, name, onClose }: { src: string; name: string; onClose: () => void }) {
+  return (
+    <Modal open onClose={onClose} sx={{ zIndex: 1400 }}>
+      <Box
+        onClick={onClose}
+        sx={{
+          position: 'fixed', inset: 0,
+          backgroundColor: 'rgba(0,0,0,0.55)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          cursor: 'zoom-out', outline: 'none',
+        }}
+      >
+        <IconButton
+          onClick={onClose}
+          sx={{
+            position: 'absolute', top: 16, right: 16,
+            backgroundColor: 'rgba(255,255,255,0.12)',
+            color: 'white',
+            '&:hover': { backgroundColor: 'rgba(255,255,255,0.22)' },
+          }}
+        >
+          <CloseIcon />
+        </IconButton>
+
+        <Box
+          component="img"
+          src={src}
+          alt={name}
+          onClick={e => e.stopPropagation()}
+          sx={{
+            maxWidth: '90vw', maxHeight: '88vh',
+            objectFit: 'contain', borderRadius: 1.5,
+            boxShadow: '0 24px 64px rgba(0,0,0,0.6)',
+          }}
+        />
+
+        <Typography sx={{
+          position: 'absolute', bottom: 24,
+          fontFamily: D.display, fontSize: '0.95rem',
+          color: 'rgba(255,255,255,0.7)', letterSpacing: '-0.01em',
+        }}>
+          {name}
+        </Typography>
+      </Box>
+    </Modal>
   );
 }
 
@@ -222,6 +268,7 @@ export default function PackingCataloguePage() {
   const [photoPreview,    setPhotoPreview]    = useState<string | null>(null);
   const [filterCategory,  setFilterCategory]  = useState('All');
   const [viewMode,        setViewMode]        = useState<'grid' | 'list'>('grid');
+  const [lightbox,        setLightbox]        = useState<{ src: string; name: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -240,11 +287,17 @@ export default function PackingCataloguePage() {
       .then(data => { setItems(data.items || []); setLoading(false); });
   }, []);
 
+  // Close lightbox on Escape
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') setLightbox(null); };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
+
   const openAdd = () => {
     setEditTarget(null);
     setForm({ ...emptyForm, transportTypes: [], accommodationTypes: [] });
-    setPhotoPreview(null);
-    setSelectedPhoto(null);
+    setPhotoPreview(null); setSelectedPhoto(null);
     setDialogOpen(true);
   };
 
@@ -323,6 +376,11 @@ export default function PackingCataloguePage() {
   return (
     <Box sx={{ minHeight: '100vh', backgroundColor: D.bg }}>
 
+      {/* ── Lightbox ── */}
+      {lightbox && (
+        <PhotoLightbox src={lightbox.src} name={lightbox.name} onClose={() => setLightbox(null)} />
+      )}
+
       {/* ── AppBar ── */}
       <AppBar position="static" sx={{ backgroundColor: D.navy }}>
         <Toolbar>
@@ -341,9 +399,7 @@ export default function PackingCataloguePage() {
             {viewMode === 'grid' ? <ListIcon /> : <GridViewIcon />}
           </IconButton>
           <Button
-            variant="contained"
-            startIcon={<AddIcon />}
-            onClick={openAdd}
+            variant="contained" startIcon={<AddIcon />} onClick={openAdd}
             sx={{ backgroundColor: D.terra, '&:hover': { backgroundColor: '#b5633e' }, fontWeight: 800, fontFamily: D.body }}
           >
             Add Item
@@ -354,41 +410,27 @@ export default function PackingCataloguePage() {
       <Container maxWidth="lg" sx={{ py: 4 }}>
 
         {/* ── Stats strip ── */}
-        <Box sx={{
-          display: 'flex', gap: 4, mb: 4,
-          pb: 3, borderBottom: `2px solid ${D.navy}`,
-          alignItems: 'baseline',
-        }}>
-          <Box>
-            <Typography sx={{ fontFamily: D.display, fontSize: '3rem', color: D.navy, lineHeight: 1, letterSpacing: '-0.03em' }}>
-              {items.length}
-            </Typography>
-            <Typography sx={{ fontSize: '0.78rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: D.muted, mt: 0.25 }}>
-              Items
-            </Typography>
-          </Box>
-          <Box>
-            <Typography sx={{ fontFamily: D.display, fontSize: '3rem', color: D.green, lineHeight: 1, letterSpacing: '-0.03em' }}>
-              {items.filter(i => i.essential).length}
-            </Typography>
-            <Typography sx={{ fontSize: '0.78rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: D.muted, mt: 0.25 }}>
-              Essentials
-            </Typography>
-          </Box>
-          <Box>
-            <Typography sx={{ fontFamily: D.display, fontSize: '3rem', color: D.terra, lineHeight: 1, letterSpacing: '-0.03em' }}>
-              {items.filter(i => i.preTravelAction).length}
-            </Typography>
-            <Typography sx={{ fontSize: '0.78rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: D.muted, mt: 0.25 }}>
-              Pre-travel
-            </Typography>
-          </Box>
+        <Box sx={{ display: 'flex', gap: 4, mb: 4, pb: 3, borderBottom: `2px solid ${D.navy}`, alignItems: 'baseline' }}>
+          {[
+            { value: items.length,                          label: 'Items',      color: D.navy  },
+            { value: items.filter(i => i.essential).length, label: 'Essentials', color: D.green },
+            { value: items.filter(i => i.preTravelAction).length, label: 'Pre-travel', color: D.terra },
+          ].map(({ value, label, color }) => (
+            <Box key={label}>
+              <Typography sx={{ fontFamily: D.display, fontSize: '3rem', color, lineHeight: 1, letterSpacing: '-0.03em' }}>
+                {value}
+              </Typography>
+              <Typography sx={{ fontSize: '0.78rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: D.muted, mt: 0.25 }}>
+                {label}
+              </Typography>
+            </Box>
+          ))}
         </Box>
 
         {/* ── Category filter ── */}
         <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mb: 3 }}>
           {categories.map(cat => {
-            const Icon = CATEGORY_ICONS[cat];
+            const Icon   = CATEGORY_ICONS[cat];
             const active = filterCategory === cat;
             return (
               <Chip
@@ -397,8 +439,7 @@ export default function PackingCataloguePage() {
                 label={cat}
                 onClick={() => setFilterCategory(cat)}
                 sx={{
-                  cursor: 'pointer',
-                  fontFamily: D.body,
+                  cursor: 'pointer', fontFamily: D.body,
                   fontWeight: active ? 800 : 500,
                   backgroundColor: active ? D.navy : 'transparent',
                   color: active ? 'white' : D.navy,
@@ -426,123 +467,109 @@ export default function PackingCataloguePage() {
         ) : viewMode === 'grid' ? (
 
           <Grid container spacing={2}>
-            {filtered.map(item => {
-              const essential = item.essential;
-              return (
-                <Grid size={{ xs: 12, sm: 6, md: 4, lg: 3 }} key={item._id}>
-                  <Card sx={{
-                    height: '100%',
-                    backgroundColor: D.paper,
-                    border: `1px solid ${D.rule}`,
-                    borderLeft: essential ? `3px solid ${D.green}` : `1px solid ${D.rule}`,
-                    borderRadius: 1.5,
-                    boxShadow: 'none',
-                    position: 'relative',
-                    overflow: 'hidden',
-                    display: 'flex',
-                    flexDirection: 'column',
-                  }}>
+            {filtered.map(item => (
+              <Grid size={{ xs: 12, sm: 6, md: 4, lg: 3 }} key={item._id}>
+                <Card sx={{
+                  height: '100%', backgroundColor: D.paper,
+                  border: `1px solid ${D.rule}`,
+                  borderLeft: item.essential ? `3px solid ${D.green}` : `1px solid ${D.rule}`,
+                  borderRadius: 1.5, boxShadow: 'none',
+                  position: 'relative', overflow: 'hidden',
+                  display: 'flex', flexDirection: 'column',
+                }}>
+                  <CategoryGhost category={item.category} />
 
-                    {/* Ghost category icon */}
-                    <CategoryGhost category={item.category} />
+                  {/* Photo thumbnail — tappable */}
+                  {item.photoUrl && (
+                    <Box
+                      component="img"
+                      src={item.photoUrl}
+                      alt={item.name}
+                      onClick={() => setLightbox({ src: item.photoUrl!, name: item.name })}
+                      sx={{
+                        position: 'absolute', top: 10, right: 10,
+                        width: 52, height: 52,
+                        borderRadius: 1, objectFit: 'cover',
+                        border: `1px solid ${D.rule}`,
+                        zIndex: 2, cursor: 'zoom-in',
+                        transition: 'transform 0.15s, box-shadow 0.15s',
+                        '&:hover': {
+                          transform: 'scale(1.06)',
+                          boxShadow: '0 4px 16px rgba(0,0,0,0.18)',
+                        },
+                      }}
+                    />
+                  )}
 
-                    {/* Photo thumbnail — only if photo exists, small */}
-                    {item.photoUrl && (
-                      <Box
-                        component="img"
-                        src={item.photoUrl}
-                        alt={item.name}
-                        sx={{
-                          position: 'absolute', top: 10, right: 10,
-                          width: 44, height: 44,
-                          borderRadius: 1, objectFit: 'cover',
-                          border: `1px solid ${D.rule}`,
-                          zIndex: 1,
-                        }}
-                      />
+                  <CardContent sx={{ pb: 1, flexGrow: 1, position: 'relative', zIndex: 1 }}>
+                    <Typography sx={{
+                      fontSize: '0.68rem', fontWeight: 700,
+                      textTransform: 'uppercase', letterSpacing: '0.07em',
+                      color: D.muted, mb: 0.5,
+                      display: 'flex', alignItems: 'center', gap: 0.5,
+                    }}>
+                      {(() => { const Icon = CATEGORY_ICONS[item.category]; return Icon ? <Icon sx={{ fontSize: 11 }} /> : null; })()}
+                      {item.category}
+                    </Typography>
+
+                    <Box sx={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', mb: 1 }}>
+                      <Typography sx={{
+                        fontFamily: D.display, fontSize: '1.1rem', color: D.navy,
+                        lineHeight: 1.25, letterSpacing: '-0.01em',
+                        pr: item.photoUrl ? 7 : 0,
+                      }}>
+                        {item.name}
+                      </Typography>
+                      {item.preTravelAction && (
+                        <Tooltip title={item.preTravelNote || 'Pre-travel action required'}>
+                          <WarningAmberIcon sx={{ fontSize: 16, color: D.terra, flexShrink: 0, mt: 0.25 }} />
+                        </Tooltip>
+                      )}
+                    </Box>
+
+                    {(item.tripTypes ?? []).filter(t => t !== 'always').length > 0 && (
+                      <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap', mb: 0.75 }}>
+                        {(item.tripTypes ?? []).filter(t => t !== 'always').map(t => (
+                          <Chip key={t} label={t} size="small" variant="outlined"
+                            sx={{ fontSize: '0.68rem', height: 20, color: D.muted, borderColor: D.rule }} />
+                        ))}
+                      </Box>
                     )}
 
-                    <CardContent sx={{ pb: 1, flexGrow: 1, position: 'relative', zIndex: 1 }}>
+                    <Typography sx={{ fontSize: '0.8rem', color: D.muted, mt: 0.5 }}>
+                      {qtyLabel(item)}
+                    </Typography>
 
-                      {/* Category micro-label */}
-                      <Typography sx={{
-                        fontSize: '0.68rem', fontWeight: 700,
-                        textTransform: 'uppercase', letterSpacing: '0.07em',
-                        color: D.muted, mb: 0.5,
-                        display: 'flex', alignItems: 'center', gap: 0.5,
-                      }}>
-                        {(() => { const Icon = CATEGORY_ICONS[item.category]; return Icon ? <Icon sx={{ fontSize: 11 }} /> : null; })()}
-                        {item.category}
+                    {((item.transportTypes ?? []).length > 0 || (item.accommodationTypes ?? []).length > 0) && (
+                      <Typography sx={{ fontSize: '0.68rem', color: D.muted, mt: 0.5, fontStyle: 'italic' }}>
+                        Only on: {[...(item.transportTypes ?? []), ...(item.accommodationTypes ?? [])].join(', ')}
                       </Typography>
+                    )}
 
-                      {/* Item name — display anchor */}
-                      <Box sx={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', mb: 1 }}>
-                        <Typography sx={{
-                          fontFamily: D.display,
-                          fontSize: '1.1rem',
-                          color: D.navy,
-                          lineHeight: 1.25,
-                          letterSpacing: '-0.01em',
-                          pr: item.photoUrl ? 6 : 0,
-                        }}>
-                          {item.name}
-                        </Typography>
-                        {item.preTravelAction && (
-                          <Tooltip title={item.preTravelNote || 'Pre-travel action required'}>
-                            <WarningAmberIcon sx={{ fontSize: 16, color: D.terra, flexShrink: 0, mt: 0.25 }} />
-                          </Tooltip>
-                        )}
-                      </Box>
-
-                      {/* Trip type chips — only non-"always" */}
-                      {(item.tripTypes ?? []).filter(t => t !== 'always').length > 0 && (
-                        <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap', mb: 0.75 }}>
-                          {(item.tripTypes ?? []).filter(t => t !== 'always').map(t => (
-                            <Chip key={t} label={t} size="small" variant="outlined"
-                              sx={{ fontSize: '0.68rem', height: 20, color: D.muted, borderColor: D.rule }} />
-                          ))}
-                        </Box>
-                      )}
-
-                      {/* Qty */}
-                      <Typography sx={{ fontSize: '0.8rem', color: D.muted, mt: 0.5 }}>
-                        {qtyLabel(item)}
+                    {item.advisoryNote && (
+                      <Typography sx={{ fontSize: '0.78rem', color: D.muted, mt: 0.75, fontStyle: 'italic', lineHeight: 1.4 }}>
+                        {item.advisoryNote}
                       </Typography>
+                    )}
+                  </CardContent>
 
-                      {/* Filter constraints */}
-                      {((item.transportTypes ?? []).length > 0 || (item.accommodationTypes ?? []).length > 0) && (
-                        <Typography sx={{ fontSize: '0.68rem', color: D.muted, mt: 0.5, fontStyle: 'italic' }}>
-                          Only on: {[...(item.transportTypes ?? []), ...(item.accommodationTypes ?? [])].join(', ')}
-                        </Typography>
-                      )}
-
-                      {/* Advisory note */}
-                      {item.advisoryNote && (
-                        <Typography sx={{ fontSize: '0.78rem', color: D.muted, mt: 0.75, fontStyle: 'italic', lineHeight: 1.4 }}>
-                          {item.advisoryNote}
-                        </Typography>
-                      )}
-                    </CardContent>
-
-                    <CardActions sx={{ justifyContent: 'flex-end', pt: 0, pb: 1, px: 1.5, position: 'relative', zIndex: 1 }}>
-                      <IconButton size="small" onClick={() => openEdit(item)}
-                        sx={{ color: D.muted, '&:hover': { color: D.navy } }}>
-                        <EditIcon sx={{ fontSize: 16 }} />
-                      </IconButton>
-                      <IconButton size="small" onClick={() => setDeleteTarget(item)}
-                        sx={{ color: D.muted, '&:hover': { color: '#d32f2f' } }}>
-                        <DeleteIcon sx={{ fontSize: 16 }} />
-                      </IconButton>
-                    </CardActions>
-                  </Card>
-                </Grid>
-              );
-            })}
+                  <CardActions sx={{ justifyContent: 'flex-end', pt: 0, pb: 1, px: 1.5, position: 'relative', zIndex: 1 }}>
+                    <IconButton size="small" onClick={() => openEdit(item)}
+                      sx={{ color: D.muted, '&:hover': { color: D.navy } }}>
+                      <EditIcon sx={{ fontSize: 16 }} />
+                    </IconButton>
+                    <IconButton size="small" onClick={() => setDeleteTarget(item)}
+                      sx={{ color: D.muted, '&:hover': { color: '#d32f2f' } }}>
+                      <DeleteIcon sx={{ fontSize: 16 }} />
+                    </IconButton>
+                  </CardActions>
+                </Card>
+              </Grid>
+            ))}
           </Grid>
 
         ) : (
 
-          // ── List view ──
           <TableContainer component={Paper} sx={{ backgroundColor: D.paper, border: `1px solid ${D.rule}`, boxShadow: 'none', borderRadius: 1.5 }}>
             <Table size="small">
               <TableHead>
@@ -567,8 +594,15 @@ export default function PackingCataloguePage() {
                     <TableCell>
                       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                         {item.photoUrl && (
-                          <Box component="img" src={item.photoUrl}
-                            sx={{ width: 28, height: 28, objectFit: 'cover', borderRadius: 0.5, flexShrink: 0 }} />
+                          <Box
+                            component="img" src={item.photoUrl}
+                            onClick={() => setLightbox({ src: item.photoUrl!, name: item.name })}
+                            sx={{
+                              width: 32, height: 32, objectFit: 'cover', borderRadius: 0.5,
+                              flexShrink: 0, cursor: 'zoom-in',
+                              '&:hover': { opacity: 0.85 },
+                            }}
+                          />
                         )}
                         <Typography sx={{ fontFamily: D.display, fontSize: '0.9rem', color: D.navy }}>
                           {item.name}
@@ -592,12 +626,10 @@ export default function PackingCataloguePage() {
                     <TableCell>
                       <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
                         {(item.transportTypes ?? []).map(t => (
-                          <Chip key={t} label={t} size="small" color="info" variant="outlined"
-                            sx={{ fontSize: '0.68rem', height: 20 }} />
+                          <Chip key={t} label={t} size="small" color="info" variant="outlined" sx={{ fontSize: '0.68rem', height: 20 }} />
                         ))}
                         {(item.accommodationTypes ?? []).map(t => (
-                          <Chip key={t} label={t} size="small" color="secondary" variant="outlined"
-                            sx={{ fontSize: '0.68rem', height: 20 }} />
+                          <Chip key={t} label={t} size="small" color="secondary" variant="outlined" sx={{ fontSize: '0.68rem', height: 20 }} />
                         ))}
                         {!(item.transportTypes?.length) && !(item.accommodationTypes?.length) && (
                           <Typography sx={{ fontSize: '0.78rem', color: D.muted }}>All</Typography>
@@ -676,7 +708,6 @@ export default function PackingCataloguePage() {
               <input ref={fileInputRef} type="file" accept="image/*" hidden onChange={handlePhotoSelect} />
             </Box>
 
-            {/* Name + Category */}
             <Box sx={{ display: 'flex', gap: 2 }}>
               <TextField label="Item name" value={form.name} required fullWidth
                 onChange={e => setForm(p => ({ ...p, name: e.target.value }))} />
@@ -698,15 +729,13 @@ export default function PackingCataloguePage() {
 
             <Divider />
 
-            {/* Trip type */}
             <Box>
               <Typography sx={{ fontSize: '0.88rem', fontWeight: 700, fontFamily: D.body, mb: 0.5 }}>Trip type</Typography>
               <Typography sx={{ fontSize: '0.75rem', color: D.muted, display: 'block', mb: 1 }}>
                 Leave all unselected to include on all trip types
               </Typography>
               <ToggleButtonGroup value={form.tripTypes}
-                onChange={(_, val) => val.length && setForm(p => ({ ...p, tripTypes: val }))}
-                fullWidth>
+                onChange={(_, val) => val.length && setForm(p => ({ ...p, tripTypes: val }))} fullWidth>
                 {TRIP_TYPES.map(t => (
                   <ToggleButton key={t} value={t} size="small"
                     sx={{ textTransform: 'none', fontWeight: 600, fontFamily: D.body }}>
@@ -719,28 +748,23 @@ export default function PackingCataloguePage() {
             <FilterToggleGroup
               label="Only include when transport includes"
               hint="Leave all unselected to include regardless of transport"
-              options={TRANSPORT_TYPES}
-              value={form.transportTypes}
+              options={TRANSPORT_TYPES} value={form.transportTypes}
               onChange={val => setForm(p => ({ ...p, transportTypes: val }))}
             />
-
             <FilterToggleGroup
               label="Only include when accommodation includes"
               hint="Leave all unselected to include regardless of accommodation"
-              options={ACCOM_TYPES}
-              value={form.accommodationTypes}
+              options={ACCOM_TYPES} value={form.accommodationTypes}
               onChange={val => setForm(p => ({ ...p, accommodationTypes: val }))}
             />
 
             <Divider />
 
-            {/* Quantity */}
             <Box>
               <Typography sx={{ fontSize: '0.88rem', fontWeight: 700, fontFamily: D.body, mb: 1 }}>Quantity</Typography>
               <ToggleButtonGroup value={form.quantityType} exclusive
-                onChange={(_, val) => val && setForm(p => ({ ...p, quantityType: val }))}
-                sx={{ mb: 2 }}>
-                <ToggleButton value="fixed" size="small" sx={{ textTransform: 'none', fontFamily: D.body }}>Fixed</ToggleButton>
+                onChange={(_, val) => val && setForm(p => ({ ...p, quantityType: val }))} sx={{ mb: 2 }}>
+                <ToggleButton value="fixed"     size="small" sx={{ textTransform: 'none', fontFamily: D.body }}>Fixed</ToggleButton>
                 <ToggleButton value="per_night" size="small" sx={{ textTransform: 'none', fontFamily: D.body }}>Per night</ToggleButton>
               </ToggleButtonGroup>
               {form.quantityType === 'fixed' ? (
@@ -765,19 +789,15 @@ export default function PackingCataloguePage() {
                 sx={{ '& .MuiSwitch-thumb': { backgroundColor: form.essential ? D.green : undefined } }} />}
               label={<Typography sx={{ fontSize: '0.9rem', fontFamily: D.body }}>Essential — always highlighted regardless of trip type</Typography>}
             />
-
             <FormControlLabel
-              control={<Switch checked={form.preTravelAction} onChange={e => setForm(p => ({ ...p, preTravelAction: e.target.checked }))}
-                color="warning" />}
+              control={<Switch checked={form.preTravelAction} onChange={e => setForm(p => ({ ...p, preTravelAction: e.target.checked }))} color="warning" />}
               label={<Typography sx={{ fontSize: '0.9rem', fontFamily: D.body }}>Requires pre-travel action</Typography>}
             />
-
             {form.preTravelAction && (
               <TextField label="Pre-travel action note" placeholder="e.g. Charge fully before packing"
                 value={form.preTravelNote} fullWidth
                 onChange={e => setForm(p => ({ ...p, preTravelNote: e.target.value }))} />
             )}
-
             <TextField label="Advisory note (optional)" placeholder="e.g. 100ml or less for carry-on"
               value={form.advisoryNote} fullWidth
               onChange={e => setForm(p => ({ ...p, advisoryNote: e.target.value }))} />
@@ -810,9 +830,7 @@ export default function PackingCataloguePage() {
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setDeleteTarget(null)} sx={{ color: D.muted }}>Cancel</Button>
-          <Button color="error" variant="contained" onClick={() => deleteTarget && handleDelete(deleteTarget)}>
-            Delete
-          </Button>
+          <Button color="error" variant="contained" onClick={() => deleteTarget && handleDelete(deleteTarget)}>Delete</Button>
         </DialogActions>
       </Dialog>
 
