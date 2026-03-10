@@ -582,7 +582,14 @@ export default function TripPage() {
           {activeTab === 2 && <ItineraryTab tripId={trip._id} startDate={trip.startDate} endDate={trip.endDate} fabTrigger={fabTrigger} />}
           {activeTab === 3 && <PackingTab tripId={trip._id} tripType={trip.tripType} nights={trip.nights} startDate={trip.startDate} fabTrigger={fabTrigger} />}
           {activeTab === 4 && <IntelligenceTab tripId={trip._id} />}
-          {activeTab === 5 && <WeatherTab tripId={trip._id} destinationCity={trip.destination?.city} />}
+          {activeTab === 5 && (
+  <WeatherTab
+    tripId={trip._id}
+    destinationCity={trip.destination?.city}
+    startDate={trip.startDate}
+    endDate={trip.endDate}
+  />
+)}
           {activeTab === 6 && <MapTab tripId={trip._id} trip={trip} />}
           {activeTab === 7 && <FilesTab tripId={trip._id} fabTrigger={fabTrigger} />}
         </Container>

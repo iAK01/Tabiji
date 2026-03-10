@@ -1,285 +1,303 @@
 'use client';
 
 import { useEffect, useRef, useState, useCallback } from 'react';
-import {
-  Box, Typography, Paper, Chip, CircularProgress,
-  ToggleButton, ToggleButtonGroup, Divider, alpha,
-} from '@mui/material';
+import { Box, Typography, CircularProgress } from '@mui/material';
 import FlightIcon        from '@mui/icons-material/Flight';
 import TrainIcon         from '@mui/icons-material/Train';
-import HotelIcon         from '@mui/icons-material/Hotel';
 import DirectionsBusIcon from '@mui/icons-material/DirectionsBus';
 import DirectionsCarIcon from '@mui/icons-material/DirectionsCar';
-import ExploreIcon       from '@mui/icons-material/Explore';
-import WorkIcon          from '@mui/icons-material/Work';
-import RestaurantIcon    from '@mui/icons-material/Restaurant';
 import EventIcon         from '@mui/icons-material/Event';
-import PlaceIcon         from '@mui/icons-material/Place';
-import CheckCircleIcon   from '@mui/icons-material/CheckCircle';
-import RadioButtonUncheckedIcon from '@mui/icons-material/RadioButtonUnchecked';
 import MapIcon           from '@mui/icons-material/Map';
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+const D = {
+  navy:    '#1D2642',
+  green:   '#6B7C5C',
+  terra:   '#C4714A',
+  bg:      '#F5F0E8',
+  paper:   '#FDFAF5',
+  muted:   'rgba(29,38,66,0.45)',
+  rule:    'rgba(29,38,66,0.10)',
+  display: '"Archivo Black", sans-serif',
+  body:    '"Archivo", "Inter", sans-serif',
+};
 
 interface Coordinates { lat: number; lng: number; }
-
-interface TripLocation {
-  city: string;
-  country: string;
-  countryCode?: string;
-  coordinates?: Coordinates;
-}
-
+interface TripLocation { city: string; country: string; coordinates?: Coordinates; }
 interface Trip {
-  _id: string;
-  name: string;
-  origin: TripLocation;
-  destination: TripLocation;
+  _id: string; name: string;
+  origin: TripLocation; destination: TripLocation;
   additionalDestinations?: (TripLocation & { arrivalDate?: string; departureDate?: string })[];
-  startDate: string;
-  endDate: string;
+  startDate: string; endDate: string;
 }
-
 interface TransportEntry {
-  type: string;
-  status: string;
-  departureLocation?: string;
-  arrivalLocation?: string;
-  departureTime?: string;
-  arrivalTime?: string;
-  details?: {
-    flightNumber?: string;
-    airline?: string;
-    operator?: string;
-  };
+  type: string; status: string;
+  departureLocation?: string; arrivalLocation?: string;
+  departureTime?: string; arrivalTime?: string;
+  confirmationNumber?: string; cost?: string;
+  details?: { flightNumber?: string; airline?: string; airlineIata?: string; seat?: string; operator?: string; };
 }
-
 interface AccomEntry {
-  name: string;
-  type: string;
-  status: string;
-  address?: string;
-  checkIn?: string;
-  checkOut?: string;
+  name: string; type: string; status: string;
+  address?: string; coordinates?: Coordinates; checkIn?: string; checkOut?: string;
 }
-
 interface VenueEntry {
-  name: string;
-  type: string;
-  status: string;
-  address?: string;
-  date?: string;
-  time?: string;
-  endTime?: string;
-  confirmationNumber?: string;
-  website?: string;
-  cost?: string;
+  name: string; type: string; status: string;
+  address?: string; coordinates?: Coordinates; date?: string; time?: string;
+}
+interface ItineraryStop { name: string; type: string; address?: string; coordinates?: Coordinates; }
+interface ItineraryDay { date: string; dayNumber: number; stops: ItineraryStop[]; }
+interface MapTabProps { tripId: string; trip: Trip; }
+
+interface TransportLeg {
+  kind: 'transport'; entry: TransportEntry;
+  fromCoords: Coordinates; toCoords: Coordinates;
+  fromLabel: string; toLabel: string;
+}
+interface GapLeg {
+  kind: 'gap'; fromLabel: string; toLabel: string;
+  fromCoords: Coordinates; toCoords: Coordinates; distanceKm: number;
+}
+type JourneyLeg = TransportLeg | GapLeg;
+
+function haversineKm(a: Coordinates, b: Coordinates): number {
+  const R = 6371, dLat = (b.lat - a.lat) * Math.PI / 180, dLng = (b.lng - a.lng) * Math.PI / 180;
+  const h = Math.sin(dLat/2)**2 + Math.cos(a.lat*Math.PI/180)*Math.cos(b.lat*Math.PI/180)*Math.sin(dLng/2)**2;
+  return R * 2 * Math.asin(Math.sqrt(h));
 }
 
-interface ItineraryStop {
-  _id?: string;
-  name: string;
-  type: string;
-  address?: string;
-  coordinates?: Coordinates;
-  scheduledStart?: string;
-  notes?: string;
+function estimateDriveTime(km: number): string {
+  const speed = km > 30 ? 80 : 40;
+  const mins  = Math.round(km / speed * 60 / 5) * 5;
+  if (mins < 60) return `~${mins} min`;
+  const h = Math.floor(mins / 60), m = mins % 60;
+  return m === 0 ? `~${h}h` : `~${h}h ${m}min`;
 }
 
-interface ItineraryDay {
-  date: string;
-  dayNumber: number;
-  stops: ItineraryStop[];
+// bbox covering Europe + North Africa — hard constraint, no US false positives
+const EUROPE_BBOX = '-25,30,50,75';
+
+function isInEurope(c?: Coordinates): boolean {
+  if (!c) return false;
+  return c.lng >= -25 && c.lng <= 50 && c.lat >= 30 && c.lat <= 75;
 }
 
-interface MapTabProps {
-  tripId: string;
-  trip: Trip;
-}
-
-// ─── Colour helpers ───────────────────────────────────────────────────────────
-
-const TRANSPORT_COLOUR: Record<string, string> = {
-  flight:           '#C9521B',
-  train:            '#0369a1',
-  bus:              '#7c3aed',
-  ferry:            '#0891b2',
-  car:              '#55702C',
-  car_hire:         '#55702C',
-  taxi:             '#b45309',
-  private_transfer: '#b45309',
-  bicycle:          '#55702C',
-};
-
-const STOP_COLOUR: Record<string, string> = {
-  flight:      '#C9521B',
-  hotel:       '#5c35a0',
-  meeting:     '#1D2642',
-  meal:        '#b45309',
-  breakfast:   '#b45309',
-  activity:    '#55702C',
-  sightseeing: '#55702C',
-  transport:   '#0369a1',
-  work:        '#1D2642',
-  other:       '#6b7280',
-};
-
-const VENUE_EMOJI: Record<string, string> = {
-  concert:    '🎵',
-  conference: '🏛️',
-  restaurant: '🍽️',
-  sports:     '🏟️',
-  attraction: '🏛️',
-  business:   '💼',
-  other:      '📍',
-};
-
-const STATUS_IS_CONFIRMED = (s: string) => s === 'confirmed' || s === 'booked';
-
-// ─── Geocode via Mapbox ───────────────────────────────────────────────────────
-
-async function geocode(query: string, token: string): Promise<Coordinates | null> {
+async function geocode(query: string, token: string, proximity?: Coordinates): Promise<Coordinates | null> {
   if (!query?.trim()) return null;
   try {
-    const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?limit=1&access_token=${token}`;
-    const res  = await fetch(url);
+    const prox = proximity ? `&proximity=${proximity.lng},${proximity.lat}` : '';
+    // If proximity is in Europe, hard-constrain results to Europe bbox
+    const bbox = isInEurope(proximity) ? `&bbox=${EUROPE_BBOX}` : '';
+    const res  = await fetch(`https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?limit=1&access_token=${token}${prox}${bbox}`);
     const data = await res.json();
     const [lng, lat] = data?.features?.[0]?.center ?? [];
-    if (lng == null || lat == null) return null;
-    return { lat, lng };
-  } catch {
-    return null;
-  }
+    return lng == null ? null : { lat, lng };
+  } catch { return null; }
 }
 
-// ─── Road routing via Mapbox Directions ───────────────────────────────────────
+async function geocodeTransportLocation(loc: string, token: string, proximity?: Coordinates): Promise<Coordinates | null> {
+  if (!loc?.trim()) return null;
+  const parts = loc.split(' — '), code = parts[0].trim(), city = parts[1]?.trim() ?? '';
+  if (/^[A-Z]{3}$/.test(code) && city) return await geocode(`${city} airport`, token, proximity);
+  return await geocode(city || loc, token, proximity);
+}
 
-const ROAD_PROFILES: Record<string, 'driving' | 'cycling'> = {
-  car:              'driving',
-  car_hire:         'driving',
-  taxi:             'driving',
-  private_transfer: 'driving',
-  bus:              'driving',
-  bicycle:          'cycling',
-};
+function iataCode(loc: string): string { return loc ? loc.split(' — ')[0].trim() : ''; }
+function cityLabel(loc: string): string {
+  if (!loc || !loc.includes(' — ')) return loc;
+  const code = loc.split(' — ')[0].trim(), city = loc.split(' — ')[1].trim();
+  return /^[A-Z]{3}$/.test(code) ? `${city} Airport` : city;
+}
 
-async function fetchDirections(
-  from: Coordinates,
-  to: Coordinates,
-  profile: 'driving' | 'cycling',
-  token: string,
-): Promise<number[][] | null> {
+async function fetchDirections(from: Coordinates, to: Coordinates, token: string): Promise<number[][] | null> {
   try {
-    const url = `https://api.mapbox.com/directions/v5/mapbox/${profile}/${from.lng},${from.lat};${to.lng},${to.lat}?geometries=geojson&overview=full&access_token=${token}`;
-    const res  = await fetch(url);
-    const data = await res.json();
+    const url = `https://api.mapbox.com/directions/v5/mapbox/driving/${from.lng},${from.lat};${to.lng},${to.lat}?geometries=geojson&overview=full&access_token=${token}`;
+    const data = await fetch(url).then(r => r.json());
     return data.routes?.[0]?.geometry?.coordinates ?? null;
-  } catch {
-    return null;
+  } catch { return null; }
+}
+
+function flightArc(from: Coordinates, to: Coordinates, steps = 80): number[][] {
+  return Array.from({ length: steps + 1 }, (_, i) => {
+    const t = i / steps;
+    return [
+      from.lng + (to.lng - from.lng) * t,
+      from.lat + (to.lat - from.lat) * t + Math.sin(Math.PI * t) * 1.5,
+    ];
+  });
+}
+
+async function buildJourneyLegs(
+  transportation: TransportEntry[], accommodation: AccomEntry[], token: string, proximity?: Coordinates,
+): Promise<JourneyLeg[]> {
+  const sorted = [...transportation].sort((a, b) =>
+    new Date(a.departureTime ?? 0).getTime() - new Date(b.departureTime ?? 0).getTime());
+  if (!sorted.length) return [];
+
+  const resolved = await Promise.all(sorted.map(async entry => ({
+    entry,
+    fromCoords: await geocodeTransportLocation(entry.departureLocation ?? '', token, proximity),
+    toCoords:   await geocodeTransportLocation(entry.arrivalLocation   ?? '', token, proximity),
+  })));
+
+  const valid = resolved.filter(l => l.fromCoords && l.toCoords) as { entry: TransportEntry; fromCoords: Coordinates; toCoords: Coordinates; }[];
+  if (!valid.length) return [];
+
+  const hotelCoords = accommodation[0]?.coordinates ?? null;
+  const hotelName   = accommodation[0]?.name ?? 'Hotel';
+  const result: JourneyLeg[] = [];
+  let currentCoords: Coordinates | null = null, currentLabel = '';
+
+  for (let i = 0; i < valid.length; i++) {
+    const { entry, fromCoords, toCoords } = valid[i];
+    const isLast = i === valid.length - 1;
+
+    if (currentCoords && haversineKm(currentCoords, fromCoords) > 2) {
+      result.push({ kind: 'gap', fromLabel: currentLabel, toLabel: entry.departureLocation ?? '',
+        fromCoords: currentCoords, toCoords: fromCoords, distanceKm: haversineKm(currentCoords, fromCoords) });
+    }
+
+    result.push({ kind: 'transport', entry, fromCoords, toCoords,
+      fromLabel: entry.departureLocation ?? '', toLabel: entry.arrivalLocation ?? '' });
+
+    if (!isLast && hotelCoords) {
+      const d = haversineKm(toCoords, hotelCoords);
+      if (d > 2) result.push({ kind: 'gap', fromLabel: entry.arrivalLocation ?? '', toLabel: hotelName,
+        fromCoords: toCoords, toCoords: hotelCoords, distanceKm: d });
+      currentCoords = hotelCoords; currentLabel = hotelName;
+    } else {
+      currentCoords = toCoords; currentLabel = entry.arrivalLocation ?? '';
+    }
   }
+  return result;
 }
 
-// ─── Short address label (first meaningful part before comma) ─────────────────
+const STATUS_IS_CONFIRMED = (s: string) => s === 'confirmed' || s === 'booked';
+function fmtTime(dt?: string) { return dt ? new Date(dt).toLocaleTimeString('en-IE', { hour: '2-digit', minute: '2-digit', hour12: false }) : '—'; }
+function fmtDate(dt?: string) { return dt ? new Date(dt).toLocaleDateString('en-IE', { weekday: 'short', day: 'numeric', month: 'short' }) : ''; }
 
-function shortLocation(addr: string): string {
-  if (!addr) return '';
-  // If it looks like "IATA — City" keep as-is
-  if (addr.includes(' — ')) return addr;
-  // Otherwise take up to first comma
-  return addr.split(',')[0].trim();
+function TIcon({ type, size = 15 }: { type: string; size?: number }) {
+  const sx = { fontSize: size, opacity: 0.55 };
+  if (type === 'flight') return <FlightIcon sx={sx} />;
+  if (type === 'train')  return <TrainIcon sx={sx} />;
+  if (type === 'bus')    return <DirectionsBusIcon sx={sx} />;
+  if (type === 'car' || type === 'car_hire') return <DirectionsCarIcon sx={sx} />;
+  return <EventIcon sx={sx} />;
 }
 
-// ─── Icon helpers ─────────────────────────────────────────────────────────────
-
-function TransportIcon({ type, size = 16 }: { type: string; size?: number }) {
-  const props = { sx: { fontSize: size } };
-  switch (type) {
-    case 'flight':   return <FlightIcon {...props} />;
-    case 'train':    return <TrainIcon {...props} />;
-    case 'bus':      return <DirectionsBusIcon {...props} />;
-    case 'car':
-    case 'car_hire': return <DirectionsCarIcon {...props} />;
-    default:         return <EventIcon {...props} />;
-  }
-}
-
-function StopIcon({ type, size = 14 }: { type: string; size?: number }) {
-  const props = { sx: { fontSize: size } };
-  switch (type) {
-    case 'hotel':              return <HotelIcon {...props} />;
-    case 'meeting':
-    case 'work':               return <WorkIcon {...props} />;
-    case 'meal':
-    case 'breakfast':          return <RestaurantIcon {...props} />;
-    case 'activity':
-    case 'sightseeing':        return <ExploreIcon {...props} />;
-    default:                   return <EventIcon {...props} />;
-  }
-}
-
-// ─── Legend item ──────────────────────────────────────────────────────────────
-
-function LegendItem({ color, label, confirmed }: { color: string; label: string; confirmed?: boolean }) {
+function TransportLegCard({ leg }: { leg: TransportLeg }) {
+  const { entry } = leg;
+  const confirmed = STATUS_IS_CONFIRMED(entry.status);
   return (
-    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-      <Box sx={{
-        width: 10, height: 10, borderRadius: '50%',
-        backgroundColor: confirmed === false ? 'transparent' : color,
-        border: confirmed === false ? `2px dashed ${color}` : 'none',
-        flexShrink: 0,
-      }} />
-      <Typography variant="caption" sx={{ fontSize: '0.72rem', color: 'text.secondary' }}>
-        {label}
+    <Box sx={{ borderLeft: `3px solid ${confirmed ? D.green : D.terra}`, backgroundColor: D.paper, borderRadius: '0 8px 8px 0', px: 2.5, py: 2 }}>
+      <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1.5, mb: 0.75 }}>
+        <Typography sx={{ fontFamily: D.display, fontSize: { xs: '1.75rem', sm: '2rem' }, color: D.navy, lineHeight: 1, letterSpacing: '-0.03em' }}>
+          {fmtTime(entry.departureTime)}
+        </Typography>
+        <Typography sx={{ color: D.muted, fontSize: '1rem', fontWeight: 700, lineHeight: 1 }}>→</Typography>
+        <Typography sx={{ fontFamily: D.display, fontSize: { xs: '1.75rem', sm: '2rem' }, color: D.navy, lineHeight: 1, letterSpacing: '-0.03em' }}>
+          {fmtTime(entry.arrivalTime)}
+        </Typography>
+        <Box sx={{ ml: 'auto', display: 'flex', alignItems: 'center', gap: 1, flexShrink: 0 }}>
+          <TIcon type={entry.type} />
+          <Box sx={{ px: 1, py: 0.3, borderRadius: 0.75, backgroundColor: confirmed ? 'rgba(107,124,92,0.12)' : 'rgba(196,113,74,0.10)', fontSize: '0.68rem', fontWeight: 800, letterSpacing: '0.07em', textTransform: 'uppercase', color: confirmed ? D.green : D.terra }}>
+            {confirmed ? 'Booked' : entry.status}
+          </Box>
+        </Box>
+      </Box>
+      <Typography sx={{ fontFamily: D.display, fontSize: { xs: '1.2rem', sm: '1.4rem' }, color: D.navy, lineHeight: 1, letterSpacing: '-0.02em', mb: 1 }}>
+        {iataCode(leg.fromLabel)} → {iataCode(leg.toLabel)}
       </Typography>
-      {confirmed !== undefined && (
-        confirmed
-          ? <CheckCircleIcon sx={{ fontSize: 12, color: 'success.main', ml: 'auto' }} />
-          : <RadioButtonUncheckedIcon sx={{ fontSize: 12, color: 'text.disabled', ml: 'auto' }} />
-      )}
+      <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+        {entry.details?.airline && <Typography sx={{ fontSize: '0.8rem', color: D.muted }}>{entry.details.airline}</Typography>}
+        {entry.details?.flightNumber && <Typography sx={{ fontSize: '0.8rem', color: D.muted, fontWeight: 700 }}>{entry.details.flightNumber}</Typography>}
+        {entry.details?.seat && <Typography sx={{ fontSize: '0.8rem', color: D.muted }}>Seat {entry.details.seat}</Typography>}
+        {entry.confirmationNumber && <Typography sx={{ fontSize: '0.78rem', color: D.muted, fontFamily: 'monospace', letterSpacing: '0.1em' }}>{entry.confirmationNumber}</Typography>}
+      </Box>
+      <Typography sx={{ fontSize: '0.73rem', color: D.muted, mt: 0.5 }}>{fmtDate(entry.departureTime)}</Typography>
     </Box>
   );
 }
 
-// ─── Main component ───────────────────────────────────────────────────────────
+function GapLegCard({ leg }: { leg: GapLeg }) {
+  return (
+    <Box sx={{ borderLeft: `3px dashed ${D.terra}`, backgroundColor: 'rgba(196,113,74,0.05)', borderRadius: '0 8px 8px 0', px: 2.5, py: 2 }}>
+      <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1.5, mb: 0.75 }}>
+        <Typography sx={{ fontFamily: D.display, fontSize: { xs: '1.75rem', sm: '2rem' }, color: D.terra, lineHeight: 1, letterSpacing: '-0.03em' }}>?</Typography>
+        <Box sx={{ ml: 'auto', flexShrink: 0 }}>
+          <Box sx={{ px: 1, py: 0.3, borderRadius: 0.75, backgroundColor: 'rgba(196,113,74,0.12)', fontSize: '0.68rem', fontWeight: 800, letterSpacing: '0.07em', textTransform: 'uppercase', color: D.terra }}>
+            Not booked
+          </Box>
+        </Box>
+      </Box>
+      <Typography sx={{ fontFamily: D.display, fontSize: { xs: '1rem', sm: '1.15rem' }, color: D.navy, lineHeight: 1.2, letterSpacing: '-0.02em', mb: 0.75 }}>
+        {cityLabel(leg.fromLabel)} → {cityLabel(leg.toLabel)}
+      </Typography>
+      <Typography sx={{ fontSize: '0.82rem', color: D.muted, fontStyle: 'italic' }}>
+        no transfer booked · {estimateDriveTime(leg.distanceKm)} · {Math.round(leg.distanceKm)} km
+      </Typography>
+    </Box>
+  );
+}
+
+type Layer = 'all' | 'transport' | 'stays' | 'venues' | 'itinerary';
+const LAYERS: { value: Layer; label: string }[] = [
+  { value: 'all', label: 'All' }, { value: 'transport', label: 'Route' },
+  { value: 'stays', label: 'Stays' }, { value: 'venues', label: 'Venues' },
+  { value: 'itinerary', label: 'Itinerary' },
+];
+
+const STOP_COLOUR: Record<string, string> = {
+  flight: '#C9521B', hotel: '#5c35a0', meeting: '#1D2642', meal: '#b45309', breakfast: '#b45309',
+  activity: '#55702C', sightseeing: '#55702C', transport: '#0369a1', work: '#1D2642', other: '#6b7280',
+};
+const VENUE_EMOJI: Record<string, string> = {
+  concert: '🎵', conference: '🏛️', restaurant: '🍽️', sports: '🏟️', attraction: '🏛️', business: '💼', other: '📍',
+};
 
 export default function MapTab({ tripId, trip }: MapTabProps) {
-  const mapContainer   = useRef<HTMLDivElement>(null);
-  const mapRef         = useRef<any>(null);
-  const mapboxglRef    = useRef<any>(null);
-  const markersRef     = useRef<any[]>([]);
-  const resolvedOrigin = useRef<Coordinates | null>(null);
-  const resolvedDest   = useRef<Coordinates | null>(null);
+  const mapContainer = useRef<HTMLDivElement>(null);
+  const mapRef       = useRef<any>(null);
+  const mapboxglRef  = useRef<any>(null);
+  const markersRef   = useRef<any[]>([]);
 
-  const [loading,    setLoading]    = useState(true);
-  const [mapReady,   setMapReady]   = useState(false);
-  const [logistics,  setLogistics]  = useState<any>(null);
-  const [itinerary,  setItinerary]  = useState<ItineraryDay[]>([]);
-  const [layer,      setLayer]      = useState<'all' | 'transport' | 'stays' | 'venues' | 'itinerary'>('all');
-  const [tokenError, setTokenError] = useState(false);
+  const [loading,     setLoading]     = useState(true);
+  const [mapReady,    setMapReady]    = useState(false);
+  const [logistics,   setLogistics]   = useState<any>(null);
+  const [itinerary,   setItinerary]   = useState<ItineraryDay[]>([]);
+  const [layer,       setLayer]       = useState<Layer>('all');
+  const [journeyLegs, setJourneyLegs] = useState<JourneyLeg[]>([]);
+  const [tokenError,  setTokenError]  = useState(false);
 
   const token = process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN ?? '';
 
-  // ── Fetch data ───────────────────────────────────────────────────────────────
   useEffect(() => {
     Promise.all([
       fetch(`/api/trips/${tripId}/logistics`).then(r => r.json()),
       fetch(`/api/trips/${tripId}/itinerary`).then(r => r.json()),
-    ]).then(([l, it]) => {
-      setLogistics(l.logistics);
-      setItinerary(it.days ?? []);
-      setLoading(false);
-    }).catch(() => setLoading(false));
+    ]).then(([l, it]) => { setLogistics(l.logistics); setItinerary(it.days ?? []); setLoading(false); })
+      .catch(() => setLoading(false));
   }, [tripId]);
 
-  // ── Init Mapbox ──────────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!logistics || !token) return;
+    void (async () => {
+      // Resolve a real proximity anchor — trip.destination.coordinates is often null
+      let proximity: Coordinates | undefined = trip.destination?.coordinates ?? undefined;
+      if (!proximity && trip.destination?.city) {
+        proximity = await geocode(`${trip.destination.city}, ${trip.destination.country}`, token) ?? undefined;
+      }
+      if (!proximity && trip.origin?.city) {
+        proximity = await geocode(`${trip.origin.city}, ${trip.origin.country}`, token) ?? undefined;
+      }
+      const legs = await buildJourneyLegs(logistics.transportation ?? [], logistics.accommodation ?? [], token, proximity);
+      setJourneyLegs(legs);
+    })();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [logistics, token]);
+
   useEffect(() => {
     if (!mapContainer.current || mapRef.current) return;
-
-    if (!token) {
-      setTokenError(true);
-      setMapReady(true);
-      return;
-    }
+    if (!token) { setTokenError(true); setMapReady(true); return; }
 
     import('mapbox-gl').then(async ({ default: mapboxgl }) => {
       mapboxglRef.current  = mapboxgl;
@@ -287,81 +305,38 @@ export default function MapTab({ tripId, trip }: MapTabProps) {
 
       let originCoords = trip.origin?.coordinates;
       let destCoords   = trip.destination?.coordinates;
+      if (!originCoords && trip.origin?.city) originCoords = await geocode(`${trip.origin.city}, ${trip.origin.country}`, token) ?? undefined;
+      if (!destCoords && trip.destination?.city) destCoords = await geocode(`${trip.destination.city}, ${trip.destination.country}`, token) ?? undefined;
 
-      if (!originCoords && trip.origin?.city) {
-        originCoords = await geocode(`${trip.origin.city}, ${trip.origin.country}`, token) ?? undefined;
-      }
-      if (!destCoords && trip.destination?.city) {
-        destCoords = await geocode(`${trip.destination.city}, ${trip.destination.country}`, token) ?? undefined;
-      }
-
-      resolvedOrigin.current = originCoords ?? null;
-      resolvedDest.current   = destCoords   ?? null;
-
-      const centre: [number, number] = (() => {
-        if (originCoords && destCoords) return [
-          (originCoords.lng + destCoords.lng) / 2,
-          (originCoords.lat + destCoords.lat) / 2,
-        ];
-        if (destCoords)   return [destCoords.lng,   destCoords.lat];
-        if (originCoords) return [originCoords.lng, originCoords.lat];
-        return [10, 50];
-      })();
+      const centre: [number, number] = originCoords && destCoords
+        ? [(originCoords.lng + destCoords.lng) / 2, (originCoords.lat + destCoords.lat) / 2]
+        : destCoords ? [destCoords.lng, destCoords.lat] : originCoords ? [originCoords.lng, originCoords.lat] : [10, 50];
 
       if (!mapContainer.current) return;
-
-      const map = new mapboxgl.Map({
-        container: mapContainer.current,
-        style: 'mapbox://styles/mapbox/light-v11',
-        center: centre,
-        zoom: originCoords && destCoords ? 4 : 6,
-        attributionControl: false,
-      });
-
+      const map = new mapboxgl.Map({ container: mapContainer.current, style: 'mapbox://styles/mapbox/light-v11', center: centre, zoom: 4, attributionControl: false });
       map.addControl(new mapboxgl.AttributionControl({ compact: true }), 'bottom-right');
       map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), 'top-right');
-
       map.on('load', () => { mapRef.current = map; setMapReady(true); });
-      map.on('error', e => console.error('[MapTab] Mapbox error:', e));
+      map.on('error', e => console.error('[MapTab]', e));
+      const t = setTimeout(() => { if (!mapRef.current) { mapRef.current = map; setMapReady(true); } }, 10000);
+      map.once('load', () => clearTimeout(t));
+    }).catch(() => setMapReady(true));
 
-      const timeout = setTimeout(() => {
-        if (!mapRef.current) { mapRef.current = map; setMapReady(true); }
-      }, 10000);
-      map.once('load', () => clearTimeout(timeout));
-    }).catch(err => {
-      console.error('[MapTab] Failed to load mapbox-gl:', err);
-      setMapReady(true);
-    });
-
-    return () => {
-      if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; }
-    };
+    return () => { if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; } };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
-  // ── Draw / update layers ──────────────────────────────────────────────────────
+  const clearMarkers = useCallback(() => { markersRef.current.forEach(m => m.remove()); markersRef.current = []; }, []);
+
   useEffect(() => {
     if (!mapReady || !mapRef.current || loading) return;
-    drawLayers();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mapReady, loading, logistics, itinerary, layer]);
-
-  const clearMarkers = useCallback(() => {
-    markersRef.current.forEach(m => m.remove());
-    markersRef.current = [];
-  }, []);
-
-  const drawLayers = useCallback(async () => {
-    const map      = mapRef.current;
-    const mapboxgl = mapboxglRef.current;
-    if (!map || !mapboxgl) return;
+    const map = mapRef.current, mapboxgl = mapboxglRef.current;
+    if (!mapboxgl) return;
+    void (async () => {
 
     clearMarkers();
-
-    ['route-line', 'route-line-border'].forEach(id => {
-      if (map.getLayer(id)) map.removeLayer(id);
-    });
-    if (map.getSource('route')) map.removeSource('route');
+    (map.getStyle()?.layers ?? []).forEach((l: any) => { if (l.id.startsWith('leg-')) try { map.removeLayer(l.id); } catch {} });
+    Object.keys(map.getStyle()?.sources ?? {}).forEach(id => { if (id.startsWith('leg-src-')) try { map.removeSource(id); } catch {} });
 
     const bounds = new mapboxgl.LngLatBounds();
     const showTransport = layer === 'all' || layer === 'transport';
@@ -369,490 +344,160 @@ export default function MapTab({ tripId, trip }: MapTabProps) {
     const showVenues    = layer === 'all' || layer === 'venues';
     const showItinerary = layer === 'all' || layer === 'itinerary';
 
-    // ── Route nodes ──────────────────────────────────────────────────────────
-    type RouteNode = { coords: Coordinates; city: string };
-    const nodes: RouteNode[] = [];
+    if (showTransport) {
+      // Seen coords for marker deduplication (key = rounded lng,lat)
+      const seenMarkers = new Set<string>();
+      const markerKey = (c: Coordinates) => `${c.lng.toFixed(2)},${c.lat.toFixed(2)}`;
 
-    if (trip.origin?.coordinates || resolvedOrigin.current) {
-      nodes.push({
-        coords: trip.origin?.coordinates ?? resolvedOrigin.current!,
-        city: trip.origin.city,
+      for (let i = 0; i < journeyLegs.length; i++) {
+        const leg = journeyLegs[i];
+        const isGap    = leg.kind === 'gap';
+        const confirmed = !isGap && STATUS_IS_CONFIRMED(leg.entry.status);
+        const color    = isGap ? D.terra : (confirmed ? D.green : D.terra);
+
+        bounds.extend([leg.fromCoords.lng, leg.fromCoords.lat]);
+        bounds.extend([leg.toCoords.lng,   leg.toCoords.lat]);
+
+        // Geometry: flight arc for flights, road route for gaps, straight for others
+        let coordinates: number[][];
+        if (!isGap && leg.entry.type === 'flight') {
+          coordinates = flightArc(leg.fromCoords, leg.toCoords);
+        } else if (isGap) {
+          const road = await fetchDirections(leg.fromCoords, leg.toCoords, token);
+          coordinates = road ?? [[leg.fromCoords.lng, leg.fromCoords.lat], [leg.toCoords.lng, leg.toCoords.lat]];
+        } else {
+          coordinates = [[leg.fromCoords.lng, leg.fromCoords.lat], [leg.toCoords.lng, leg.toCoords.lat]];
+        }
+
+        try {
+          map.addSource(`leg-src-${i}`, { type: 'geojson', data: { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates } } });
+          map.addLayer({ id: `leg-${i}`, type: 'line', source: `leg-src-${i}`,
+            paint: { 'line-color': color, 'line-width': isGap ? 1.5 : 2.5, 'line-opacity': isGap ? 0.6 : 0.9, 'line-dasharray': isGap ? [3, 4] : [1] } });
+        } catch {}
+
+        // Transport endpoint markers — deduplicated
+        if (!isGap) {
+          for (const [c, label, isFirst] of [
+            [leg.fromCoords, iataCode(leg.fromLabel), i === 0],
+            [leg.toCoords,   iataCode(leg.toLabel),   false  ],
+          ] as [Coordinates, string, boolean][]) {
+            const key = markerKey(c);
+            if (seenMarkers.has(key)) continue;
+            seenMarkers.add(key);
+
+            const pc = isFirst ? D.navy : D.terra;
+            const el = document.createElement('div');
+            el.style.cssText = `width:14px;height:14px;border-radius:50%;background:${pc};border:3px solid white;box-shadow:0 2px 8px rgba(0,0,0,0.35);cursor:default;position:relative;`;
+            const lbl = document.createElement('div');
+            lbl.style.cssText = `position:absolute;bottom:18px;left:50%;transform:translateX(-50%);background:${pc};color:white;font-family:"Archivo Black",sans-serif;font-size:11px;font-weight:900;letter-spacing:0.03em;padding:3px 8px;border-radius:10px;white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,0.2);pointer-events:none;`;
+            lbl.textContent = label;
+            el.appendChild(lbl);
+            markersRef.current.push(new mapboxgl.Marker({ element: el, anchor: 'center' }).setLngLat([c.lng, c.lat]).addTo(map));
+          }
+        }
+      }
+    }
+
+    if (showStays) {
+      (logistics?.accommodation ?? []).forEach((a: AccomEntry) => {
+        if (!a.coordinates?.lat) return;
+        const { lat, lng } = a.coordinates; bounds.extend([lng, lat]);
+        const confirmed = STATUS_IS_CONFIRMED(a.status);
+        const el = document.createElement('div');
+        el.style.cssText = `width:32px;height:32px;border-radius:8px;background:${confirmed ? '#5c35a0' : 'white'};border:2px solid #5c35a0;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,0.25);cursor:pointer;font-size:16px;`;
+        el.textContent = '🏨';
+        const popup = new mapboxgl.Popup({ offset: 20, closeButton: false })
+          .setHTML(`<div style="font-family:system-ui;padding:4px 2px;"><div style="font-weight:800;font-size:13px;color:#1D2642;">${a.name}</div>${a.address ? `<div style="font-size:10px;color:#9ca3af;margin-top:3px;">${a.address}</div>` : ''}${a.checkIn ? `<div style="font-size:10px;color:#6b7280;margin-top:3px;">Check-in: ${new Date(a.checkIn).toLocaleDateString('en-IE',{day:'numeric',month:'short'})}</div>` : ''}</div>`);
+        markersRef.current.push(new mapboxgl.Marker({ element: el, anchor: 'center' }).setLngLat([lng, lat]).setPopup(popup).addTo(map));
       });
     }
 
-    const extra = (trip.additionalDestinations ?? []).slice().sort((a, b) =>
-      (a.arrivalDate ?? '') < (b.arrivalDate ?? '') ? -1 : 1
-    );
-    for (const d of extra) {
-      const c = d.coordinates ?? await geocode(`${d.city}, ${d.country}`, token);
-      if (c) nodes.push({ coords: c, city: d.city });
+    if (showVenues) {
+      (logistics?.venues ?? []).forEach((v: VenueEntry) => {
+        if (!v.coordinates?.lat) return;
+        const { lat, lng } = v.coordinates; bounds.extend([lng, lat]);
+        const confirmed = STATUS_IS_CONFIRMED(v.status);
+        const emoji = VENUE_EMOJI[v.type] ?? '📍';
+        const el = document.createElement('div');
+        el.style.cssText = `width:32px;height:32px;border-radius:8px;background:${confirmed ? D.navy : 'white'};border:2px solid ${D.navy};display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,0.25);cursor:pointer;font-size:16px;`;
+        el.textContent = emoji;
+        const popup = new mapboxgl.Popup({ offset: 20, closeButton: false })
+          .setHTML(`<div style="font-family:system-ui;padding:4px 2px;"><div style="font-weight:800;font-size:13px;color:#1D2642;">${v.name}</div><div style="font-size:11px;color:#6b7280;margin-top:2px;text-transform:capitalize;">${v.type}</div>${v.address ? `<div style="font-size:10px;color:#9ca3af;margin-top:2px;">${v.address}</div>` : ''}</div>`);
+        markersRef.current.push(new mapboxgl.Marker({ element: el, anchor: 'center' }).setLngLat([lng, lat]).setPopup(popup).addTo(map));
+      });
     }
 
-    if (trip.destination?.coordinates || resolvedDest.current) {
-      nodes.push({
-        coords: trip.destination?.coordinates ?? resolvedDest.current!,
-        city: trip.destination.city,
+    if (showItinerary) {
+      itinerary.flatMap(d => d.stops).forEach(stop => {
+        if (!stop.coordinates?.lat) return;
+        const { lat, lng } = stop.coordinates; bounds.extend([lng, lat]);
+        const color = STOP_COLOUR[stop.type] ?? '#6b7280';
+        const el = document.createElement('div');
+        el.style.cssText = `width:12px;height:12px;border-radius:50%;background:${color};border:2.5px solid white;box-shadow:0 1px 4px rgba(0,0,0,0.3);cursor:pointer;`;
+        const popup = new mapboxgl.Popup({ offset: 14, closeButton: false })
+          .setHTML(`<div style="font-family:system-ui;padding:4px 2px;"><div style="font-weight:700;font-size:12px;color:#1D2642;">${stop.name}</div><div style="font-size:10px;color:#6b7280;text-transform:capitalize;">${stop.type}</div></div>`);
+        markersRef.current.push(new mapboxgl.Marker({ element: el, anchor: 'center' }).setLngLat([lng, lat]).setPopup(popup).addTo(map));
       });
-    } else {
-      const c = await geocode(`${trip.destination?.city}, ${trip.destination?.country}`, token);
-      if (c) nodes.push({ coords: c, city: trip.destination?.city ?? '' });
     }
 
-    const transport: TransportEntry[] = logistics?.transportation ?? [];
-    const mainTransportConfirmed = transport.length > 0 && transport.some(t => STATUS_IS_CONFIRMED(t.status));
+    if (!bounds.isEmpty()) map.fitBounds(bounds, { padding: { top: 60, bottom: 60, left: 60, right: 60 }, maxZoom: 14, duration: 800 });
+    })();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mapReady, loading, logistics, itinerary, layer, journeyLegs, clearMarkers]);
 
-    // ── Route lines ──────────────────────────────────────────────────────────
-    if (showTransport && nodes.length >= 2) {
-      // Try road routing if the primary transport mode supports it
-      const primaryTransport = transport[0];
-      const roadProfile = primaryTransport ? ROAD_PROFILES[primaryTransport.type] : undefined;
-
-      let routeCoordinates: number[][] | null = null;
-
-      if (roadProfile && nodes.length === 2) {
-        routeCoordinates = await fetchDirections(nodes[0].coords, nodes[1].coords, roadProfile, token);
-      }
-
-      // Fall back to straight line if no road route
-      if (!routeCoordinates) {
-        routeCoordinates = nodes.map(n => [n.coords.lng, n.coords.lat]);
-      }
-
-      map.addSource('route', {
-        type: 'geojson',
-        data: { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: routeCoordinates } },
-      });
-      map.addLayer({
-        id: 'route-line', type: 'line', source: 'route',
-        paint: {
-          'line-color': mainTransportConfirmed ? '#55702C' : '#C9521B',
-          'line-width': mainTransportConfirmed ? 2.5 : 2,
-          'line-opacity': 0.9,
-          'line-dasharray': mainTransportConfirmed ? [1] : [4, 3],
-        },
-      });
-        map.addLayer({
-          id: 'route-line-border', type: 'line', source: 'route',
-          paint: {
-            'line-color': mainTransportConfirmed ? '#55702C' : '#C9521B',
-            'line-width': 6, 'line-opacity': 0.15, 'line-blur': 3,
-          },
-        }, 'route-line');
-        nodes.forEach(n => bounds.extend([n.coords.lng, n.coords.lat]));
-      }
-
-      // ── City markers ─────────────────────────────────────────────────────────
-      if (showTransport) {
-        nodes.forEach((node, i) => {
-          const isOrigin = i === 0;
-          const isDest   = i === nodes.length - 1;
-          const color    = isOrigin ? '#1D2642' : isDest ? '#C9521B' : '#55702C';
-
-          const el = document.createElement('div');
-          el.style.cssText = `
-            width: 14px; height: 14px; border-radius: 50%;
-            background: ${color}; border: 3px solid white;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.35); cursor: default; position: relative;
-          `;
-          const label = document.createElement('div');
-          label.style.cssText = `
-            position: absolute; bottom: 18px; left: 50%; transform: translateX(-50%);
-            background: ${color}; color: white; font-size: 10px; font-weight: 700;
-            padding: 2px 7px; border-radius: 10px; white-space: nowrap;
-            letter-spacing: 0.3px; box-shadow: 0 2px 6px rgba(0,0,0,0.2); pointer-events: none;
-          `;
-          label.textContent = node.city;
-          el.appendChild(label);
-
-          const marker = new mapboxgl.Marker({ element: el, anchor: 'center' })
-            .setLngLat([node.coords.lng, node.coords.lat])
-            .addTo(map);
-          markersRef.current.push(marker);
-        });
-      }
-
-      // ── Accommodation markers ─────────────────────────────────────────────────
-      if (showStays && logistics?.accommodation?.length > 0) {
-        for (const accom of logistics.accommodation as AccomEntry[]) {
-          let coords: Coordinates | null = null;
-          if (accom.address) coords = await geocode(accom.address, token);
-          if (!coords && accom.name) coords = await geocode(`${accom.name} ${trip.destination?.city ?? ''}`, token);
-          if (!coords) continue;
-
-          bounds.extend([coords.lng, coords.lat]);
-          const confirmed = STATUS_IS_CONFIRMED(accom.status);
-
-          const el = document.createElement('div');
-          el.style.cssText = `
-            width: 28px; height: 28px; border-radius: 8px;
-            background: ${confirmed ? '#5c35a0' : 'white'};
-            border: 2px solid #5c35a0;
-            display: flex; align-items: center; justify-content: center;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.25); cursor: pointer; font-size: 14px;
-          `;
-          el.textContent = '🏨';
-
-          const popup = new mapboxgl.Popup({ offset: 20, closeButton: false, className: 'tabiji-popup' })
-            .setHTML(`
-              <div style="font-family:system-ui;padding:4px 2px;">
-                <div style="font-weight:700;font-size:13px;color:#1D2642;">${accom.name}</div>
-                <div style="font-size:11px;color:#6b7280;margin-top:2px;">${accom.type ?? 'Accommodation'}</div>
-                <div style="margin-top:6px;display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:700;
-                  background:${confirmed ? '#dcfce7' : '#fef3c7'};color:${confirmed ? '#166534' : '#92400e'};">
-                  ${accom.status?.replace('_', ' ') ?? 'Unknown'}
-                </div>
-                ${accom.checkIn ? `<div style="font-size:10px;color:#6b7280;margin-top:4px;">Check-in: ${new Date(accom.checkIn).toLocaleDateString('en-IE',{day:'numeric',month:'short'})}</div>` : ''}
-              </div>
-            `);
-
-          const marker = new mapboxgl.Marker({ element: el, anchor: 'center' })
-            .setLngLat([coords.lng, coords.lat])
-            .setPopup(popup)
-            .addTo(map);
-          markersRef.current.push(marker);
-        }
-      }
-
-      // ── Venue markers ─────────────────────────────────────────────────────────
-      if (showVenues && logistics?.venues?.length > 0) {
-        for (const venue of logistics.venues as VenueEntry[]) {
-          let coords: Coordinates | null = null;
-          if (venue.address) coords = await geocode(venue.address, token);
-          if (!coords && venue.name) coords = await geocode(`${venue.name} ${trip.destination?.city ?? ''}`, token);
-          if (!coords) continue;
-
-          bounds.extend([coords.lng, coords.lat]);
-          const confirmed = STATUS_IS_CONFIRMED(venue.status);
-          const emoji     = VENUE_EMOJI[venue.type] ?? '📍';
-
-          const el = document.createElement('div');
-          el.style.cssText = `
-            width: 30px; height: 30px; border-radius: 8px;
-            background: ${confirmed ? '#1D2642' : 'white'};
-            border: 2px solid #1D2642;
-            display: flex; align-items: center; justify-content: center;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.25); cursor: pointer; font-size: 15px;
-          `;
-          el.textContent = emoji;
-
-          const dateStr = venue.date
-            ? new Date(venue.date).toLocaleDateString('en-IE', { day: 'numeric', month: 'short', year: 'numeric' })
-            : '';
-
-          const popup = new mapboxgl.Popup({ offset: 20, closeButton: false, className: 'tabiji-popup' })
-            .setHTML(`
-              <div style="font-family:system-ui;padding:4px 2px;">
-                <div style="font-weight:700;font-size:13px;color:#1D2642;">${venue.name}</div>
-                <div style="font-size:11px;color:#6b7280;margin-top:2px;text-transform:capitalize;">${venue.type?.replace('_', ' ')}</div>
-                ${dateStr ? `<div style="font-size:10px;color:#6b7280;margin-top:3px;">📅 ${dateStr}${venue.time ? ` · ${venue.time}` : ''}</div>` : ''}
-                ${venue.address ? `<div style="font-size:10px;color:#9ca3af;margin-top:2px;">${venue.address}</div>` : ''}
-                <div style="margin-top:6px;display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:700;
-                  background:${confirmed ? '#dcfce7' : '#fef3c7'};color:${confirmed ? '#166534' : '#92400e'};">
-                  ${venue.status?.replace('_', ' ') ?? 'Unknown'}
-                </div>
-                ${venue.website ? `<div style="margin-top:6px;"><a href="${venue.website}" target="_blank" style="font-size:10px;color:#1D2642;font-weight:700;">Visit website ↗</a></div>` : ''}
-              </div>
-            `);
-
-          const marker = new mapboxgl.Marker({ element: el, anchor: 'center' })
-            .setLngLat([coords.lng, coords.lat])
-            .setPopup(popup)
-            .addTo(map);
-          markersRef.current.push(marker);
-        }
-      }
-
-      // ── Itinerary stop markers ────────────────────────────────────────────────
-      if (showItinerary) {
-        const allStops = itinerary.flatMap(d => d.stops);
-        for (const stop of allStops) {
-          if (!stop.coordinates?.lat) continue;
-          const { lat, lng } = stop.coordinates;
-          bounds.extend([lng, lat]);
-          const color = STOP_COLOUR[stop.type] ?? STOP_COLOUR.other;
-
-          const el = document.createElement('div');
-          el.style.cssText = `
-            width: 10px; height: 10px; border-radius: 50%;
-            background: ${color}; border: 2px solid white;
-            box-shadow: 0 1px 4px rgba(0,0,0,0.3); cursor: pointer;
-          `;
-
-          const popup = new mapboxgl.Popup({ offset: 14, closeButton: false, className: 'tabiji-popup' })
-            .setHTML(`
-              <div style="font-family:system-ui;padding:4px 2px;">
-                <div style="font-weight:700;font-size:12px;color:#1D2642;">${stop.name}</div>
-                <div style="font-size:10px;color:#6b7280;text-transform:capitalize;margin-top:1px;">${stop.type}</div>
-                ${stop.address ? `<div style="font-size:10px;color:#9ca3af;margin-top:3px;">${stop.address}</div>` : ''}
-              </div>
-            `);
-
-          const marker = new mapboxgl.Marker({ element: el, anchor: 'center' })
-            .setLngLat([lng, lat])
-            .setPopup(popup)
-            .addTo(map);
-          markersRef.current.push(marker);
-        }
-      }
-
-      // ── Fit bounds ───────────────────────────────────────────────────────────
-      if (!bounds.isEmpty()) {
-        map.fitBounds(bounds, {
-          padding: { top: 60, bottom: 60, left: 60, right: 60 },
-          maxZoom: 14,
-          duration: 800,
-        });
-      }
-  }, [mapReady, loading, logistics, itinerary, layer, trip, token, clearMarkers]);
-
-  // ── Derived data ──────────────────────────────────────────────────────────────
-  const transport       = (logistics?.transportation ?? []).filter((t: any) =>
-    ['flight','train','bus','ferry','car','car_hire','taxi','private_transfer','bicycle'].includes(t.type)
-  );
-  const accommodation   = logistics?.accommodation ?? [];
-  const venues          = logistics?.venues        ?? [];
-  const stopsWithCoords = itinerary.flatMap(d => d.stops).filter(s => s.coordinates?.lat);
+  const gapCount = journeyLegs.filter(l => l.kind === 'gap').length;
 
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
 
-      {/* ── Map container ── */}
-      <Paper sx={{ overflow: 'hidden', borderRadius: 2, position: 'relative' }}>
-
-        {/* Layer filter */}
-        <Box sx={{
-          position: 'absolute', top: 12, left: 12, zIndex: 10,
-          backgroundColor: 'rgba(255,255,255,0.95)',
-          borderRadius: 1.5, boxShadow: '0 2px 8px rgba(0,0,0,0.12)',
-          backdropFilter: 'blur(4px)',
-        }}>
-          <ToggleButtonGroup
-            value={layer}
-            exclusive
-            onChange={(_, v) => { if (v) setLayer(v); }}
-            size="small"
-            sx={{
-              '& .MuiToggleButton-root': {
-                px: { xs: 1, sm: 1.5 },
-                py: 0.75,
-                fontSize: { xs: '0.65rem', sm: '0.72rem' },
-                fontWeight: 700,
-                textTransform: 'none',
-                border: 'none',
-                color: 'text.secondary',
-                '&.Mui-selected': { backgroundColor: alpha('#55702C', 0.12), color: '#55702C' },
-              },
-            }}
-          >
-            <ToggleButton value="all">All</ToggleButton>
-            <ToggleButton value="transport">Route</ToggleButton>
-            <ToggleButton value="stays">Stays</ToggleButton>
-            <ToggleButton value="venues">Venues</ToggleButton>
-            <ToggleButton value="itinerary">Itinerary</ToggleButton>
-          </ToggleButtonGroup>
+      <Box sx={{ position: 'relative', borderRadius: 2, overflow: 'hidden' }}>
+        <Box sx={{ position: 'absolute', top: 12, left: 12, zIndex: 10, display: 'flex', gap: 0.5, backgroundColor: 'rgba(253,250,245,0.95)', backdropFilter: 'blur(4px)', borderRadius: 1.5, p: 0.5, boxShadow: '0 2px 8px rgba(0,0,0,0.12)' }}>
+          {LAYERS.map(l => (
+            <Box key={l.value} component="button" onClick={() => setLayer(l.value)} sx={{ background: layer === l.value ? D.navy : 'transparent', color: layer === l.value ? 'white' : D.muted, border: 'none', borderRadius: 1, px: { xs: 1, sm: 1.5 }, py: 0.6, fontSize: '0.72rem', fontWeight: 800, fontFamily: D.body, textTransform: 'none', cursor: 'pointer', whiteSpace: 'nowrap', letterSpacing: '0.02em', transition: 'background 0.15s, color 0.15s' }}>
+              {l.label}
+            </Box>
+          ))}
         </Box>
 
-        {/* Map */}
-        <Box ref={mapContainer} sx={{ width: '100%', height: { xs: 320, sm: 420, md: 500 }, backgroundColor: '#f0ede8' }} />
+        <Box ref={mapContainer} sx={{ width: '100%', height: { xs: 300, sm: 400, md: 480 }, backgroundColor: '#f0ede8' }} />
 
-        {/* Loading overlay */}
         {(loading || !mapReady) && !tokenError && (
-          <Box sx={{
-            position: 'absolute', inset: 0,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            backgroundColor: alpha('#f0ede8', 0.85),
-          }}>
-            <Box sx={{ textAlign: 'center' }}>
-              <CircularProgress size={32} sx={{ color: '#55702C' }} />
-              <Typography variant="caption" sx={{ display: 'block', mt: 1.5, color: 'text.secondary', fontSize: '0.72rem' }}>
-                Loading map…
-              </Typography>
-            </Box>
+          <Box sx={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(245,240,232,0.85)' }}>
+            <CircularProgress size={32} sx={{ color: D.green }} />
           </Box>
         )}
-
-        {/* Token error overlay */}
         {tokenError && (
-          <Box sx={{
-            position: 'absolute', inset: 0,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            backgroundColor: alpha('#f0ede8', 0.95),
-          }}>
+          <Box sx={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(245,240,232,0.95)' }}>
             <Box sx={{ textAlign: 'center', px: 3 }}>
-              <MapIcon sx={{ fontSize: 40, color: 'text.disabled', mb: 1 }} />
-              <Typography variant="body2" fontWeight={700} color="text.secondary">Map unavailable</Typography>
-              <Typography variant="caption" color="text.disabled" sx={{ display: 'block', mt: 0.5 }}>
-                NEXT_PUBLIC_MAPBOX_TOKEN is not set in .env.local
-              </Typography>
+              <MapIcon sx={{ fontSize: 40, color: D.muted, mb: 1 }} />
+              <Typography sx={{ fontWeight: 700, fontSize: '0.95rem', color: D.muted }}>Map unavailable</Typography>
             </Box>
           </Box>
         )}
-      </Paper>
+      </Box>
 
-      {/* ── Journey Overview strip ── */}
-      <Paper sx={{ p: { xs: 2, sm: 2.5 }, backgroundColor: 'background.paper' }}>
-        <Typography variant="subtitle2" fontWeight={800} sx={{
-          mb: 2, fontSize: '0.8rem', letterSpacing: 0.5, textTransform: 'uppercase', color: 'text.secondary',
-        }}>
-          Journey Overview
-        </Typography>
-
-        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: { xs: 2, sm: 3 } }}>
-
-          {/* Route */}
-          <Box sx={{ minWidth: 120 }}>
-            <Typography sx={{ fontSize: '0.68rem', fontWeight: 700, letterSpacing: 0.6, color: 'text.disabled', textTransform: 'uppercase', mb: 0.75 }}>
-              Route
+      <Box sx={{ pt: 3, pb: 2 }}>
+        <Box sx={{ mb: 2.5 }}>
+          <Typography sx={{ fontFamily: D.display, fontSize: { xs: '1.5rem', sm: '1.75rem' }, color: D.navy, lineHeight: 1, letterSpacing: '-0.03em', mb: 0.5 }}>
+            {trip.origin?.city} → {trip.destination?.city}
+          </Typography>
+          {gapCount > 0 && (
+            <Typography sx={{ fontSize: '0.85rem', color: D.terra, fontWeight: 600 }}>
+              {gapCount} transfer{gapCount !== 1 ? 's' : ''} not booked
             </Typography>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
-              <Box sx={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: '#1D2642', flexShrink: 0 }} />
-              <Typography variant="body2" fontWeight={700} sx={{ fontSize: '0.88rem' }}>{trip.origin?.city}</Typography>
-            </Box>
-            {(trip.additionalDestinations ?? []).map((d, i) => (
-              <Box key={i} sx={{ display: 'flex', alignItems: 'center', gap: 0.75, mt: 0.5, pl: 0.25 }}>
-                <Box sx={{ width: 6, height: 6, borderRadius: '50%', backgroundColor: '#55702C', flexShrink: 0 }} />
-                <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.8rem' }}>{d.city}</Typography>
-              </Box>
-            ))}
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, mt: 0.5 }}>
-              <Box sx={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: '#C9521B', flexShrink: 0 }} />
-              <Typography variant="body2" fontWeight={700} sx={{ fontSize: '0.88rem', color: 'secondary.main' }}>
-                {trip.destination?.city}
-              </Typography>
-            </Box>
-          </Box>
+          )}
+        </Box>
 
-          <Divider orientation="vertical" flexItem />
-
-          {/* Transport */}
-          <Box sx={{ minWidth: 140 }}>
-            <Typography sx={{ fontSize: '0.68rem', fontWeight: 700, letterSpacing: 0.6, color: 'text.disabled', textTransform: 'uppercase', mb: 0.75 }}>
-              Transport ({transport.length})
-            </Typography>
-            {transport.length === 0 ? (
-              <Typography variant="caption" color="text.disabled">None added</Typography>
-            ) : (
-              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.75 }}>
-                {transport.map((t: TransportEntry, i: number) => {
-                  const confirmed = STATUS_IS_CONFIRMED(t.status);
-                  const color     = TRANSPORT_COLOUR[t.type] ?? '#6b7280';
-                  return (
-                    <Box key={i} sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <Box sx={{ color, display: 'flex' }}><TransportIcon type={t.type} size={14} /></Box>
-                      <Typography variant="caption" sx={{ fontSize: '0.78rem', flexGrow: 1 }}>
-                        {t.departureLocation && t.arrivalLocation
-                          ? `${shortLocation(t.departureLocation)} → ${shortLocation(t.arrivalLocation)}`
-                          : t.type.replace('_', ' ')}
-                      </Typography>
-                      {confirmed
-                        ? <CheckCircleIcon sx={{ fontSize: 13, color: 'success.main' }} />
-                        : <RadioButtonUncheckedIcon sx={{ fontSize: 13, color: 'text.disabled' }} />}
-                    </Box>
-                  );
-                })}
-              </Box>
+        {journeyLegs.length > 0 ? (
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+            {journeyLegs.map((leg, i) =>
+              leg.kind === 'transport' ? <TransportLegCard key={i} leg={leg} /> : <GapLegCard key={i} leg={leg} />
             )}
           </Box>
-
-          <Divider orientation="vertical" flexItem sx={{ display: { xs: 'none', sm: 'block' } }} />
-
-          {/* Accommodation */}
-          <Box sx={{ minWidth: 140 }}>
-            <Typography sx={{ fontSize: '0.68rem', fontWeight: 700, letterSpacing: 0.6, color: 'text.disabled', textTransform: 'uppercase', mb: 0.75 }}>
-              Stays ({accommodation.length})
-            </Typography>
-            {accommodation.length === 0 ? (
-              <Typography variant="caption" color="text.disabled">None added</Typography>
-            ) : (
-              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.75 }}>
-                {accommodation.map((a: AccomEntry, i: number) => {
-                  const confirmed = STATUS_IS_CONFIRMED(a.status);
-                  return (
-                    <Box key={i} sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <HotelIcon sx={{ fontSize: 13, color: confirmed ? '#5c35a0' : 'text.disabled' }} />
-                      <Typography variant="caption" sx={{ fontSize: '0.78rem', flexGrow: 1 }}>{a.name || a.type}</Typography>
-                      {confirmed
-                        ? <CheckCircleIcon sx={{ fontSize: 13, color: 'success.main' }} />
-                        : <RadioButtonUncheckedIcon sx={{ fontSize: 13, color: 'text.disabled' }} />}
-                    </Box>
-                  );
-                })}
-              </Box>
-            )}
-          </Box>
-
-          {/* Venues */}
-          {venues.length > 0 && (
-            <>
-              <Divider orientation="vertical" flexItem sx={{ display: { xs: 'none', sm: 'block' } }} />
-              <Box sx={{ minWidth: 140 }}>
-                <Typography sx={{ fontSize: '0.68rem', fontWeight: 700, letterSpacing: 0.6, color: 'text.disabled', textTransform: 'uppercase', mb: 0.75 }}>
-                  Venues ({venues.length})
-                </Typography>
-                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.75 }}>
-                  {venues.map((v: VenueEntry, i: number) => {
-                    const confirmed = STATUS_IS_CONFIRMED(v.status);
-                    const emoji     = VENUE_EMOJI[v.type] ?? '📍';
-                    return (
-                      <Box key={i} sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                        <Typography sx={{ fontSize: 12, lineHeight: 1 }}>{emoji}</Typography>
-                        <Typography variant="caption" sx={{ fontSize: '0.78rem', flexGrow: 1 }}>{v.name}</Typography>
-                        {confirmed
-                          ? <CheckCircleIcon sx={{ fontSize: 13, color: 'success.main' }} />
-                          : <RadioButtonUncheckedIcon sx={{ fontSize: 13, color: 'text.disabled' }} />}
-                      </Box>
-                    );
-                  })}
-                </Box>
-              </Box>
-            </>
-          )}
-
-          {stopsWithCoords.length > 0 && (
-            <>
-              <Divider orientation="vertical" flexItem sx={{ display: { xs: 'none', md: 'block' } }} />
-              <Box sx={{ minWidth: 100 }}>
-                <Typography sx={{ fontSize: '0.68rem', fontWeight: 700, letterSpacing: 0.6, color: 'text.disabled', textTransform: 'uppercase', mb: 0.75 }}>
-                  On map
-                </Typography>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <ExploreIcon sx={{ fontSize: 13, color: '#55702C' }} />
-                  <Typography variant="caption" sx={{ fontSize: '0.78rem' }}>
-                    {stopsWithCoords.length} itinerary stop{stopsWithCoords.length !== 1 ? 's' : ''}
-                  </Typography>
-                </Box>
-                <Typography variant="caption" color="text.disabled" sx={{ fontSize: '0.72rem', mt: 0.25, display: 'block' }}>
-                  Tap markers to see details
-                </Typography>
-              </Box>
-            </>
-          )}
-
-        </Box>
-      </Paper>
-
-      {/* ── Legend ── */}
-      <Paper sx={{ p: { xs: 1.75, sm: 2 }, backgroundColor: 'background.paper' }}>
-        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: { xs: 1.5, sm: 2 }, alignItems: 'center' }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
-            <Box sx={{ width: 24, height: 2.5, backgroundColor: '#55702C', borderRadius: 1, flexShrink: 0 }} />
-            <Typography variant="caption" sx={{ fontSize: '0.7rem', color: 'text.secondary' }}>Confirmed route</Typography>
-          </Box>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
-            <Box sx={{
-              width: 24, height: 2.5, borderRadius: 1, flexShrink: 0,
-              backgroundImage: 'repeating-linear-gradient(to right, #C9521B 0, #C9521B 6px, transparent 6px, transparent 10px)',
-            }} />
-            <Typography variant="caption" sx={{ fontSize: '0.7rem', color: 'text.secondary' }}>Unconfirmed route</Typography>
-          </Box>
-          <Box sx={{ width: 1, height: 16, backgroundColor: 'divider', display: { xs: 'none', sm: 'block' } }} />
-          <LegendItem color="#1D2642" label="Origin" />
-          <LegendItem color="#C9521B" label="Destination" />
-          <LegendItem color="#5c35a0" label="Accommodation" />
-          <LegendItem color="#1D2642" label="Venues" />
-          <LegendItem color="#55702C" label="Itinerary stops" />
-        </Box>
-      </Paper>
+        ) : !loading && (
+          <Typography sx={{ fontSize: '0.9rem', color: D.muted, py: 2 }}>No transport added yet.</Typography>
+        )}
+      </Box>
 
     </Box>
   );
