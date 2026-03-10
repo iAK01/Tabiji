@@ -47,6 +47,27 @@ import { saveTripCache, getTripCache, queueAction } from '@/lib/offline/db';
 
 const MapTab = dynamic(() => import('@/components/map/MapTab'), { ssr: false });
 
+// ─── Design tokens ────────────────────────────────────────────────────────────
+
+const D = {
+  green:   '#6B7C5C',
+  terra:   '#C4714A',
+  navy:    '#2C3E50',
+  bg:      '#F5F0E8',
+  paper:   '#FDFAF5',
+  display: '"Archivo Black", sans-serif',
+  body:    '"Archivo", "Inter", sans-serif',
+} as const;
+
+const STATUS_DOT: Record<string, string> = {
+  confirmed: D.green,
+  active:    D.green,
+  planning:  D.terra,
+  idea:      '#9ca3af',
+  completed: '#9ca3af',
+  cancelled: '#ef4444',
+};
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface WeatherDay {
@@ -94,11 +115,6 @@ interface Trip {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const STATUS_COLOURS: Record<string, 'default' | 'primary' | 'secondary' | 'error' | 'warning' | 'success'> = {
-  idea: 'default', planning: 'warning', confirmed: 'primary',
-  active: 'success', completed: 'default', cancelled: 'error',
-};
-
 const TAB_CONFIG = [
   { label: 'Overview',  Icon: GridViewIcon },
   { label: 'Logistics', Icon: FlightIcon },
@@ -111,18 +127,16 @@ const TAB_CONFIG = [
 ];
 
 export type FabTrigger = { action: string; seq: number };
-
 type FabActionConfig = { label: string; icon: React.ReactNode; action: string };
 
 const ACTION_TAB_MAP: Record<string, number> = {
   transport: 1, accom: 1, venue: 1,
-  stop: 2,
-  item: 3,
+  stop: 2, item: 3,
   note: 7, todo: 7, link: 7, contact: 7, file: 7,
 };
 
 const TAB_FAB_ACTIONS: Record<number, FabActionConfig[]> = {
-  0: [ // Overview — navigates to the right tab then fires
+  0: [
     { label: 'Transport',     icon: <FlightIcon />,         action: 'transport' },
     { label: 'Accommodation', icon: <HotelIcon />,          action: 'accom'     },
     { label: 'Venue',         icon: <PlaceIcon />,          action: 'venue'     },
@@ -134,18 +148,14 @@ const TAB_FAB_ACTIONS: Record<number, FabActionConfig[]> = {
     { label: 'Contact',       icon: <PersonAddIcon />,      action: 'contact'   },
     { label: 'File',          icon: <UploadFileIcon />,     action: 'file'      },
   ],
-  1: [ // Logistics
+  1: [
     { label: 'Transport',     icon: <FlightIcon />,         action: 'transport' },
     { label: 'Accommodation', icon: <HotelIcon />,          action: 'accom'     },
     { label: 'Venue',         icon: <PlaceIcon />,          action: 'venue'     },
   ],
-  2: [ // Itinerary
-    { label: 'Add stop',      icon: <AddLocationAltIcon />, action: 'stop'      },
-  ],
-  3: [ // Packing
-    { label: 'Add item',      icon: <PlaylistAddIcon />,    action: 'item'      },
-  ],
-  7: [ // Resources
+  2: [{ label: 'Add stop',   icon: <AddLocationAltIcon />, action: 'stop'      }],
+  3: [{ label: 'Add item',   icon: <PlaylistAddIcon />,    action: 'item'      }],
+  7: [
     { label: 'Note',          icon: <NoteAddIcon />,        action: 'note'      },
     { label: 'To-do',         icon: <AssignmentIcon />,     action: 'todo'      },
     { label: 'Link',          icon: <LinkIcon />,           action: 'link'      },
@@ -169,11 +179,9 @@ export default function TripPage() {
     name: '', tripType: '', purpose: '', startDate: '', endDate: '', status: '',
   });
 
-  // ── FAB state ──
   const [fabTrigger, setFabTrigger] = useState<FabTrigger | null>(null);
   const [fabOpen,    setFabOpen]    = useState(false);
 
-  // ── Delete state ──
   const [deletePreviewOpen,  setDeletePreviewOpen]  = useState(false);
   const [deleteConfirmOpen,  setDeleteConfirmOpen]  = useState(false);
   const [deletePreview,      setDeletePreview]      = useState<any>(null);
@@ -187,7 +195,6 @@ export default function TripPage() {
         const data = await res.json();
         setTrip(data.trip);
         await saveTripCache(String(id), data.trip);
-
         if (!data.trip?.coverPhotoUrl && data.trip?.destination?.city) {
           const photoRes  = await fetch(`/api/trips/${data.trip._id}/cover-photo`, { method: 'POST' });
           const photoData = await photoRes.json();
@@ -247,25 +254,18 @@ export default function TripPage() {
   };
 
   const getTripFabActions = (tripType: string): Record<number, FabActionConfig[]> => {
-  const expenseAction: FabActionConfig = {
-    label: 'Log expense', icon: <ReceiptIcon />, action: 'expense',
+    const expenseAction: FabActionConfig = {
+      label: 'Log expense', icon: <ReceiptIcon />, action: 'expense',
+    };
+    const isWork = tripType === 'work' || tripType === 'mixed';
+    return {
+      0: [...TAB_FAB_ACTIONS[0], ...(isWork ? [expenseAction] : [])],
+      1: [...TAB_FAB_ACTIONS[1], ...(isWork ? [expenseAction] : [])],
+      2: TAB_FAB_ACTIONS[2],
+      3: TAB_FAB_ACTIONS[3],
+      7: TAB_FAB_ACTIONS[7],
+    };
   };
-  const isWork = tripType === 'work' || tripType === 'mixed';
-
-  return {
-    0: [
-      ...(TAB_FAB_ACTIONS[0]),
-      ...(isWork ? [expenseAction] : []),
-    ],
-    1: [
-      ...(TAB_FAB_ACTIONS[1]),
-      ...(isWork ? [expenseAction] : []),
-    ],
-    2: TAB_FAB_ACTIONS[2],
-    3: TAB_FAB_ACTIONS[3],
-    7: TAB_FAB_ACTIONS[7],
-  };
-};
 
   const refreshPhoto = async () => {
     if (!trip) return;
@@ -273,8 +273,6 @@ export default function TripPage() {
     const data = await res.json();
     if (data.trip) setTrip(data.trip);
   };
-
-  // ── Delete handlers ───────────────────────────────────────────────────────
 
   const openDeletePreview = async () => {
     setDeletePreview(null);
@@ -303,19 +301,12 @@ export default function TripPage() {
     }
   };
 
-  if (!trip) return null;
-
-  const daysUntil = trip.startDate
-    ? Math.ceil((new Date(trip.startDate).getTime() - Date.now()) / 86400000)
-    : null;
-
-  // ── FAB fire helper ───────────────────────────────────────────────────────
   const fireFab = (action: string) => {
-      if (action === 'expense') {
-    window.open('https://imc.show/admin/expenses/new', '_blank');
-    setFabOpen(false);
-    return;
-  }
+    if (action === 'expense') {
+      window.open('https://imc.show/admin/expenses/new', '_blank');
+      setFabOpen(false);
+      return;
+    }
     if (activeTab === 0) {
       const targetTab = ACTION_TAB_MAP[action];
       if (targetTab !== undefined) setActiveTab(targetTab);
@@ -324,426 +315,589 @@ export default function TripPage() {
     setFabOpen(false);
   };
 
+  if (!trip) return null;
+
+  const daysUntil = trip.startDate
+    ? Math.ceil((new Date(trip.startDate).getTime() - Date.now()) / 86400000)
+    : null;
+
+  const isActive = trip.status === 'active';
+  const isPast   = trip.status === 'completed' ||
+    (!!trip.endDate && new Date(trip.endDate) < new Date(new Date().setHours(0, 0, 0, 0)));
+
   return (
-    <Box sx={{ minHeight: '100vh', backgroundColor: 'background.default', pb: { xs: 6, sm: 0 } }}>
+    <>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Archivo+Black&family=Archivo:wght@300;400;500;600;700&display=swap');
+      `}</style>
 
- {/* ── AppBar ── */}
-<AppBar position="static" elevation={0} sx={{ backgroundColor: 'text.primary' }}>
-  {/* ── Utility row: nav + status ── */}
-  <Toolbar sx={{ minHeight: 48, gap: 1, px: { xs: 1.5, sm: 2 } }}>
-    <IconButton color="inherit" onClick={() => router.push('/dashboard')} size="small">
-      <ArrowBackIcon fontSize="small" />
-    </IconButton>
-    <Box
-      component="img"
-      src="/Logo.jpeg"
-      alt="Logo"
-      onClick={() => router.push('/dashboard')}
-      sx={{ flexShrink: 0, width: 36, height: 36, objectFit: 'contain', cursor: 'pointer', opacity: 0.9 }}
-    />
-    <Box sx={{ flexGrow: 1 }} />
-    <Chip
-      label={trip.status}
-      color={STATUS_COLOURS[trip.status]}
-      size="small"
-      sx={{ fontWeight: 700, textTransform: 'capitalize' }}
-    />
-    <IconButton color="inherit" onClick={openEdit} size="small">
-      <EditIcon fontSize="small" />
-    </IconButton>
-  </Toolbar>
+      <Box sx={{ minHeight: '100vh', backgroundColor: D.bg, pb: { xs: 10, sm: 4 } }}>
 
-{/* ── Hero name block ── */}
-<Box sx={{
-  px: { xs: 2.5, sm: 3.5 },
-  pt: 0.5,
-  pb: 3,
-  background: 'linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0.18) 100%)',
-}}>
-  <Typography sx={{
-    color: 'rgba(255,255,255,0.35)',
-    fontSize: { xs: '0.68rem', sm: '0.72rem' },
-    fontWeight: 800,
-    letterSpacing: 3,
-    textTransform: 'uppercase',
-    mb: 0.75,
-  }}>
-    {trip.destination?.city}{trip.destination?.country ? `, ${trip.destination.country}` : ''}
-  </Typography>
-
-  <Box sx={{ display: 'flex', alignItems: 'stretch', gap: 0 }}>
-    <Box sx={{
-      width: 5,
-      alignSelf: 'stretch',
-      background: 'linear-gradient(180deg, #E8622A 0%, #A03D10 100%)',
-      borderRadius: '2px',
-      mr: 2.5,
-      flexShrink: 0,
-    }} />
-
-    <Typography sx={{
-      color: 'rgba(255,255,255,0.92)',
-      fontWeight: 900,
-      fontSize: { xs: '2.4rem', sm: '3.2rem', md: '3.8rem' },
-      lineHeight: 1.05,
-      letterSpacing: { xs: '-1px', sm: '-2px' },
-      textShadow: [
-        '0 1px 0 rgba(255,255,255,0.07)',
-        '0 -1px 0 rgba(0,0,0,0.5)',
-        '0 4px 20px rgba(0,0,0,0.55)',
-        '0 1px 2px rgba(0,0,0,0.8)',
-      ].join(', '),
-      overflow: 'hidden',
-      textOverflow: 'ellipsis',
-      whiteSpace: 'nowrap',
-    }}>
-      {trip.name}
-    </Typography>
-  </Box>
-</Box>
-</AppBar>
-
-      {/* ── Tabs ── */}
-      <Box sx={{ backgroundColor: 'text.primary', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
-        <Container maxWidth="lg" disableGutters>
-<Tabs
-  value={activeTab}
-  onChange={(_, val) => setActiveTab(val)}
-  textColor="inherit"
-  variant={isMobile ? 'scrollable' : 'fullWidth'}
-  scrollButtons={false}
-  TabIndicatorProps={{ style: { backgroundColor: '#C9521B', height: 3, borderRadius: '3px 3px 0 0' } }}
-  sx={{
-    '& .MuiTab-root': {
-      minHeight: 64,
-      minWidth: { xs: 80, sm: 120 },
-      flexDirection: 'column',
-      gap: 0.5,
-      fontSize: { xs: '0.7rem', sm: '0.75rem' },
-      fontWeight: 700,
-      textTransform: 'uppercase',
-      letterSpacing: 0.8,
-      color: 'rgba(255,255,255,0.4)',
-      transition: 'all 0.18s ease',
-      position: 'relative',
-      overflow: 'hidden',
-      '&:hover': {
-        color: 'rgba(255,255,255,0.9)',
-        backgroundColor: 'rgba(255,255,255,0.06)',
-        '& svg': {
-          color: '#C9521B',
-          transform: 'translateY(-2px)',
-          filter: 'drop-shadow(0 0 6px rgba(201,82,27,0.7))',
-        },
-      },
-      '&.Mui-selected': {
-        color: 'white',
-        fontWeight: 800,
-        '& svg': {
-          color: '#C9521B',
-          filter: 'drop-shadow(0 0 8px rgba(201,82,27,0.8))',
-        },
-      },
-      '& svg': {
-        fontSize: { xs: '1.15rem', sm: '1.25rem' },
-        transition: 'all 0.18s ease',
-        color: 'inherit',
-      },
-    },
-  }}
->
-  {TAB_CONFIG.map(({ label, Icon }) => (
-    <Tab key={label} label={label} icon={<Icon />} iconPosition="top" />
-  ))}
-</Tabs>
-        </Container>
-      </Box>
-
-      {/* ── Cover photo ── */}
-      {trip.coverPhotoUrl && (
-        <Box sx={{
-          height: { xs: 190, sm: 240 },
-          backgroundImage: `url(${trip.coverPhotoUrl})`,
-          backgroundSize: 'cover',
-          backgroundPosition: 'center',
-          position: 'relative',
+        {/* ── AppBar ── */}
+        <AppBar position="static" elevation={0} sx={{
+          backgroundColor: D.navy,
+          borderBottom: `3px solid ${D.terra}`,
         }}>
-          <Box sx={{ position: 'absolute', inset: 0, background: 'linear-gradient(to bottom, rgba(0,0,0,0.05), rgba(0,0,0,0.62))' }} />
-          <Box sx={{ position: 'absolute', bottom: 14, left: 16, right: 56 }}>
-            <Typography sx={{ color: 'white', fontWeight: 900, lineHeight: 1.2, fontSize: { xs: '1.2rem', sm: '1.4rem' } }}>
-              {trip.destination?.city}, {trip.destination?.country}
+
+          {/* Utility row */}
+          <Toolbar sx={{ minHeight: 52, gap: 1, px: { xs: 1.5, sm: 2.5 } }}>
+            <IconButton
+              color="inherit"
+              onClick={() => router.push('/dashboard')}
+              size="small"
+              sx={{ mr: 0.5 }}
+            >
+              <ArrowBackIcon fontSize="small" />
+            </IconButton>
+
+            <Box
+              component="img"
+              src="/Logo.jpeg"
+              alt="Logo"
+              onClick={() => router.push('/dashboard')}
+              sx={{ width: 36, height: 36, objectFit: 'contain', cursor: 'pointer', opacity: 0.85 }}
+            />
+
+            <Box sx={{ flexGrow: 1 }} />
+
+            {/* Status pill — matches dashboard style */}
+            <Box sx={{
+              display: 'flex', alignItems: 'center', gap: 0.6,
+              backgroundColor: alpha('#fff', 0.1),
+              borderRadius: 10, px: 1.25, py: 0.45,
+            }}>
+              <Box sx={{
+                width: 6, height: 6, borderRadius: '50%',
+                backgroundColor: STATUS_DOT[trip.status] ?? alpha('#fff', 0.4),
+                flexShrink: 0,
+              }} />
+              <Typography sx={{
+                fontFamily: D.body, color: 'white', fontSize: '0.63rem',
+                fontWeight: 800, textTransform: 'capitalize', letterSpacing: '0.05em',
+              }}>
+                {trip.status}
+              </Typography>
+            </Box>
+
+            <IconButton color="inherit" onClick={openEdit} size="small" sx={{ ml: 0.5 }}>
+              <EditIcon fontSize="small" />
+            </IconButton>
+          </Toolbar>
+
+          {/* Hero name block */}
+          <Box sx={{ px: { xs: 2.5, sm: 3.5 }, pt: 0.5, pb: { xs: 2.5, sm: 3.5 } }}>
+
+            {/* Destination — subdued overline */}
+            <Typography sx={{
+              fontFamily: D.body,
+              color: alpha('#fff', 0.45),
+              fontSize: '0.62rem',
+              fontWeight: 800,
+              letterSpacing: '0.24em',
+              textTransform: 'uppercase',
+              mb: 1,
+            }}>
+              {trip.destination?.city}{trip.destination?.country ? `, ${trip.destination.country}` : ''}
             </Typography>
-            {daysUntil !== null && daysUntil > 0 && (
-              <Typography sx={{ color: 'rgba(255,255,255,0.85)', fontSize: { xs: '0.9rem', sm: '0.95rem' }, mt: 0.3 }}>
-                {daysUntil} days away · {trip.nights} nights
+
+            {/* Trip name — Archivo Black, massive, tight */}
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0 }}>
+              {/* Terracotta rule — same accent as dashboard hero */}
+              <Box sx={{
+                width: 4, alignSelf: 'stretch',
+                backgroundColor: D.terra,
+                borderRadius: 1,
+                mr: { xs: 2, sm: 2.5 },
+                flexShrink: 0,
+              }} />
+              <Typography sx={{
+                fontFamily: D.display,
+                color: 'white',
+                fontSize: { xs: '2.6rem', sm: '3.8rem', md: '4.8rem' },
+                lineHeight: 1.0,
+                letterSpacing: '-0.03em',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: { xs: 'normal', sm: 'nowrap' },
+              }}>
+                {trip.name}
+              </Typography>
+            </Box>
+
+            {/* Meta row — nights · type · days away */}
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mt: 1.75, ml: { xs: '28px', sm: '36px' } }}>
+              <Typography sx={{
+                fontFamily: D.body,
+                color: alpha('#fff', 0.45),
+                fontSize: '0.72rem',
+                fontWeight: 600,
+                letterSpacing: '0.04em',
+              }}>
+                {trip.nights} nights
+              </Typography>
+              <Box sx={{ width: 3, height: 3, borderRadius: '50%', backgroundColor: alpha('#fff', 0.2) }} />
+              <Typography sx={{
+                fontFamily: D.body,
+                color: alpha('#fff', 0.45),
+                fontSize: '0.72rem',
+                fontWeight: 600,
+                textTransform: 'capitalize',
+                letterSpacing: '0.04em',
+              }}>
+                {trip.tripType}
+              </Typography>
+              {daysUntil !== null && daysUntil > 0 && !isActive && (
+                <>
+                  <Box sx={{ width: 3, height: 3, borderRadius: '50%', backgroundColor: alpha('#fff', 0.2) }} />
+                  <Typography sx={{
+                    fontFamily: D.display,
+                    color: D.terra,
+                    fontSize: '0.82rem',
+                    letterSpacing: '-0.01em',
+                  }}>
+                    {daysUntil === 1 ? 'Tomorrow' : `${daysUntil} days away`}
+                  </Typography>
+                </>
+              )}
+              {isActive && (
+                <>
+                  <Box sx={{ width: 3, height: 3, borderRadius: '50%', backgroundColor: alpha('#fff', 0.2) }} />
+                  <Box sx={{
+                    backgroundColor: D.green, borderRadius: 10,
+                    px: 1, py: 0.2,
+                  }}>
+                    <Typography sx={{ fontFamily: D.body, color: 'white', fontSize: '0.6rem', fontWeight: 800, letterSpacing: '0.12em', textTransform: 'uppercase' }}>
+                      On trip
+                    </Typography>
+                  </Box>
+                </>
+              )}
+            </Box>
+          </Box>
+        </AppBar>
+
+        {/* ── Tabs ── */}
+        <Box sx={{
+          backgroundColor: D.navy,
+          borderBottom: `1px solid ${alpha('#fff', 0.08)}`,
+          position: 'sticky',
+          top: 0,
+          zIndex: 100,
+          boxShadow: `0 4px 20px ${alpha(D.navy, 0.35)}`,
+        }}>
+          <Container maxWidth="lg" disableGutters>
+            <Tabs
+              value={activeTab}
+              onChange={(_, val) => setActiveTab(val)}
+              textColor="inherit"
+              variant={isMobile ? 'scrollable' : 'fullWidth'}
+              scrollButtons={false}
+              TabIndicatorProps={{
+                style: {
+                  backgroundColor: D.terra,
+                  height: 3,
+                  borderRadius: '3px 3px 0 0',
+                },
+              }}
+              sx={{
+                '& .MuiTab-root': {
+                  fontFamily: D.body,
+                  minHeight: 58,
+                  minWidth: { xs: 72, sm: 100 },
+                  flexDirection: 'column',
+                  gap: 0.4,
+                  fontSize: { xs: '0.6rem', sm: '0.65rem' },
+                  fontWeight: 700,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.1em',
+                  color: alpha('#fff', 0.35),
+                  transition: 'color 0.15s',
+                  '&:hover': { color: alpha('#fff', 0.8) },
+                  '&.Mui-selected': {
+                    color: 'white',
+                    fontWeight: 800,
+                  },
+                  '& svg': {
+                    fontSize: { xs: '1.1rem', sm: '1.2rem' },
+                    transition: 'color 0.15s',
+                  },
+                  '&.Mui-selected svg': { color: D.terra },
+                },
+              }}
+            >
+              {TAB_CONFIG.map(({ label, Icon }) => (
+                <Tab key={label} label={label} icon={<Icon />} iconPosition="top" />
+              ))}
+            </Tabs>
+          </Container>
+        </Box>
+
+        {/* ── Cover photo ── */}
+        {trip.coverPhotoUrl && (
+          <Box sx={{
+            height: { xs: 200, sm: 260 },
+            backgroundImage: `url(${trip.coverPhotoUrl})`,
+            backgroundSize: 'cover',
+            backgroundPosition: 'center',
+            position: 'relative',
+          }}>
+            <Box sx={{
+              position: 'absolute', inset: 0,
+              background: `linear-gradient(to bottom, ${alpha(D.navy, 0.08)}, ${alpha(D.navy, 0.55)})`,
+            }} />
+
+            {/* Credit */}
+            {trip.coverPhotoCredit && (
+              <Typography sx={{
+                position: 'absolute', bottom: 12, left: 16,
+                fontFamily: D.body, color: alpha('#fff', 0.5),
+                fontSize: '0.6rem', letterSpacing: '0.06em',
+              }}>
+                {trip.coverPhotoCredit}
               </Typography>
             )}
-            {daysUntil === 0 && (
-              <Typography sx={{ color: 'white', fontWeight: 700, fontSize: '0.9rem', mt: 0.3 }}>Today</Typography>
-            )}
+
+            <IconButton
+              onClick={refreshPhoto}
+              size="small"
+              sx={{
+                position: 'absolute', bottom: 10, right: 14,
+                color: 'white',
+                backgroundColor: alpha(D.navy, 0.45),
+                backdropFilter: 'blur(4px)',
+                '&:hover': { backgroundColor: alpha(D.navy, 0.65) },
+                p: 0.9,
+              }}
+            >
+              <RefreshIcon sx={{ fontSize: '1rem' }} />
+            </IconButton>
           </Box>
-          <IconButton
-            onClick={refreshPhoto}
-            sx={{ position: 'absolute', bottom: 10, right: 12, color: 'white', backgroundColor: 'rgba(0,0,0,0.35)', '&:hover': { backgroundColor: 'rgba(0,0,0,0.55)' }, p: 1 }}
-            size="small"
-          >
-            <RefreshIcon fontSize="small" />
-          </IconButton>
-        </Box>
-      )}
+        )}
 
-      {/* ── Tab content ── */}
-      <Container maxWidth="lg" sx={{ py: { xs: 3, sm: 4 }, px: { xs: 2, sm: 3 } }}>
+        {/* ── Tab content ── */}
+        <Container maxWidth="lg" sx={{ py: { xs: 3, sm: 4 }, px: { xs: 2, sm: 3 } }}>
+          {trip.status === 'active' && <OnTripScreen tripId={trip._id} trip={trip} />}
+          {activeTab === 0 && <TripOverview trip={trip} onNavigate={setActiveTab} />}
+          {activeTab === 1 && <LogisticsTab tripId={trip._id} trip={trip} fabTrigger={fabTrigger} />}
+          {activeTab === 2 && <ItineraryTab tripId={trip._id} startDate={trip.startDate} endDate={trip.endDate} fabTrigger={fabTrigger} />}
+          {activeTab === 3 && <PackingTab tripId={trip._id} tripType={trip.tripType} nights={trip.nights} startDate={trip.startDate} fabTrigger={fabTrigger} />}
+          {activeTab === 4 && <IntelligenceTab tripId={trip._id} />}
+          {activeTab === 5 && <WeatherTab tripId={trip._id} destinationCity={trip.destination?.city} />}
+          {activeTab === 6 && <MapTab tripId={trip._id} trip={trip} />}
+          {activeTab === 7 && <FilesTab tripId={trip._id} fabTrigger={fabTrigger} />}
+        </Container>
 
-        {trip.status === 'active' && <OnTripScreen tripId={trip._id} trip={trip} />}
-
-        {activeTab === 0 && <TripOverview trip={trip} onNavigate={setActiveTab} />}
-        {activeTab === 1 && <LogisticsTab tripId={trip._id} trip={trip} fabTrigger={fabTrigger} />}
-        {activeTab === 2 && <ItineraryTab tripId={trip._id} startDate={trip.startDate} endDate={trip.endDate} fabTrigger={fabTrigger} />}
-        {activeTab === 3 && <PackingTab tripId={trip._id} tripType={trip.tripType} nights={trip.nights} startDate={trip.startDate} fabTrigger={fabTrigger} />}
-        {activeTab === 4 && <IntelligenceTab tripId={trip._id} />}
-        {activeTab === 5 && <WeatherTab tripId={trip._id} destinationCity={trip.destination?.city} />}
-        {activeTab === 6 && <MapTab tripId={trip._id} trip={trip} />}
-        {activeTab === 7 && <FilesTab tripId={trip._id} fabTrigger={fabTrigger} />}
-      </Container>
-
-      {/* ── Context-aware FAB ── */}
-      {getTripFabActions(trip.tripType)[activeTab] && (() => {
-        const actions = getTripFabActions(trip.tripType)[activeTab];
-        if (actions.length === 1) {
+        {/* ── Context-aware FAB ── */}
+        {getTripFabActions(trip.tripType)[activeTab] && (() => {
+          const actions = getTripFabActions(trip.tripType)[activeTab];
+          if (actions.length === 1) {
+            return (
+              <Tooltip title={actions[0].label} placement="left">
+                <Fab
+                  onClick={() => fireFab(actions[0].action)}
+                  sx={{
+                    position: 'fixed', bottom: { xs: 24, sm: 32 }, right: { xs: 16, sm: 32 }, zIndex: 1050,
+                    backgroundColor: D.green, color: 'white',
+                    boxShadow: `0 4px 20px ${alpha(D.navy, 0.3)}`,
+                    '&:hover': { backgroundColor: '#556647' },
+                  }}
+                >
+                  {actions[0].icon}
+                </Fab>
+              </Tooltip>
+            );
+          }
           return (
-            <Tooltip title={actions[0].label} placement="left">
-              <Fab
-                onClick={() => fireFab(actions[0].action)}
+            <SpeedDial
+              ariaLabel="Quick add"
+              open={fabOpen}
+              onOpen={() => setFabOpen(true)}
+              onClose={() => setFabOpen(false)}
+              icon={<SpeedDialIcon />}
+              sx={{
+                position: 'fixed', bottom: { xs: 24, sm: 32 }, right: { xs: 16, sm: 32 }, zIndex: 1050,
+                '& .MuiSpeedDial-fab': {
+                  backgroundColor: D.green, color: 'white',
+                  boxShadow: `0 4px 20px ${alpha(D.navy, 0.3)}`,
+                  '&:hover': { backgroundColor: '#556647' },
+                },
+              }}
+            >
+              {actions.map(({ label, icon, action }) => (
+                <SpeedDialAction
+                  key={action}
+                  icon={icon}
+                  tooltipTitle={label}
+                  tooltipOpen={isMobile}
+                  onClick={() => fireFab(action)}
+                  sx={{ '& .MuiSpeedDialAction-fab': { color: D.green, '&:hover': { backgroundColor: alpha(D.green, 0.1) } } }}
+                />
+              ))}
+            </SpeedDial>
+          );
+        })()}
+
+        {/* ── Edit dialog ── */}
+        <Dialog open={editOpen} onClose={() => setEditOpen(false)} maxWidth="sm" fullWidth fullScreen={isMobile}
+          PaperProps={{ sx: { borderRadius: { sm: 2.5 }, backgroundColor: D.paper } }}>
+          <DialogTitle sx={{
+            fontFamily: D.display, fontSize: { xs: '1.5rem', sm: '1.8rem' },
+            letterSpacing: '-0.02em', color: D.navy, pb: 1,
+          }}>
+            Edit Trip
+          </DialogTitle>
+          <DialogContent>
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, pt: 1 }}>
+              <TextField label="Trip name" value={editForm.name}
+                onChange={e => setEditForm(p => ({ ...p, name: e.target.value }))}
+                fullWidth
+                InputProps={{ sx: { fontFamily: D.body } }}
+                InputLabelProps={{ sx: { fontFamily: D.body } }}
+              />
+              <FormControl fullWidth>
+                <InputLabel sx={{ fontFamily: D.body }}>Status</InputLabel>
+                <Select value={editForm.status} label="Status"
+                  onChange={e => setEditForm(p => ({ ...p, status: e.target.value }))}
+                  sx={{ fontFamily: D.body }}>
+                  {['idea', 'planning', 'confirmed', 'active', 'completed', 'cancelled'].map(s => (
+                    <MenuItem key={s} value={s} sx={{ fontFamily: D.body, textTransform: 'capitalize' }}>{s}</MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+              <FormControl fullWidth>
+                <InputLabel sx={{ fontFamily: D.body }}>Trip type</InputLabel>
+                <Select value={editForm.tripType} label="Trip type"
+                  onChange={e => setEditForm(p => ({ ...p, tripType: e.target.value }))}
+                  sx={{ fontFamily: D.body }}>
+                  <MenuItem value="leisure" sx={{ fontFamily: D.body }}>Leisure</MenuItem>
+                  <MenuItem value="work"    sx={{ fontFamily: D.body }}>Work</MenuItem>
+                  <MenuItem value="mixed"   sx={{ fontFamily: D.body }}>Mixed</MenuItem>
+                </Select>
+              </FormControl>
+              <Box sx={{ display: 'flex', gap: 2, flexDirection: { xs: 'column', sm: 'row' } }}>
+                <TextField label="Departure date" type="date" value={editForm.startDate}
+                  onChange={e => setEditForm(p => ({ ...p, startDate: e.target.value }))}
+                  fullWidth InputLabelProps={{ shrink: true, sx: { fontFamily: D.body } }}
+                  InputProps={{ sx: { fontFamily: D.body } }}
+                />
+                <TextField label="Return date" type="date" value={editForm.endDate}
+                  onChange={e => setEditForm(p => ({ ...p, endDate: e.target.value }))}
+                  fullWidth InputLabelProps={{ shrink: true, sx: { fontFamily: D.body } }}
+                  InputProps={{ sx: { fontFamily: D.body } }}
+                />
+              </Box>
+              <TextField label="Purpose / notes" value={editForm.purpose}
+                onChange={e => setEditForm(p => ({ ...p, purpose: e.target.value }))}
+                fullWidth multiline rows={2}
+                InputProps={{ sx: { fontFamily: D.body } }}
+                InputLabelProps={{ sx: { fontFamily: D.body } }}
+              />
+            </Box>
+          </DialogContent>
+          <DialogActions sx={{ px: 3, pb: 3, gap: 1, flexDirection: { xs: 'column-reverse', sm: 'row' } }}>
+            <Button
+              startIcon={<DeleteForeverIcon />}
+              onClick={() => { setEditOpen(false); openDeletePreview(); }}
+              fullWidth={isMobile} size="large"
+              sx={{ mr: { sm: 'auto' }, fontFamily: D.body, fontWeight: 700,
+                color: '#dc2626', '&:hover': { backgroundColor: alpha('#dc2626', 0.06) } }}
+            >
+              Delete trip
+            </Button>
+            <Button onClick={() => setEditOpen(false)} fullWidth={isMobile} size="large"
+              sx={{ fontFamily: D.body, fontWeight: 600 }}>
+              Cancel
+            </Button>
+            <Button variant="contained" onClick={saveEdit} disabled={!editForm.name}
+              fullWidth={isMobile} size="large"
+              sx={{
+                fontFamily: D.display, letterSpacing: '-0.01em',
+                backgroundColor: D.navy, boxShadow: 'none',
+                '&:hover': { backgroundColor: alpha(D.navy, 0.88), boxShadow: 'none' },
+              }}>
+              Save Changes
+            </Button>
+          </DialogActions>
+        </Dialog>
+
+        {/* ── Delete preview dialog ── */}
+        <Dialog
+          open={deletePreviewOpen}
+          onClose={() => !deleting && setDeletePreviewOpen(false)}
+          maxWidth="sm" fullWidth fullScreen={isMobile}
+          PaperProps={{ sx: { borderRadius: { sm: 2.5 }, backgroundColor: D.paper } }}
+        >
+          <DialogTitle sx={{
+            display: 'flex', alignItems: 'center', gap: 1.5,
+            fontFamily: D.display, fontSize: { xs: '1.3rem', sm: '1.5rem' },
+            letterSpacing: '-0.02em', color: '#dc2626',
+          }}>
+            <WarningAmberIcon />
+            Delete "{trip?.name}"?
+          </DialogTitle>
+          <DialogContent>
+            {!deletePreview && !deleteError && (
+              <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
+                <CircularProgress size={28} sx={{ color: D.terra }} />
+              </Box>
+            )}
+            {deleteError && (
+              <Typography sx={{ fontFamily: D.body, color: '#dc2626' }} variant="body2">{deleteError}</Typography>
+            )}
+            {deletePreview && (
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                <Typography sx={{ fontFamily: D.body }} variant="body2" color="text.secondary">
+                  This will permanently delete the following. This cannot be undone.
+                </Typography>
+                <Paper variant="outlined" sx={{ borderRadius: 2, overflow: 'hidden', borderColor: alpha(D.navy, 0.12) }}>
+                  <List dense disablePadding>
+                    {deletePreview.audit.itinerary.days > 0 && (
+                      <>
+                        <ListItem>
+                          <ListItemText
+                            primary={`Itinerary — ${deletePreview.audit.itinerary.days} day${deletePreview.audit.itinerary.days !== 1 ? 's' : ''}, ${deletePreview.audit.itinerary.stops} stop${deletePreview.audit.itinerary.stops !== 1 ? 's' : ''}`}
+                            primaryTypographyProps={{ sx: { fontFamily: D.body, fontWeight: 600 } }}
+                          />
+                        </ListItem>
+                        <Divider />
+                      </>
+                    )}
+                    {(deletePreview.audit.logistics.transport > 0 || deletePreview.audit.logistics.accommodation > 0 || deletePreview.audit.logistics.venues > 0) && (
+                      <>
+                        <ListItem>
+                          <ListItemText
+                            primary={[
+                              deletePreview.audit.logistics.transport > 0 && `${deletePreview.audit.logistics.transport} transport booking${deletePreview.audit.logistics.transport !== 1 ? 's' : ''}`,
+                              deletePreview.audit.logistics.accommodation > 0 && `${deletePreview.audit.logistics.accommodation} accommodation`,
+                              deletePreview.audit.logistics.venues > 0 && `${deletePreview.audit.logistics.venues} venue${deletePreview.audit.logistics.venues !== 1 ? 's' : ''}`,
+                            ].filter(Boolean).join(', ')}
+                            secondary="Logistics"
+                            primaryTypographyProps={{ sx: { fontFamily: D.body, fontWeight: 600 } }}
+                            secondaryTypographyProps={{ sx: { fontFamily: D.body } }}
+                          />
+                        </ListItem>
+                        <Divider />
+                      </>
+                    )}
+                    {deletePreview.audit.files.total > 0 && (
+                      <>
+                        <ListItem>
+                          <ListItemText
+                            primary={`${deletePreview.audit.files.total} resource${deletePreview.audit.files.total !== 1 ? 's' : ''} — ${Object.entries(deletePreview.audit.files.byType).map(([k, v]) => `${v} ${k}${(v as number) !== 1 ? 's' : ''}`).join(', ')}`}
+                            secondary="Files, links, contacts, notes, todos"
+                            primaryTypographyProps={{ sx: { fontFamily: D.body, fontWeight: 600 } }}
+                            secondaryTypographyProps={{ sx: { fontFamily: D.body } }}
+                          />
+                        </ListItem>
+                        <Divider />
+                      </>
+                    )}
+                    {deletePreview.audit.gcsAttachments.length > 0 && (
+                      <>
+                        <ListItem sx={{ backgroundColor: alpha('#dc2626', 0.04) }}>
+                          <ListItemText
+                            primary={`${deletePreview.audit.gcsAttachments.length} uploaded file${deletePreview.audit.gcsAttachments.length !== 1 ? 's' : ''} will be permanently removed from storage`}
+                            secondary={deletePreview.audit.gcsAttachments.map((f: any) => f.name).join(', ')}
+                            primaryTypographyProps={{ sx: { fontFamily: D.body, fontWeight: 700, color: '#dc2626' } }}
+                            secondaryTypographyProps={{ sx: { fontFamily: D.body } }}
+                          />
+                        </ListItem>
+                        <Divider />
+                      </>
+                    )}
+                    {deletePreview.audit.pushLogs.total > 0 && (
+                      <ListItem>
+                        <ListItemText
+                          primary={`${deletePreview.audit.pushLogs.total} push notification log${deletePreview.audit.pushLogs.total !== 1 ? 's' : ''}`}
+                          primaryTypographyProps={{ sx: { fontFamily: D.body, fontWeight: 600 } }}
+                        />
+                      </ListItem>
+                    )}
+                    {deletePreview.audit.packing.exists && (
+                      <>
+                        <Divider />
+                        <ListItem>
+                          <ListItemText primary="Packing list" primaryTypographyProps={{ sx: { fontFamily: D.body, fontWeight: 600 } }} />
+                        </ListItem>
+                      </>
+                    )}
+                    {deletePreview.audit.intelligence.exists && (
+                      <>
+                        <Divider />
+                        <ListItem>
+                          <ListItemText primary="Cultural intelligence data" primaryTypographyProps={{ sx: { fontFamily: D.body, fontWeight: 600 } }} />
+                        </ListItem>
+                      </>
+                    )}
+                  </List>
+                </Paper>
+              </Box>
+            )}
+          </DialogContent>
+          <DialogActions sx={{ px: 3, pb: 3, gap: 1, flexDirection: { xs: 'column-reverse', sm: 'row' } }}>
+            <Button onClick={() => setDeletePreviewOpen(false)} fullWidth={isMobile} size="large"
+              sx={{ fontFamily: D.body, fontWeight: 600 }}>
+              Cancel
+            </Button>
+            {deletePreview && (
+              <Button
+                variant="contained"
+                onClick={() => { setDeletePreviewOpen(false); setDeleteConfirmOpen(true); }}
+                fullWidth={isMobile} size="large"
+                startIcon={<DeleteForeverIcon />}
                 sx={{
-                  position: 'fixed', bottom: { xs: 24, sm: 32 }, right: { xs: 16, sm: 32 }, zIndex: 1050,
-                  backgroundColor: '#55702C', color: 'white', boxShadow: '0 4px 20px rgba(0,0,0,0.25)',
-                  '&:hover': { backgroundColor: '#455f24' },
+                  fontFamily: D.display, letterSpacing: '-0.01em',
+                  backgroundColor: '#dc2626', boxShadow: 'none',
+                  '&:hover': { backgroundColor: '#b91c1c', boxShadow: 'none' },
                 }}
               >
-                {actions[0].icon}
-              </Fab>
-            </Tooltip>
-          );
-        }
-        return (
-          <SpeedDial
-            ariaLabel="Quick add"
-            open={fabOpen}
-            onOpen={() => setFabOpen(true)}
-            onClose={() => setFabOpen(false)}
-            icon={<SpeedDialIcon />}
-            sx={{
-              position: 'fixed', bottom: { xs: 24, sm: 32 }, right: { xs: 16, sm: 32 }, zIndex: 1050,
-              '& .MuiSpeedDial-fab': {
-                backgroundColor: '#55702C', color: 'white', boxShadow: '0 4px 20px rgba(0,0,0,0.25)',
-                '&:hover': { backgroundColor: '#455f24' },
-              },
-            }}
-          >
-            {actions.map(({ label, icon, action }) => (
-              <SpeedDialAction
-                key={action}
-                icon={icon}
-                tooltipTitle={label}
-                tooltipOpen={isMobile}
-                onClick={() => fireFab(action)}
-                sx={{ '& .MuiSpeedDialAction-fab': { color: '#55702C', '&:hover': { backgroundColor: alpha('#55702C', 0.1) } } }}
-              />
-            ))}
-          </SpeedDial>
-        );
-      })()}
+                Continue to delete
+              </Button>
+            )}
+          </DialogActions>
+        </Dialog>
 
-      {/* ── Edit dialog ── */}
-      <Dialog open={editOpen} onClose={() => setEditOpen(false)} maxWidth="sm" fullWidth fullScreen={isMobile}>
-        <DialogTitle fontWeight={700} sx={{ fontSize: { xs: '1.2rem', sm: '1.25rem' } }}>Edit Trip</DialogTitle>
-        <DialogContent>
-          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, pt: 1 }}>
-            <TextField label="Trip name" value={editForm.name} onChange={e => setEditForm(p => ({ ...p, name: e.target.value }))} fullWidth />
-            <FormControl fullWidth>
-              <InputLabel>Status</InputLabel>
-              <Select value={editForm.status} label="Status" onChange={e => setEditForm(p => ({ ...p, status: e.target.value }))}>
-                {['idea', 'planning', 'confirmed', 'active', 'completed', 'cancelled'].map(s => (
-                  <MenuItem key={s} value={s} sx={{ textTransform: 'capitalize' }}>{s}</MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-            <FormControl fullWidth>
-              <InputLabel>Trip type</InputLabel>
-              <Select value={editForm.tripType} label="Trip type" onChange={e => setEditForm(p => ({ ...p, tripType: e.target.value }))}>
-                <MenuItem value="leisure">Leisure</MenuItem>
-                <MenuItem value="work">Work</MenuItem>
-                <MenuItem value="mixed">Mixed</MenuItem>
-              </Select>
-            </FormControl>
-            <Box sx={{ display: 'flex', gap: 2, flexDirection: { xs: 'column', sm: 'row' } }}>
-              <TextField label="Departure date" type="date" value={editForm.startDate} onChange={e => setEditForm(p => ({ ...p, startDate: e.target.value }))} fullWidth InputLabelProps={{ shrink: true }} />
-              <TextField label="Return date"    type="date" value={editForm.endDate}   onChange={e => setEditForm(p => ({ ...p, endDate: e.target.value }))}   fullWidth InputLabelProps={{ shrink: true }} />
-            </Box>
-            <TextField label="Purpose / notes" value={editForm.purpose} onChange={e => setEditForm(p => ({ ...p, purpose: e.target.value }))} fullWidth multiline rows={2} />
-          </Box>
-        </DialogContent>
-        <DialogActions sx={{ px: 3, pb: 3, gap: 1, flexDirection: { xs: 'column-reverse', sm: 'row' } }}>
-          <Button
-            startIcon={<DeleteForeverIcon />}
-            onClick={() => { setEditOpen(false); openDeletePreview(); }}
-            sx={{ mr: 'auto', color: '#dc2626', '&:hover': { backgroundColor: alpha('#dc2626', 0.06) } }}
-            fullWidth={isMobile}
-            size="large"
-          >
-            Delete trip
-          </Button>
-          <Button onClick={() => setEditOpen(false)} fullWidth={isMobile} size="large">Cancel</Button>
-          <Button variant="contained" onClick={saveEdit} disabled={!editForm.name} fullWidth={isMobile} size="large">Save Changes</Button>
-        </DialogActions>
-      </Dialog>
-
-      {/* ── Delete preview dialog (Step 1: audit) ── */}
-      <Dialog
-        open={deletePreviewOpen}
-        onClose={() => !deleting && setDeletePreviewOpen(false)}
-        maxWidth="sm" fullWidth fullScreen={isMobile}
-      >
-        <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1.5, fontWeight: 700, color: '#dc2626' }}>
-          <WarningAmberIcon />
-          Delete "{trip?.name}"?
-        </DialogTitle>
-        <DialogContent>
-          {!deletePreview && !deleteError && (
-            <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
-              <CircularProgress size={32} />
-            </Box>
-          )}
-          {deleteError && (
-            <Typography color="error" variant="body2">{deleteError}</Typography>
-          )}
-          {deletePreview && (
-            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-              <Typography variant="body2" color="text.secondary">
-                This will permanently delete the following. This cannot be undone.
-              </Typography>
-              <Paper variant="outlined" sx={{ borderRadius: 2, overflow: 'hidden' }}>
-                <List dense disablePadding>
-                  {deletePreview.audit.itinerary.days > 0 && (
-                    <>
-                      <ListItem>
-                        <ListItemText
-                          primary={`Itinerary — ${deletePreview.audit.itinerary.days} day${deletePreview.audit.itinerary.days !== 1 ? 's' : ''}, ${deletePreview.audit.itinerary.stops} stop${deletePreview.audit.itinerary.stops !== 1 ? 's' : ''}`}
-                        />
-                      </ListItem>
-                      <Divider />
-                    </>
-                  )}
-                  {(deletePreview.audit.logistics.transport > 0 || deletePreview.audit.logistics.accommodation > 0 || deletePreview.audit.logistics.venues > 0) && (
-                    <>
-                      <ListItem>
-                        <ListItemText
-                          primary={[
-                            deletePreview.audit.logistics.transport > 0 && `${deletePreview.audit.logistics.transport} transport booking${deletePreview.audit.logistics.transport !== 1 ? 's' : ''}`,
-                            deletePreview.audit.logistics.accommodation > 0 && `${deletePreview.audit.logistics.accommodation} accommodation`,
-                            deletePreview.audit.logistics.venues > 0 && `${deletePreview.audit.logistics.venues} venue${deletePreview.audit.logistics.venues !== 1 ? 's' : ''}`,
-                          ].filter(Boolean).join(', ')}
-                          secondary="Logistics"
-                        />
-                      </ListItem>
-                      <Divider />
-                    </>
-                  )}
-                  {deletePreview.audit.files.total > 0 && (
-                    <>
-                      <ListItem>
-                        <ListItemText
-                          primary={`${deletePreview.audit.files.total} resource${deletePreview.audit.files.total !== 1 ? 's' : ''} — ${Object.entries(deletePreview.audit.files.byType).map(([k, v]) => `${v} ${k}${(v as number) !== 1 ? 's' : ''}`).join(', ')}`}
-                          secondary="Files, links, contacts, notes, todos"
-                        />
-                      </ListItem>
-                      <Divider />
-                    </>
-                  )}
-                  {deletePreview.audit.gcsAttachments.length > 0 && (
-                    <>
-                      <ListItem sx={{ backgroundColor: alpha('#dc2626', 0.04) }}>
-                        <ListItemText
-                          primary={`${deletePreview.audit.gcsAttachments.length} uploaded file${deletePreview.audit.gcsAttachments.length !== 1 ? 's' : ''} will be permanently removed from storage`}
-                          secondary={deletePreview.audit.gcsAttachments.map((f: any) => f.name).join(', ')}
-                          primaryTypographyProps={{ color: '#dc2626', fontWeight: 700 }}
-                        />
-                      </ListItem>
-                      <Divider />
-                    </>
-                  )}
-                  {deletePreview.audit.pushLogs.total > 0 && (
-                    <ListItem>
-                      <ListItemText
-                        primary={`${deletePreview.audit.pushLogs.total} push notification log${deletePreview.audit.pushLogs.total !== 1 ? 's' : ''}`}
-                      />
-                    </ListItem>
-                  )}
-                  {deletePreview.audit.packing.exists && (
-                    <>
-                      <Divider />
-                      <ListItem>
-                        <ListItemText primary="Packing list" />
-                      </ListItem>
-                    </>
-                  )}
-                  {deletePreview.audit.intelligence.exists && (
-                    <>
-                      <Divider />
-                      <ListItem>
-                        <ListItemText primary="Cultural intelligence data" />
-                      </ListItem>
-                    </>
-                  )}
-                </List>
-              </Paper>
-            </Box>
-          )}
-        </DialogContent>
-        <DialogActions sx={{ px: 3, pb: 3, gap: 1, flexDirection: { xs: 'column-reverse', sm: 'row' } }}>
-          <Button onClick={() => setDeletePreviewOpen(false)} fullWidth={isMobile} size="large">Cancel</Button>
-          {deletePreview && (
-            <Button
-              variant="contained"
-              onClick={() => { setDeletePreviewOpen(false); setDeleteConfirmOpen(true); }}
-              fullWidth={isMobile} size="large"
-              sx={{ backgroundColor: '#dc2626', '&:hover': { backgroundColor: '#b91c1c' } }}
-              startIcon={<DeleteForeverIcon />}
-            >
-              Continue to delete
+        {/* ── Delete confirm dialog ── */}
+        <Dialog
+          open={deleteConfirmOpen}
+          onClose={() => !deleting && setDeleteConfirmOpen(false)}
+          maxWidth="xs" fullWidth
+          PaperProps={{ sx: { borderRadius: 2.5, backgroundColor: D.paper } }}
+        >
+          <DialogTitle sx={{
+            fontFamily: D.display, fontSize: '1.4rem',
+            letterSpacing: '-0.02em', color: '#dc2626',
+          }}>
+            Are you absolutely sure?
+          </DialogTitle>
+          <DialogContent>
+            <Typography sx={{ fontFamily: D.body }} variant="body2" color="text.secondary">
+              <strong>"{trip?.name}"</strong> and all its data will be permanently deleted. There is no undo.
+            </Typography>
+            {deleteError && (
+              <Typography sx={{ fontFamily: D.body, mt: 1 }} color="error" variant="body2">{deleteError}</Typography>
+            )}
+          </DialogContent>
+          <DialogActions sx={{ px: 3, pb: 3, gap: 1 }}>
+            <Button onClick={() => setDeleteConfirmOpen(false)} disabled={deleting} size="large"
+              sx={{ fontFamily: D.body, fontWeight: 600 }}>
+              Cancel
             </Button>
-          )}
-        </DialogActions>
-      </Dialog>
+            <Button
+              variant="contained" onClick={handleDeleteTrip} disabled={deleting} size="large"
+              startIcon={deleting ? <CircularProgress size={16} sx={{ color: 'white' }} /> : <DeleteForeverIcon />}
+              sx={{
+                fontFamily: D.display, letterSpacing: '-0.01em',
+                backgroundColor: '#dc2626', boxShadow: 'none',
+                '&:hover': { backgroundColor: '#b91c1c', boxShadow: 'none' },
+              }}
+            >
+              {deleting ? 'Deleting…' : 'Permanently delete'}
+            </Button>
+          </DialogActions>
+        </Dialog>
 
-      {/* ── Delete confirm dialog (Step 2: point of no return) ── */}
-      <Dialog
-        open={deleteConfirmOpen}
-        onClose={() => !deleting && setDeleteConfirmOpen(false)}
-        maxWidth="xs" fullWidth
-      >
-        <DialogTitle sx={{ fontWeight: 700, color: '#dc2626' }}>Are you absolutely sure?</DialogTitle>
-        <DialogContent>
-          <Typography variant="body2" color="text.secondary">
-            <strong>"{trip?.name}"</strong> and all its data will be permanently deleted. There is no undo.
-          </Typography>
-          {deleteError && (
-            <Typography color="error" variant="body2" sx={{ mt: 1 }}>{deleteError}</Typography>
-          )}
-        </DialogContent>
-        <DialogActions sx={{ px: 3, pb: 3, gap: 1 }}>
-          <Button onClick={() => setDeleteConfirmOpen(false)} disabled={deleting} size="large">Cancel</Button>
-          <Button
-            variant="contained" onClick={handleDeleteTrip} disabled={deleting} size="large"
-            sx={{ backgroundColor: '#dc2626', '&:hover': { backgroundColor: '#b91c1c' } }}
-            startIcon={deleting ? <CircularProgress size={18} sx={{ color: 'white' }} /> : <DeleteForeverIcon />}
-          >
-            {deleting ? 'Deleting…' : 'Permanently delete'}
-          </Button>
-        </DialogActions>
-      </Dialog>
-
-    </Box>
+      </Box>
+    </>
   );
 }

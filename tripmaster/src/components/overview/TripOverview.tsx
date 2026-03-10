@@ -28,6 +28,20 @@ import BlockIcon                from '@mui/icons-material/Block';
 import UndoIcon                 from '@mui/icons-material/Undo';
 import NavigateButton           from '@/components/ui/NavigateButton';
 
+// ─── Design tokens ────────────────────────────────────────────────────────────
+
+const D = {
+  navy:    '#1D2642',
+  terra:   '#C4714A',
+  green:   '#6B7C5C',
+  bg:      '#F5F0E8',
+  paper:   '#FDFAF5',
+  muted:   'rgba(29,38,66,0.45)',
+  rule:    'rgba(29,38,66,0.10)',
+  display: '"Archivo Black", sans-serif',
+  body:    '"Archivo", "Inter", sans-serif',
+};
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface WeatherDay {
@@ -70,15 +84,14 @@ interface Props {
   onNavigate: (tab: number) => void;
 }
 
-// ─── Section colour palette ───────────────────────────────────────────────────
-// Each strip has its own dark header colour + a tinted content background
+// ─── Section colours ──────────────────────────────────────────────────────────
 
 const SECTION_COLOURS = {
-  logistics:  { header: '#1D2642', tint: 'rgba(29,38,66,0.04)',  accent: '#4a5a8a' },
-  itinerary:  { header: '#2d4a1e', tint: 'rgba(45,74,30,0.04)',  accent: '#55702C' },
-  weather:    { header: '#7a4a10', tint: 'rgba(122,74,16,0.04)', accent: '#C9521B' },
-  packing:    { header: '#3d3035', tint: 'rgba(61,48,53,0.04)',  accent: '#8b5e6a' },
-  resources:  { header: '#1a3d3d', tint: 'rgba(26,61,61,0.04)', accent: '#0891b2' },
+  logistics:  { header: '#1D2642', tint: 'rgba(29,38,66,0.03)',  accent: '#4a5a8a' },
+  itinerary:  { header: '#2d4a1e', tint: 'rgba(45,74,30,0.03)',  accent: '#55702C' },
+  weather:    { header: '#7a4a10', tint: 'rgba(122,74,16,0.03)', accent: '#C9521B' },
+  packing:    { header: '#3d3035', tint: 'rgba(61,48,53,0.03)',  accent: '#8b5e6a' },
+  resources:  { header: '#1a3d3d', tint: 'rgba(26,61,61,0.03)', accent: '#0891b2' },
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -96,81 +109,103 @@ function formatTime(mins: number): string {
   return `${String(Math.floor(mins / 60)).padStart(2, '0')}:${String(mins % 60).padStart(2, '0')}`;
 }
 
+const toDialDigits = (phone: string) => phone.replace(/\D/g, '');
+
+// ─── Shared atoms ─────────────────────────────────────────────────────────────
+
+const SectionTag = ({ children, color = D.muted }: { children: React.ReactNode; color?: string }) => (
+  <Typography sx={{
+    fontFamily: D.body, fontSize: '0.6rem', fontWeight: 700,
+    letterSpacing: '0.12em', textTransform: 'uppercase',
+    color, display: 'block',
+  }}>
+    {children}
+  </Typography>
+);
+
+function StatusPill({ status }: { status: string }) {
+  const DOT: Record<string, string> = {
+    not_booked: '#9e9e9e', pending: '#ed6c02', booked: D.navy,
+    confirmed: '#2e7d32', cancelled: '#d32f2f',
+  };
+  const color = DOT[status] ?? DOT.not_booked;
+  return (
+    <Box sx={{
+      display: 'inline-flex', alignItems: 'center', gap: 0.6,
+      px: 1.25, py: 0.4,
+      bgcolor: `${color}14`,
+      border: `1px solid ${color}28`,
+      borderRadius: 99,
+    }}>
+      <Box sx={{ width: 6, height: 6, borderRadius: '50%', bgcolor: color, flexShrink: 0 }} />
+      <Typography sx={{ fontSize: '0.72rem', fontFamily: D.body, fontWeight: 600, textTransform: 'capitalize', color }}>
+        {status.replace('_', ' ')}
+      </Typography>
+    </Box>
+  );
+}
+
 function statusDot(level: 'ok' | 'warn' | 'empty') {
   if (level === 'ok')   return <CheckCircleIcon sx={{ fontSize: 14, color: 'success.main', flexShrink: 0 }} />;
   if (level === 'warn') return <WarningAmberIcon sx={{ fontSize: 14, color: 'warning.main', flexShrink: 0 }} />;
   return <RadioButtonUncheckedIcon sx={{ fontSize: 14, color: 'text.disabled', flexShrink: 0 }} />;
 }
 
-const toDialDigits = (phone: string) => phone.replace(/\D/g, '');
-
 // ─── Strip wrapper ────────────────────────────────────────────────────────────
 
 function Strip({
-  icon, label, tab, onNavigate, status, onDismiss, children,
-  sectionKey,
+  icon, label, tab, onNavigate, status, onDismiss, children, sectionKey,
 }: {
-  icon:        React.ReactNode;
-  label:       string;
-  tab:         number;
-  onNavigate:  (tab: number) => void;
-  status?:     'ok' | 'warn' | 'empty';
-  onDismiss?:  () => void;
-  children:    React.ReactNode;
-  sectionKey:  keyof typeof SECTION_COLOURS;
+  icon:       React.ReactNode;
+  label:      string;
+  tab:        number;
+  onNavigate: (tab: number) => void;
+  status?:    'ok' | 'warn' | 'empty';
+  onDismiss?: () => void;
+  children:   React.ReactNode;
+  sectionKey: keyof typeof SECTION_COLOURS;
 }) {
   const colours = SECTION_COLOURS[sectionKey];
-
   return (
-    <Paper
-      elevation={0}
-      sx={{
-        overflow: 'hidden',
-        border: '1px solid',
-        borderColor: status === 'warn' ? 'rgba(237,108,2,0.4)' : 'divider',
-        borderRadius: 2,
-      }}
-    >
-      {/* ── Coloured header row ── */}
+    <Paper elevation={0} sx={{
+      overflow: 'hidden',
+      border: '1.5px solid',
+      borderColor: status === 'warn' ? 'rgba(237,108,2,0.4)' : D.rule,
+      borderRadius: '12px',
+    }}>
+      {/* Header */}
       <Box
         onClick={() => onNavigate(tab)}
         sx={{
-          px: { xs: 2, sm: 2.5 },
-          py: { xs: 1.25, sm: 1.5 },
-          display: 'flex',
-          alignItems: 'center',
-          gap: 1.25,
+          px: 2.5, py: 1.5,
+          display: 'flex', alignItems: 'center', gap: 1.5,
           backgroundColor: colours.header,
-          cursor: 'pointer',
-          userSelect: 'none',
+          cursor: 'pointer', userSelect: 'none',
           transition: 'filter 0.15s ease',
           '&:hover': { filter: 'brightness(1.12)' },
         }}
       >
-        {/* Icon */}
-        <Box sx={{ color: 'rgba(255,255,255,0.7)', display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+        <Box sx={{ color: 'rgba(255,255,255,0.6)', display: 'flex', alignItems: 'center', flexShrink: 0 }}>
           {icon}
         </Box>
 
-        {/* Label */}
         <Typography sx={{
           flexGrow: 1,
-          fontSize: { xs: '0.85rem', sm: '0.9rem' },
-          fontWeight: 800,
-          letterSpacing: 1.2,
+          fontFamily: D.display,
+          fontSize: '0.85rem',
+          letterSpacing: '0.08em',
           textTransform: 'uppercase',
           color: 'white',
         }}>
           {label}
         </Typography>
 
-        {/* Status badge */}
         {status === 'ok' && (
           <Chip
             icon={<CheckCircleIcon sx={{ fontSize: '0.85rem !important', color: '#4ade80 !important' }} />}
             label="Good"
             size="small"
-            sx={{ height: 22, fontSize: '0.68rem', fontWeight: 700, backgroundColor: 'rgba(74,222,128,0.15)', color: '#4ade80', border: '1px solid rgba(74,222,128,0.3)', '& .MuiChip-icon': { ml: '6px' } }}
+            sx={{ height: 22, fontSize: '0.68rem', fontWeight: 700, fontFamily: D.body, backgroundColor: 'rgba(74,222,128,0.15)', color: '#4ade80', border: '1px solid rgba(74,222,128,0.3)', '& .MuiChip-icon': { ml: '6px' } }}
           />
         )}
         {status === 'warn' && (
@@ -178,11 +213,9 @@ function Strip({
             icon={<WarningAmberIcon sx={{ fontSize: '0.85rem !important', color: '#fbbf24 !important' }} />}
             label="Action needed"
             size="small"
-            sx={{ height: 22, fontSize: '0.68rem', fontWeight: 700, backgroundColor: 'rgba(251,191,36,0.15)', color: '#fbbf24', border: '1px solid rgba(251,191,36,0.3)', '& .MuiChip-icon': { ml: '6px' } }}
+            sx={{ height: 22, fontSize: '0.68rem', fontWeight: 700, fontFamily: D.body, backgroundColor: 'rgba(251,191,36,0.15)', color: '#fbbf24', border: '1px solid rgba(251,191,36,0.3)', '& .MuiChip-icon': { ml: '6px' } }}
           />
         )}
-
-        {/* Dismiss on empty */}
         {status === 'empty' && onDismiss && (
           <Tooltip title="Not needed for this trip">
             <IconButton
@@ -194,12 +227,11 @@ function Strip({
             </IconButton>
           </Tooltip>
         )}
-
-        <ChevronRightIcon sx={{ fontSize: 18, color: 'rgba(255,255,255,0.4)', flexShrink: 0 }} />
+        <ChevronRightIcon sx={{ fontSize: 18, color: 'rgba(255,255,255,0.35)', flexShrink: 0 }} />
       </Box>
 
-      {/* ── Content ── */}
-      <Box sx={{ px: { xs: 2, sm: 2.5 }, py: { xs: 1.5, sm: 2 }, backgroundColor: colours.tint }}>
+      {/* Content */}
+      <Box sx={{ px: 2.5, py: 2, backgroundColor: colours.tint }}>
         {children}
       </Box>
     </Paper>
@@ -216,42 +248,28 @@ function StatusRow({ icon, label, value, level, onDismiss }: {
   onDismiss?: () => void;
 }) {
   return (
-    <Box sx={{
-      display: 'flex',
-      alignItems: 'center',
-      gap: { xs: 0.75, sm: 1 },
-      py: { xs: 0.6, sm: 0.5 },
-    }}>
+    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, py: 0.6 }}>
       <Box sx={{ color: 'text.disabled', display: 'flex', flexShrink: 0 }}>{icon}</Box>
       <Typography sx={{
-        fontSize: '0.8rem',
-        color: 'text.secondary',
-        minWidth: { xs: 72, sm: 90 },
-        flexShrink: 0,
-        fontWeight: 600,
+        fontFamily: D.body, fontSize: '0.78rem', color: 'text.secondary',
+        minWidth: { xs: 72, sm: 90 }, flexShrink: 0, fontWeight: 600,
       }}>
         {label}
       </Typography>
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.6, minWidth: 0, flexGrow: 1 }}>
         {statusDot(level)}
         <Typography sx={{
-          fontSize: '0.82rem',
-          fontWeight: 700,
+          fontFamily: D.body, fontSize: '0.82rem', fontWeight: 700,
           color: level === 'ok' ? 'success.main' : level === 'warn' ? 'warning.dark' : 'text.disabled',
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-          whiteSpace: 'nowrap',
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
         }}>
           {value}
         </Typography>
       </Box>
       {level === 'empty' && onDismiss && (
         <Tooltip title="Not needed for this trip">
-          <IconButton
-            size="small"
-            onClick={e => { e.stopPropagation(); onDismiss(); }}
-            sx={{ p: 0.25, flexShrink: 0, color: 'text.disabled', '&:hover': { color: 'error.main' } }}
-          >
+          <IconButton size="small" onClick={e => { e.stopPropagation(); onDismiss(); }}
+            sx={{ p: 0.25, flexShrink: 0, color: 'text.disabled', '&:hover': { color: 'error.main' } }}>
             <BlockIcon sx={{ fontSize: 13 }} />
           </IconButton>
         </Tooltip>
@@ -323,8 +341,8 @@ export default function TripOverview({ trip, onNavigate }: Props) {
     }
   }
 
-  const nextStartMins = nextStop ? stopStartMinutes(nextStop) : null;
-  const minsUntilNext = nextStartMins !== null
+  const nextStartMins  = nextStop ? stopStartMinutes(nextStop) : null;
+  const minsUntilNext  = nextStartMins !== null
     ? nextStartMins - (new Date().getHours() * 60 + new Date().getMinutes())
     : null;
   const isUrgent = minsUntilNext !== null && minsUntilNext <= 30;
@@ -387,36 +405,53 @@ export default function TripOverview({ trip, onNavigate }: Props) {
   const docCount   = resources.filter(r => r.resourceType === 'file').length;
   const hasResources = contacts.length > 0 || keyLinks.length > 0 || docCount > 0 || notes.length > 0;
 
+  // ── Countdown label ───────────────────────────────────────────────────────
+  const countdownNumber = isPast ? null : isToday ? 0 : daysUntil;
+  const countdownLabel  = isPast ? 'TRIP COMPLETE' : isToday ? 'DEPARTING TODAY' : 'DAYS TO GO';
+  const accentColor     = isToday ? '#2e7d32' : isPast ? D.muted : daysUntil <= 7 ? '#ed6c02' : D.navy;
+
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: { xs: 1.5, sm: 2 } }}>
 
       {/* ── What's Next (active trips only) ── */}
       {isActive && nextStop && (
         <Paper elevation={0} sx={{
-          p: { xs: 2, sm: 2.5 },
-          backgroundColor: isUrgent ? 'rgba(201,82,27,0.06)' : 'rgba(85,112,44,0.06)',
-          border: '2px solid',
-          borderColor: isUrgent ? 'warning.main' : '#55702C',
-          borderRadius: 2,
+          overflow: 'hidden',
+          border: '1.5px solid',
+          borderColor: isUrgent ? 'rgba(237,108,2,0.5)' : 'rgba(107,124,92,0.4)',
+          borderRadius: '12px',
+          position: 'relative',
         }}>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 1 }}>
+          {/* Urgency colour bar */}
+          <Box sx={{
+            height: 4,
+            background: isUrgent
+              ? 'linear-gradient(90deg, #ed6c02, #fbbf24)'
+              : 'linear-gradient(90deg, #6B7C5C, #9aad89)',
+          }} />
+
+          <Box sx={{ p: 2.5, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 2 }}>
             <Box sx={{ minWidth: 0 }}>
-              <Typography sx={{
-                fontWeight: 800, textTransform: 'uppercase', fontSize: '0.65rem',
-                letterSpacing: '0.08em', color: isUrgent ? 'warning.dark' : '#55702C',
-              }}>
+              <SectionTag color={isUrgent ? '#ed6c02' : D.green}>
                 {isUrgent
-                  ? `⚡ Starting in ${minsUntilNext} min`
+                  ? `Starting in ${minsUntilNext} min`
                   : `Next up · ${nextStartMins !== null ? formatTime(nextStartMins) : ''}`}
-              </Typography>
-              <Typography variant="h6" fontWeight={800} sx={{ mt: 0.25, lineHeight: 1.2 }}>
+              </SectionTag>
+              <Typography sx={{
+                fontFamily: D.display, fontSize: '1.4rem', color: D.navy,
+                lineHeight: 1.1, letterSpacing: '-0.02em', mt: 0.5,
+              }}>
                 {nextStop.name}
               </Typography>
               {nextStop.address && (
-                <Typography variant="body2" color="text.secondary" sx={{ mt: 0.25 }}>{nextStop.address}</Typography>
+                <Typography sx={{ fontFamily: D.body, fontSize: '0.78rem', color: D.muted, mt: 0.5 }}>
+                  {nextStop.address}
+                </Typography>
               )}
               {nextStop.notes && (
-                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>{nextStop.notes}</Typography>
+                <Typography sx={{ fontFamily: D.body, fontSize: '0.75rem', color: D.muted, mt: 0.4, fontStyle: 'italic' }}>
+                  {nextStop.notes}
+                </Typography>
               )}
             </Box>
             <NavigateButton
@@ -430,56 +465,105 @@ export default function TripOverview({ trip, onNavigate }: Props) {
 
       {isActive && !nextStop && (
         <Paper elevation={0} sx={{
-          p: 2, backgroundColor: 'rgba(85,112,44,0.06)',
-          border: '1px solid', borderColor: '#55702C', borderRadius: 2,
+          p: 2.5, border: '1.5px solid rgba(107,124,92,0.4)', borderRadius: '12px',
+          bgcolor: 'rgba(107,124,92,0.04)',
         }}>
-          <Typography variant="body2" fontWeight={700} color="#55702C">✅ Nothing more scheduled for today</Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.25 }}>Check the itinerary tab for tomorrow.</Typography>
+          <Typography sx={{ fontFamily: D.display, fontSize: '0.9rem', color: D.green }}>
+            Nothing more scheduled today
+          </Typography>
+          <Typography sx={{ fontFamily: D.body, fontSize: '0.78rem', color: D.muted, mt: 0.4 }}>
+            Check the itinerary tab for tomorrow.
+          </Typography>
         </Paper>
       )}
 
       {/* ── Countdown hero ── */}
       <Paper elevation={0} sx={{
-        px: { xs: 2, sm: 2.5 },
-        py: { xs: 2, sm: 2.5 },
-        borderRadius: 2,
-        border: '1px solid',
-        borderColor: 'divider',
-        borderLeft: '4px solid',
-        borderLeftColor: isToday ? 'success.main' : isPast ? 'text.disabled' : daysUntil <= 7 ? 'warning.main' : 'primary.main',
+        borderRadius: '12px',
+        border: '1.5px solid',
+        borderColor: D.rule,
+        overflow: 'hidden',
+        position: 'relative',
       }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-          <AccessTimeIcon color={isToday ? 'success' : isPast ? 'disabled' : 'primary'} sx={{ fontSize: 26, flexShrink: 0 }} />
-          <Box sx={{ minWidth: 0 }}>
-            <Typography fontWeight={800} sx={{ lineHeight: 1, fontSize: { xs: '1.6rem', sm: '2rem' } }}>
-              {isPast ? 'Trip complete' : isToday ? 'Departing today' : `${daysUntil} days to go`}
-            </Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ mt: 0.4, fontSize: '0.82rem' }}>
-              {new Date(trip.startDate).toLocaleDateString('en-IE', { weekday: 'short', day: 'numeric', month: 'long', year: 'numeric' })}
-              {' → '}
-              {new Date(trip.endDate).toLocaleDateString('en-IE', { day: 'numeric', month: 'long' })}
-              {trip.nights > 0 && ` · ${trip.nights} nights`}
-            </Typography>
-          </Box>
-        </Box>
+        {/* Left accent bar */}
+        <Box sx={{
+          position: 'absolute', left: 0, top: 0, bottom: 0, width: 4,
+          bgcolor: accentColor,
+        }} />
 
-        {items.length > 0 && !isPast && (
-          <Box sx={{ mt: 2 }}>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
-              <Typography variant="caption" color="text.secondary" fontWeight={600} sx={{ fontSize: '0.75rem' }}>
-                Packing · {packedItems} of {items.length} items
+        <Box sx={{ px: 2.5, pt: 2.5, pb: items.length > 0 && !isPast ? 1.5 : 2.5, pl: 3.5 }}>
+          {/* Two-zone layout: number hero left, destination right */}
+          <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 2 }}>
+
+            {/* LEFT: number hero */}
+            <Box sx={{ flexShrink: 0 }}>
+              {countdownNumber !== null ? (
+                <>
+                  <Typography sx={{
+                    fontFamily: D.display,
+                    fontSize: isToday ? '3rem' : '4.5rem',
+                    color: accentColor,
+                    lineHeight: 1,
+                    letterSpacing: '-0.04em',
+                  }}>
+                    {isToday ? 'TODAY' : countdownNumber}
+                  </Typography>
+                  {!isToday && (
+                    <SectionTag color={alpha(accentColor, 0.7)}>{countdownLabel}</SectionTag>
+                  )}
+                </>
+              ) : (
+                <Typography sx={{ fontFamily: D.display, fontSize: '1.8rem', color: D.muted, lineHeight: 1, letterSpacing: '-0.02em' }}>
+                  COMPLETE
+                </Typography>
+              )}
+            </Box>
+
+            {/* Vertical rule */}
+            <Box sx={{ width: '1px', bgcolor: D.rule, alignSelf: 'stretch', flexShrink: 0, mx: 0.5 }} />
+
+            {/* RIGHT: destination + dates */}
+            <Box sx={{ flex: 1, minWidth: 0 }}>
+              <SectionTag>Destination</SectionTag>
+              <Typography sx={{
+                fontFamily: D.display, fontSize: '1.4rem', color: D.navy,
+                lineHeight: 1.1, letterSpacing: '-0.02em', mt: 0.5,
+              }}>
+                {trip.destination?.city}
               </Typography>
-              <Typography variant="caption" fontWeight={800}
-                sx={{ fontSize: '0.75rem', color: packPct === 100 ? 'success.main' : 'text.secondary' }}>
-                {packPct}%
+              <Typography sx={{ fontFamily: D.body, fontSize: '0.78rem', color: D.muted, mt: 0.25 }}>
+                {trip.destination?.country}
+              </Typography>
+              <Typography sx={{ fontFamily: D.body, fontSize: '0.75rem', color: D.muted, mt: 0.75 }}>
+                {new Date(trip.startDate).toLocaleDateString('en-IE', { day: 'numeric', month: 'short' })}
+                {' → '}
+                {new Date(trip.endDate).toLocaleDateString('en-IE', { day: 'numeric', month: 'short', year: 'numeric' })}
+                {trip.nights > 0 && ` · ${trip.nights}N`}
               </Typography>
             </Box>
-            <LinearProgress variant="determinate" value={packPct} sx={{
-              height: 5, borderRadius: 3, backgroundColor: 'action.hover',
-              '& .MuiLinearProgress-bar': { borderRadius: 3, backgroundColor: packPct === 100 ? 'success.main' : '#55702C' },
-            }} />
           </Box>
-        )}
+
+          {/* Packing progress */}
+          {items.length > 0 && !isPast && (
+            <Box sx={{ mt: 2.5, pt: 2, borderTop: `1px dashed ${D.rule}` }}>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.75 }}>
+                <Typography sx={{ fontFamily: D.body, fontSize: '0.72rem', color: D.muted, fontWeight: 600 }}>
+                  Packing · {packedItems} of {items.length}
+                </Typography>
+                <Typography sx={{
+                  fontFamily: D.display, fontSize: '0.78rem',
+                  color: packPct === 100 ? 'success.main' : D.muted,
+                }}>
+                  {packPct}%
+                </Typography>
+              </Box>
+              <LinearProgress variant="determinate" value={packPct} sx={{
+                height: 4, borderRadius: 3, backgroundColor: D.rule,
+                '& .MuiLinearProgress-bar': { borderRadius: 3, backgroundColor: packPct === 100 ? 'success.main' : D.green },
+              }} />
+            </Box>
+          )}
+        </Box>
       </Paper>
 
       {loading ? (
@@ -568,7 +652,7 @@ export default function TripOverview({ trip, onNavigate }: Props) {
               sectionKey="itinerary"
             >
               {totalStops === 0 ? (
-                <Typography variant="body2" color="text.disabled" sx={{ fontSize: '0.82rem' }}>
+                <Typography sx={{ fontFamily: D.body, fontSize: '0.82rem', color: 'text.disabled' }}>
                   No itinerary added yet
                 </Typography>
               ) : isActive && itinerary?.days ? (
@@ -582,36 +666,53 @@ export default function TripOverview({ trip, onNavigate }: Props) {
                     return m === null || m >= nowMins;
                   });
                   return remaining.length > 0 ? (
-                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
-                      {remaining.slice(0, 3).map((s: any, i: number) => {
+                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.75 }}>
+                      {remaining.slice(0, 3).map((s: any, idx: number) => {
                         const mins = stopStartMinutes(s);
                         return (
-                          <Box key={i} sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                            <Typography sx={{ fontSize: '0.72rem', color: 'text.disabled', width: 34, flexShrink: 0, fontWeight: 700 }}>
+                          <Box key={idx} sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+                            <Typography sx={{
+                              fontFamily: D.display, fontSize: '0.78rem', color: D.terra,
+                              width: 36, flexShrink: 0, lineHeight: 1,
+                            }}>
                               {mins !== null ? formatTime(mins) : '—'}
                             </Typography>
-                            <Typography sx={{ fontSize: '0.84rem', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            <Typography sx={{
+                              fontFamily: D.body, fontSize: '0.84rem', fontWeight: 600,
+                              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: D.navy,
+                            }}>
                               {s.name}
                             </Typography>
                           </Box>
                         );
                       })}
                       {remaining.length > 3 && (
-                        <Typography variant="caption" color="text.disabled" sx={{ fontSize: '0.72rem', mt: 0.25 }}>
+                        <Typography sx={{ fontFamily: D.body, fontSize: '0.72rem', color: D.muted, mt: 0.25 }}>
                           +{remaining.length - 3} more today
                         </Typography>
                       )}
                     </Box>
                   ) : (
-                    <Typography variant="body2" color="text.secondary" sx={{ fontSize: '0.82rem' }}>
+                    <Typography sx={{ fontFamily: D.body, fontSize: '0.82rem', color: D.muted }}>
                       Nothing more scheduled today
                     </Typography>
                   );
                 })()
               ) : (
-                <Typography variant="body2" color="text.secondary" sx={{ fontSize: '0.84rem', fontWeight: 600 }}>
-                  {totalDays} day{totalDays !== 1 ? 's' : ''} planned · {totalStops} stop{totalStops !== 1 ? 's' : ''}
-                </Typography>
+                <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1 }}>
+                  <Typography sx={{ fontFamily: D.display, fontSize: '1.6rem', color: D.navy, letterSpacing: '-0.03em', lineHeight: 1 }}>
+                    {totalDays}
+                  </Typography>
+                  <Typography sx={{ fontFamily: D.body, fontSize: '0.78rem', color: D.muted }}>
+                    day{totalDays !== 1 ? 's' : ''} planned
+                  </Typography>
+                  <Typography sx={{ fontFamily: D.display, fontSize: '1.6rem', color: D.navy, letterSpacing: '-0.03em', lineHeight: 1, ml: 1 }}>
+                    {totalStops}
+                  </Typography>
+                  <Typography sx={{ fontFamily: D.body, fontSize: '0.78rem', color: D.muted }}>
+                    stop{totalStops !== 1 ? 's' : ''}
+                  </Typography>
+                </Box>
               )}
             </Strip>
           )}
@@ -627,28 +728,40 @@ export default function TripOverview({ trip, onNavigate }: Props) {
               sectionKey="weather"
             >
               {weatherDay ? (
-                <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1.5, flexWrap: 'wrap' }}>
-                  <Typography sx={{ fontSize: '1.8rem', lineHeight: 1, flexShrink: 0 }}>{weatherDay.icon}</Typography>
-                  <Box sx={{ minWidth: 0 }}>
-                    <Typography fontWeight={700} sx={{ fontSize: '0.9rem' }}>
-                      {weatherDay.condition} · {weatherDay.tempMax}°C high / {weatherDay.tempMin}°C low
+                <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 2 }}>
+                  {/* Temp hero */}
+                  <Box sx={{ flexShrink: 0, textAlign: 'center' }}>
+                    <Typography sx={{ fontSize: '2rem', lineHeight: 1 }}>{weatherDay.icon}</Typography>
+                    <Typography sx={{ fontFamily: D.display, fontSize: '1.4rem', color: D.navy, lineHeight: 1, letterSpacing: '-0.03em', mt: 0.5 }}>
+                      {weatherDay.tempMax}°
+                    </Typography>
+                    <Typography sx={{ fontFamily: D.body, fontSize: '0.7rem', color: D.muted }}>
+                      {weatherDay.tempMin}° low
+                    </Typography>
+                  </Box>
+
+                  <Box sx={{ width: '1px', bgcolor: D.rule, alignSelf: 'stretch', mx: 0.5 }} />
+
+                  <Box sx={{ flex: 1, minWidth: 0 }}>
+                    <Typography sx={{ fontFamily: D.display, fontSize: '0.95rem', color: D.navy, lineHeight: 1.2 }}>
+                      {weatherDay.condition}
                     </Typography>
                     {trip.weather?.summary && (
-                      <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.78rem', display: 'block', mt: 0.3 }}>
+                      <Typography sx={{ fontFamily: D.body, fontSize: '0.75rem', color: D.muted, mt: 0.5 }}>
                         {trip.weather.summary}
                       </Typography>
                     )}
                     {trip.weather?.packingNotes?.[0] && (
-                      <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.78rem', display: 'block', mt: 0.2 }}>
-                        💡 {trip.weather.packingNotes[0]}
+                      <Typography sx={{ fontFamily: D.body, fontSize: '0.75rem', color: D.green, fontWeight: 600, mt: 0.4 }}>
+                        {trip.weather.packingNotes[0]}
                       </Typography>
                     )}
                   </Box>
                 </Box>
               ) : trip.weather?.summary ? (
-                <Typography variant="body2" color="text.secondary" sx={{ fontSize: '0.82rem' }}>{trip.weather.summary}</Typography>
+                <Typography sx={{ fontFamily: D.body, fontSize: '0.82rem', color: D.muted }}>{trip.weather.summary}</Typography>
               ) : (
-                <Typography variant="body2" color="text.disabled" sx={{ fontSize: '0.82rem' }}>No forecast data yet</Typography>
+                <Typography sx={{ fontFamily: D.body, fontSize: '0.82rem', color: 'text.disabled' }}>No forecast data yet</Typography>
               )}
             </Strip>
           )}
@@ -665,24 +778,21 @@ export default function TripOverview({ trip, onNavigate }: Props) {
               sectionKey="packing"
             >
               {items.length === 0 ? (
-                <Typography variant="body2" color="text.disabled" sx={{ fontSize: '0.82rem' }}>
+                <Typography sx={{ fontFamily: D.body, fontSize: '0.82rem', color: 'text.disabled' }}>
                   No list generated yet — tap to create one
                 </Typography>
               ) : (
                 <Box>
-                  <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-                    <Typography variant="body2" color="text.secondary" sx={{ fontSize: '0.82rem' }}>
-                      {packedItems} of {items.length} items packed
-                    </Typography>
-                    <Typography fontWeight={800} sx={{
-                      fontSize: '0.82rem',
-                      color: packPct === 100 ? 'success.main' : daysUntil <= 3 ? 'warning.dark' : 'text.secondary',
-                    }}>
+                  <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1, mb: 1.5 }}>
+                    <Typography sx={{ fontFamily: D.display, fontSize: '1.6rem', color: packPct === 100 ? 'success.main' : D.navy, letterSpacing: '-0.03em', lineHeight: 1 }}>
                       {packPct}%
+                    </Typography>
+                    <Typography sx={{ fontFamily: D.body, fontSize: '0.78rem', color: D.muted }}>
+                      packed · {packedItems} of {items.length} items
                     </Typography>
                   </Box>
                   <LinearProgress variant="determinate" value={packPct} sx={{
-                    height: 7, borderRadius: 3, backgroundColor: 'rgba(0,0,0,0.08)',
+                    height: 5, borderRadius: 3, backgroundColor: D.rule,
                     '& .MuiLinearProgress-bar': { borderRadius: 3, backgroundColor: packPct === 100 ? 'success.main' : '#8b5e6a' },
                   }} />
                 </Box>
@@ -706,22 +816,22 @@ export default function TripOverview({ trip, onNavigate }: Props) {
                     {contacts.map((c: any) => (
                       <Box key={c._id} sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
                         <PersonIcon sx={{ fontSize: 14, color: 'text.disabled', flexShrink: 0 }} />
-                        <Typography fontWeight={700} sx={{ fontSize: '0.85rem', mr: 0.5 }}>{c.name}</Typography>
-                        <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.72rem', mr: 'auto', textTransform: 'capitalize' }}>
+                        <Typography sx={{ fontFamily: D.display, fontSize: '0.85rem', color: D.navy, mr: 0.5 }}>{c.name}</Typography>
+                        <Typography sx={{ fontFamily: D.body, fontSize: '0.72rem', color: D.muted, mr: 'auto', textTransform: 'capitalize' }}>
                           {c.type?.replace(/_/g, ' ')}
                         </Typography>
                         <Box sx={{ display: 'flex', gap: 0.5, flexShrink: 0, flexWrap: 'wrap' }}>
                           {c.phone && (
                             <Button component="a" href={`tel:${c.phone}`} size="small" startIcon={<PhoneIcon sx={{ fontSize: '0.85rem !important' }} />}
                               variant="outlined" onClick={(e: React.MouseEvent) => e.stopPropagation()}
-                              sx={{ fontSize: '0.72rem', fontWeight: 700, py: 0.35, px: 0.9, minHeight: 28, borderColor: alpha('#55702C', 0.4), color: '#55702C', '&:hover': { borderColor: '#55702C', backgroundColor: alpha('#55702C', 0.06) } }}>
+                              sx={{ fontSize: '0.72rem', fontFamily: D.body, fontWeight: 700, py: 0.35, px: 0.9, minHeight: 28, borderColor: alpha(D.green, 0.4), color: D.green, '&:hover': { borderColor: D.green, backgroundColor: alpha(D.green, 0.06) } }}>
                               Call
                             </Button>
                           )}
                           {c.phone && (
                             <Button component="a" href={`sms:${c.phone}`} size="small" startIcon={<SmsIcon sx={{ fontSize: '0.85rem !important' }} />}
                               variant="outlined" onClick={(e: React.MouseEvent) => e.stopPropagation()}
-                              sx={{ fontSize: '0.72rem', fontWeight: 700, py: 0.35, px: 0.9, minHeight: 28, borderColor: alpha('#64748b', 0.4), color: '#64748b', '&:hover': { borderColor: '#64748b', backgroundColor: alpha('#64748b', 0.06) } }}>
+                              sx={{ fontSize: '0.72rem', fontFamily: D.body, fontWeight: 700, py: 0.35, px: 0.9, minHeight: 28, borderColor: alpha('#64748b', 0.4), color: '#64748b', '&:hover': { borderColor: '#64748b', backgroundColor: alpha('#64748b', 0.06) } }}>
                               SMS
                             </Button>
                           )}
@@ -730,14 +840,14 @@ export default function TripOverview({ trip, onNavigate }: Props) {
                               target="_blank" rel="noopener noreferrer" size="small"
                               startIcon={<WhatsAppIcon sx={{ fontSize: '0.85rem !important' }} />}
                               variant="outlined" onClick={(e: React.MouseEvent) => e.stopPropagation()}
-                              sx={{ fontSize: '0.72rem', fontWeight: 700, py: 0.35, px: 0.9, minHeight: 28, borderColor: alpha('#25D366', 0.5), color: '#25D366', '&:hover': { borderColor: '#25D366', backgroundColor: alpha('#25D366', 0.06) } }}>
-                              WhatsApp
+                              sx={{ fontSize: '0.72rem', fontFamily: D.body, fontWeight: 700, py: 0.35, px: 0.9, minHeight: 28, borderColor: alpha('#25D366', 0.5), color: '#25D366', '&:hover': { borderColor: '#25D366', backgroundColor: alpha('#25D366', 0.06) } }}>
+                              WA
                             </Button>
                           )}
                           {c.email && (
                             <Button component="a" href={`mailto:${c.email}`} size="small" startIcon={<EmailIcon sx={{ fontSize: '0.85rem !important' }} />}
                               variant="outlined" onClick={(e: React.MouseEvent) => e.stopPropagation()}
-                              sx={{ fontSize: '0.72rem', fontWeight: 700, py: 0.35, px: 0.9, minHeight: 28, borderColor: alpha('#0891b2', 0.4), color: '#0891b2', '&:hover': { borderColor: '#0891b2', backgroundColor: alpha('#0891b2', 0.06) } }}>
+                              sx={{ fontSize: '0.72rem', fontFamily: D.body, fontWeight: 700, py: 0.35, px: 0.9, minHeight: 28, borderColor: alpha('#0891b2', 0.4), color: '#0891b2', '&:hover': { borderColor: '#0891b2', backgroundColor: alpha('#0891b2', 0.06) } }}>
                               Email
                             </Button>
                           )}
@@ -747,7 +857,9 @@ export default function TripOverview({ trip, onNavigate }: Props) {
                   </Box>
                 )}
 
-                {contacts.length > 0 && (keyLinks.length > 0 || docCount > 0 || notes.length > 0) && <Divider />}
+                {contacts.length > 0 && (keyLinks.length > 0 || docCount > 0 || notes.length > 0) && (
+                  <Divider sx={{ borderColor: D.rule }} />
+                )}
 
                 {keyLinks.length > 0 && (
                   <Box sx={{ display: 'flex', gap: 0.75, flexWrap: 'wrap' }}>
@@ -763,7 +875,7 @@ export default function TripOverview({ trip, onNavigate }: Props) {
                         rel="noopener noreferrer"
                         onClick={(e: React.MouseEvent) => e.stopPropagation()}
                         clickable
-                        sx={{ fontSize: '0.72rem', fontWeight: 600, height: 24 }}
+                        sx={{ fontSize: '0.72rem', fontFamily: D.body, fontWeight: 600, height: 24 }}
                       />
                     ))}
                   </Box>
@@ -771,13 +883,13 @@ export default function TripOverview({ trip, onNavigate }: Props) {
 
                 <Box sx={{ display: 'flex', gap: 1.5, flexWrap: 'wrap' }}>
                   {docCount > 0 && (
-                    <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.78rem' }}>
-                      📄 {docCount} document{docCount !== 1 ? 's' : ''}
+                    <Typography sx={{ fontFamily: D.body, fontSize: '0.78rem', color: D.muted }}>
+                      {docCount} document{docCount !== 1 ? 's' : ''}
                     </Typography>
                   )}
                   {notes.length > 0 && (
-                    <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.78rem' }}>
-                      🗒️ {notes.length} note{notes.length !== 1 ? 's' : ''}
+                    <Typography sx={{ fontFamily: D.body, fontSize: '0.78rem', color: D.muted }}>
+                      {notes.length} note{notes.length !== 1 ? 's' : ''}
                     </Typography>
                   )}
                 </Box>
@@ -795,7 +907,7 @@ export default function TripOverview({ trip, onNavigate }: Props) {
               onDismiss={() => toggleDismiss('resources')}
               sectionKey="resources"
             >
-              <Typography variant="body2" color="text.disabled" sx={{ fontSize: '0.82rem' }}>
+              <Typography sx={{ fontFamily: D.body, fontSize: '0.82rem', color: 'text.disabled' }}>
                 No contacts, notes, links or documents yet
               </Typography>
             </Strip>
@@ -804,8 +916,8 @@ export default function TripOverview({ trip, onNavigate }: Props) {
           {/* ── Dismissed row ── */}
           {dismissed.length > 0 && (
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, px: 0.5 }}>
-              <Typography variant="caption" color="text.disabled" sx={{ fontSize: '0.72rem', flexGrow: 1 }}>
-                {dismissed.length} section{dismissed.length !== 1 ? 's' : ''} hidden for this trip
+              <Typography sx={{ fontFamily: D.body, fontSize: '0.72rem', color: D.muted, flexGrow: 1 }}>
+                {dismissed.length} section{dismissed.length !== 1 ? 's' : ''} hidden
               </Typography>
               <Button
                 size="small"
@@ -818,49 +930,104 @@ export default function TripOverview({ trip, onNavigate }: Props) {
                     body: JSON.stringify({ dismissedChecks: [] }),
                   });
                 }}
-                sx={{ fontSize: '0.72rem', color: 'text.disabled', py: 0.25 }}
+                sx={{ fontFamily: D.body, fontSize: '0.72rem', color: D.muted, py: 0.25 }}
               >
                 Restore all
               </Button>
             </Box>
           )}
 
-          {/* ── Trip details ── */}
-          <Paper elevation={0} variant="outlined" sx={{ p: { xs: 2, sm: 2.5 }, borderRadius: 2 }}>
-            <Typography sx={{
-              fontSize: '0.7rem', fontWeight: 800, letterSpacing: 1.2,
-              textTransform: 'uppercase', color: 'text.disabled', mb: 1.5,
+          {/* ── Trip Details ── */}
+          <Paper elevation={0} sx={{
+            borderRadius: '12px',
+            border: `1.5px solid ${D.rule}`,
+            overflow: 'hidden',
+            position: 'relative',
+          }}>
+            {/* Ghost AccessTime icon */}
+            <Box sx={{
+              position: 'absolute', right: -16, bottom: -16,
+              opacity: 0.04, color: D.navy, pointerEvents: 'none', transform: 'rotate(-8deg)',
+              '& .MuiSvgIcon-root': { fontSize: '10rem', width: '10rem', height: '10rem' },
             }}>
-              Trip Details
-            </Typography>
-            <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: { xs: 1.5, sm: 2 } }}>
-              {[
-                { label: 'From',    value: trip.origin?.city,      sub: trip.origin?.country },
-                { label: 'To',      value: trip.destination?.city, sub: trip.destination?.country },
-                { label: 'Departs', value: new Date(trip.startDate).toLocaleDateString('en-IE', { day: 'numeric', month: 'long' }), sub: String(new Date(trip.startDate).getFullYear()) },
-                { label: 'Type',    value: trip.tripType,           sub: trip.nights > 0 ? `${trip.nights} nights` : 'Day trip', capitalize: true },
-              ].map(({ label, value, sub, capitalize }) => (
-                <Box key={label}>
-                  <Typography sx={{ fontSize: '0.65rem', fontWeight: 800, letterSpacing: 0.8, color: 'text.disabled', textTransform: 'uppercase', mb: 0.25 }}>
-                    {label}
+              <AccessTimeIcon />
+            </Box>
+
+            <Box sx={{ px: 2.5, pt: 2.5, pb: 2.5 }}>
+              <SectionTag>Trip Details</SectionTag>
+
+              {/* FROM → TO hero row */}
+              <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1.5, mt: 1.25 }}>
+                <Box>
+                  <SectionTag color={D.muted}>From</SectionTag>
+                  <Typography sx={{ fontFamily: D.display, fontSize: '1.4rem', color: D.navy, lineHeight: 1, letterSpacing: '-0.02em' }}>
+                    {trip.origin?.city}
                   </Typography>
-                  <Typography fontWeight={800} sx={{ fontSize: '0.9rem', textTransform: capitalize ? 'capitalize' : 'none' }}>
-                    {value}
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary" sx={{ fontSize: '0.78rem', textTransform: capitalize ? 'capitalize' : 'none' }}>
-                    {sub}
+                  <Typography sx={{ fontFamily: D.body, fontSize: '0.72rem', color: D.muted, mt: 0.25 }}>
+                    {trip.origin?.country}
                   </Typography>
                 </Box>
-              ))}
-            </Box>
-            {trip.purpose && (
-              <Box sx={{ mt: 1.5, pt: 1.5, borderTop: '1px solid', borderColor: 'divider' }}>
-                <Typography sx={{ fontSize: '0.65rem', fontWeight: 800, letterSpacing: 0.8, color: 'text.disabled', textTransform: 'uppercase', mb: 0.25 }}>
-                  Purpose
+
+                <Typography sx={{ fontFamily: D.display, fontSize: '1.2rem', color: D.terra, alignSelf: 'center', px: 0.5 }}>
+                  →
                 </Typography>
-                <Typography sx={{ fontSize: '0.88rem' }}>{trip.purpose}</Typography>
+
+                <Box>
+                  <SectionTag color={D.muted}>To</SectionTag>
+                  <Typography sx={{ fontFamily: D.display, fontSize: '1.4rem', color: D.navy, lineHeight: 1, letterSpacing: '-0.02em' }}>
+                    {trip.destination?.city}
+                  </Typography>
+                  <Typography sx={{ fontFamily: D.body, fontSize: '0.72rem', color: D.muted, mt: 0.25 }}>
+                    {trip.destination?.country}
+                  </Typography>
+                </Box>
               </Box>
-            )}
+
+              {/* Dashed divider */}
+              <Box sx={{ borderTop: `1px dashed ${D.rule}`, my: 2 }} />
+
+              {/* Meta grid */}
+              <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1.5 }}>
+                {[
+                  {
+                    label: 'Departs',
+                    value: new Date(trip.startDate).toLocaleDateString('en-IE', { day: 'numeric', month: 'long' }),
+                    sub:   String(new Date(trip.startDate).getFullYear()),
+                  },
+                  {
+                    label: 'Type',
+                    value: trip.tripType,
+                    sub:   trip.nights > 0 ? `${trip.nights} nights` : 'Day trip',
+                    capitalize: true,
+                  },
+                ].map(({ label, value, sub, capitalize }) => (
+                  <Box key={label}>
+                    <SectionTag color={D.muted}>{label}</SectionTag>
+                    <Typography sx={{
+                      fontFamily: D.display, fontSize: '0.95rem', color: D.navy, mt: 0.25,
+                      textTransform: capitalize ? 'capitalize' : 'none',
+                    }}>
+                      {value}
+                    </Typography>
+                    <Typography sx={{
+                      fontFamily: D.body, fontSize: '0.75rem', color: D.muted,
+                      textTransform: capitalize ? 'capitalize' : 'none',
+                    }}>
+                      {sub}
+                    </Typography>
+                  </Box>
+                ))}
+              </Box>
+
+              {trip.purpose && (
+                <Box sx={{ mt: 1.75, pt: 1.75, borderTop: `1px dashed ${D.rule}` }}>
+                  <SectionTag color={D.muted}>Purpose</SectionTag>
+                  <Typography sx={{ fontFamily: D.body, fontSize: '0.88rem', color: D.navy, mt: 0.25 }}>
+                    {trip.purpose}
+                  </Typography>
+                </Box>
+              )}
+            </Box>
           </Paper>
         </>
       )}

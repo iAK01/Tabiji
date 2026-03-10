@@ -22,6 +22,20 @@ import InfoOutlinedIcon  from '@mui/icons-material/InfoOutlined';
 import TuneIcon          from '@mui/icons-material/Tune';
 import AssignmentTurnedInIcon from '@mui/icons-material/AssignmentTurnedIn';
 
+// ─── Design tokens ────────────────────────────────────────────────────────────
+
+const D = {
+  green:   '#6B7C5C',
+  terra:   '#C4714A',
+  navy:    '#2C3E50',
+  bg:      '#F5F0E8',
+  paper:   '#FDFAF5',
+  display: '"Archivo Black", sans-serif',
+  body:    '"Archivo", "Inter", sans-serif',
+} as const;
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+
 const CATEGORIES = [
   'Documents', 'Electronics', 'Clothes', 'Toiletries',
   'Medicines', 'Work Gear', 'Luggage', 'Accessories', 'Other',
@@ -131,23 +145,23 @@ function TypeToggleGroup({
 }) {
   return (
     <Box>
-      <Typography variant="body2" fontWeight={700} sx={{ fontSize: '0.82rem', mb: 0.5 }}>
+      <Typography sx={{ fontFamily: D.body, fontWeight: 700, fontSize: '0.82rem', mb: 0.5 }}>
         {label}
       </Typography>
       {hint && (
-        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1, fontSize: '0.74rem' }}>
+        <Typography sx={{ fontFamily: D.body, fontSize: '0.74rem', display: 'block', mb: 1, color: 'text.secondary' }}>
           {hint}
         </Typography>
       )}
       <ToggleButtonGroup value={value} onChange={(_, val) => onChange(val)} fullWidth size="small">
         {options.map(t => (
           <ToggleButton key={t} value={t}
-            sx={{ fontSize: '0.72rem', textTransform: 'none', fontWeight: 600, py: 0.75 }}>
+            sx={{ fontFamily: D.body, fontSize: '0.72rem', textTransform: 'none', fontWeight: 600, py: 0.75 }}>
             {t}
           </ToggleButton>
         ))}
       </ToggleButtonGroup>
-      <Typography variant="caption" color="text.disabled" sx={{ mt: 0.5, display: 'block', fontSize: '0.72rem' }}>
+      <Typography sx={{ fontFamily: D.body, fontSize: '0.72rem', color: 'text.disabled', mt: 0.5, display: 'block' }}>
         {value.length === 0 ? 'No filter — included on all trips' : `Only included when trip has: ${value.join(', ')}`}
       </Typography>
     </Box>
@@ -172,11 +186,6 @@ export default function PackingTab({ tripId, tripType, nights, startDate, fabTri
   const [newItem,          setNewItem]          = useState({ name: '', category: 'Other', quantity: 1, advisoryNote: '' });
   const [catalogueEdit,    setCatalogueEdit]    = useState<CatalogueEditState | null>(null);
   const [catalogueSaving,  setCatalogueSaving]  = useState(false);
-
-  // ── Packing advisory state ─────────────────────────────────────────────────
-  // creatingAdvisory: spinner while the POST is in flight
-  // advisoryCreated:  true after first successful creation — disables the button
-  //                   and shows a confirmation so the user knows it worked
   const [creatingAdvisory, setCreatingAdvisory] = useState(false);
   const [advisoryCreated,  setAdvisoryCreated]  = useState(false);
 
@@ -195,9 +204,9 @@ export default function PackingTab({ tripId, tripType, nights, startDate, fabTri
   const showLiveRefresh = tripStartsInDays <= 14 && tripStartsInDays >= 0 && weatherAgeHours >= 24;
 
   useEffect(() => {
-  if (!fabTrigger) return;
-  if (fabTrigger.action === 'item') setAddOpen(true);
-}, [fabTrigger]);
+    if (!fabTrigger) return;
+    if (fabTrigger.action === 'item') setAddOpen(true);
+  }, [fabTrigger]);
 
   // ── Actions ───────────────────────────────────────────────────────────────
 
@@ -316,40 +325,25 @@ export default function PackingTab({ tripId, tripType, nights, startDate, fabTri
     setNewItem({ name: '', category: 'Other', quantity: 1, advisoryNote: '' });
   };
 
-  // ── Packing advisory: create consolidated to-do ────────────────────────────
-  // Creates a single packing_advisory todo in the Files tab covering all
-  // pre-travel action items. Judicious by design — one notification, not many.
-  // The user can always create granular manual todos from the Files tab.
   const createPackingAdvisory = async (items: IndexedItem[]) => {
     if (!items.length || creatingAdvisory || advisoryCreated) return;
     setCreatingAdvisory(true);
-
-    // Build a compact body listing each item and its note
-    const bodyLines = items.map(item =>
+    const bodyLines      = items.map(item =>
       item.preTravelNote ? `• ${item.name}: ${item.preTravelNote}` : `• ${item.name}`
     );
-
-    // packingItemRef is a short comma-separated summary used in the push notification body
-    // when the todo has no explicit body (not the case here, but kept for completeness)
     const packingItemRef = items.map(i => i.name).join(', ');
-
     const fd = new FormData();
     fd.append('resourceType',    'todo');
     fd.append('name',            'Pre-travel checklist');
     fd.append('body',            bodyLines.join('\n'));
     fd.append('source',          'packing_advisory');
     fd.append('packingItemRef',  packingItemRef);
-    // No dueAt or notification by default — user sets that in the Files tab
-    // if they want a push reminder at a specific time before the trip.
     fd.append('notification.enabled', 'false');
-
     try {
       const res = await fetch(`/api/trips/${tripId}/files`, { method: 'POST', body: fd });
-      if (res.ok) {
-        setAdvisoryCreated(true);
-      }
+      if (res.ok) setAdvisoryCreated(true);
     } catch {
-      // Silently fail — user can try again or create manually
+      // Silently fail
     } finally {
       setCreatingAdvisory(false);
     }
@@ -359,21 +353,54 @@ export default function PackingTab({ tripId, tripType, nights, startDate, fabTri
 
   if (loading) return (
     <Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}>
-      <CircularProgress />
+      <CircularProgress sx={{ color: D.green }} />
     </Box>
   );
 
   if (!packing) return (
-    <Paper sx={{ p: { xs: 4, sm: 6 }, textAlign: 'center', backgroundColor: 'background.paper' }}>
-      <AutoAwesomeIcon sx={{ fontSize: 56, color: 'primary.main', opacity: 0.45, mb: 2 }} />
-      <Typography variant="h5" fontWeight={700} gutterBottom>Generate your packing list</Typography>
-      <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>{nights} nights · {tripType}</Typography>
-      <Typography variant="body2" color="text.secondary" sx={{ mb: 4, maxWidth: 360, mx: 'auto' }}>
+    <Paper elevation={0} sx={{
+      p: { xs: 4, sm: 6 }, textAlign: 'center',
+      backgroundColor: D.paper,
+      border: `1.5px solid rgba(44,62,80,0.08)`,
+      borderRadius: 2.5,
+      position: 'relative', overflow: 'hidden',
+    }}>
+      {/* Ghost watermark */}
+      <Typography sx={{
+        fontFamily: D.display,
+        fontSize: { xs: '4rem', sm: '7rem' },
+        letterSpacing: '-0.04em', lineHeight: 0.85,
+        color: 'rgba(44,62,80,0.05)',
+        userSelect: 'none', pointerEvents: 'none',
+        position: 'absolute', bottom: -8, right: -8,
+      }}>
+        PACK
+      </Typography>
+
+      <AutoAwesomeIcon sx={{ fontSize: 48, color: D.green, opacity: 0.5, mb: 2 }} />
+      <Typography sx={{
+        fontFamily: D.display, fontSize: { xs: '1.6rem', sm: '2rem' },
+        letterSpacing: '-0.03em', color: D.navy, mb: 0.75,
+      }}>
+        Generate your packing list
+      </Typography>
+      <Typography sx={{ fontFamily: D.body, fontWeight: 600, color: D.terra, fontSize: '0.8rem',
+        letterSpacing: '0.1em', textTransform: 'uppercase', mb: 1.5 }}>
+        {nights} nights · {tripType}
+      </Typography>
+      <Typography sx={{ fontFamily: D.body, color: 'text.secondary', fontSize: '0.88rem',
+        mb: 4, maxWidth: 360, mx: 'auto', lineHeight: 1.6 }}>
         We'll build a smart list based on your trip type, duration, transport, accommodation, and weather forecast.
       </Typography>
       <Button variant="contained" size="large" fullWidth={mobile}
         startIcon={generating ? <CircularProgress size={18} color="inherit" /> : <AutoAwesomeIcon />}
-        onClick={generate} disabled={generating} sx={{ py: mobile ? 1.75 : 1.25 }}>
+        onClick={generate} disabled={generating}
+        sx={{
+          fontFamily: D.display, letterSpacing: '-0.01em',
+          backgroundColor: D.navy, boxShadow: 'none',
+          py: mobile ? 1.75 : 1.5, px: 3,
+          '&:hover': { backgroundColor: 'rgba(44,62,80,0.88)', boxShadow: 'none' },
+        }}>
         {generating ? 'Generating…' : 'Generate Packing List'}
       </Button>
     </Paper>
@@ -415,7 +442,7 @@ export default function PackingTab({ tripId, tripType, nights, startDate, fabTri
       {/* ── Weather alert ── */}
       {ws && (ws.hasRain || ws.minLow <= 8 || ws.maxHigh >= 22) && (
         <Alert severity="info" icon={<WbSunnyIcon fontSize="small" />}
-          sx={{ mb: 2, '& .MuiAlert-message': { fontSize: '0.82rem' } }}>
+          sx={{ mb: 2, fontFamily: D.body, '& .MuiAlert-message': { fontFamily: D.body, fontSize: '0.82rem' } }}>
           This list was tailored to the forecast: {[
             ws.minLow  <= 8  && `lows of ${ws.minLow}°C`,
             ws.maxHigh >= 22 && `highs of ${ws.maxHigh}°C`,
@@ -430,26 +457,36 @@ export default function PackingTab({ tripId, tripType, nights, startDate, fabTri
           action={
             <Button size="small" color="inherit" onClick={generate} disabled={generating}
               startIcon={generating ? <CircularProgress size={14} color="inherit" /> : <RefreshIcon fontSize="small" />}
-              sx={{ fontWeight: 700, fontSize: '0.75rem' }}>
+              sx={{ fontFamily: D.body, fontWeight: 700, fontSize: '0.75rem' }}>
               {generating ? 'Refreshing…' : 'Refresh'}
             </Button>
           }
-          sx={{ mb: 2, '& .MuiAlert-message': { fontSize: '0.82rem' } }}>
+          sx={{ mb: 2, '& .MuiAlert-message': { fontFamily: D.body, fontSize: '0.82rem' } }}>
           Your trip is in {tripStartsInDays} day{tripStartsInDays !== 1 ? 's' : ''} — live weather now available.
         </Alert>
       )}
 
       {/* ── Progress card ── */}
-      <Paper sx={{ p: { xs: 2.5, sm: 3 }, mb: 2.5, backgroundColor: 'background.paper' }}>
-
+      <Paper elevation={0} sx={{
+        p: { xs: 2.5, sm: 3 }, mb: 2.5,
+        backgroundColor: D.paper,
+        border: `1.5px solid rgba(44,62,80,0.08)`,
+        borderRadius: 2.5,
+      }}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-          <Typography variant="h6" fontWeight={700} sx={{ fontSize: { xs: '1.05rem', sm: '1.15rem' } }}>
+          <Typography sx={{
+            fontFamily: D.display,
+            fontSize: { xs: '1.1rem', sm: '1.3rem' },
+            letterSpacing: '-0.02em',
+            color: D.navy,
+          }}>
             {nights} nights · {tripType}
           </Typography>
-          <Box sx={{ display: 'flex', gap: 1 }}>
+          <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
             <Button size="small" variant="outlined" startIcon={<FilterListIcon />}
               onClick={() => setFilterOpen(p => !p)}
-              color={filter !== 'all' ? 'primary' : 'inherit'}>
+              color={filter !== 'all' ? 'primary' : 'inherit'}
+              sx={{ fontFamily: D.body, fontWeight: 700, fontSize: '0.72rem' }}>
               {filter === 'all' ? 'Filter' : filter}
             </Button>
             <IconButton size="small" onClick={generate} disabled={generating} aria-label="Regenerate list">
@@ -467,48 +504,72 @@ export default function PackingTab({ tripId, tripType, nights, startDate, fabTri
                 onClick={() => { setFilter(f); setFilterOpen(false); }}
                 color={filter === f ? 'primary' : 'default'}
                 variant={filter === f ? 'filled' : 'outlined'}
-                sx={{ cursor: 'pointer', fontWeight: 600 }} />
+                sx={{ fontFamily: D.body, cursor: 'pointer', fontWeight: 700 }} />
             ))}
           </Box>
         </Collapse>
 
-        {/* Progress bar */}
+        {/* Progress bar + typographic counter */}
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 1 }}>
           <LinearProgress variant="determinate" value={packing.packingProgress}
             color={allDone ? 'success' : 'primary'}
-            sx={{ flex: 1, height: 10, borderRadius: 5, backgroundColor: 'action.hover',
-              '& .MuiLinearProgress-bar': { borderRadius: 5 } }} />
-          <Typography variant="body2" fontWeight={700} sx={{ minWidth: 52, textAlign: 'right' }}>
-            {packing.packedItems}/{packing.totalItems}
-          </Typography>
+            sx={{ flex: 1, height: 8, borderRadius: 4, backgroundColor: 'action.hover',
+              '& .MuiLinearProgress-bar': { borderRadius: 4 } }} />
+          {/* Typographic counter — Archivo Black, terracotta */}
+          <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 0.4, flexShrink: 0 }}>
+            <Typography sx={{
+              fontFamily: D.display,
+              fontSize: '1.25rem',
+              letterSpacing: '-0.03em',
+              lineHeight: 1,
+              color: allDone ? D.green : D.terra,
+            }}>
+              {packing.packedItems}
+            </Typography>
+            <Typography sx={{ fontFamily: D.body, fontSize: '0.72rem', color: 'text.disabled', fontWeight: 600 }}>
+              /{packing.totalItems}
+            </Typography>
+          </Box>
         </Box>
 
         {allDone && (
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mt: 2,
             backgroundColor: 'success.light', borderRadius: 2, px: 2, py: 1.5 }}>
             <CheckCircleIcon color="success" />
-            <Typography fontWeight={700} color="success.dark">All packed — you're ready to go!</Typography>
+            <Typography sx={{ fontFamily: D.body, fontWeight: 700, color: 'success.dark' }}>
+              All packed — you're ready to go!
+            </Typography>
           </Box>
         )}
 
         {/* Summary chips */}
         <Box sx={{ display: 'flex', gap: 1, mt: 2, flexWrap: 'wrap' }}>
-          <Chip label={`${indexedItems.filter(i => i.essential).length} essentials`} size="small" color="primary" />
+          <Chip label={`${indexedItems.filter(i => i.essential).length} essentials`}
+            size="small" color="primary"
+            sx={{ fontFamily: D.body, fontWeight: 700 }} />
           {preTravelItems.length > 0 && (
             <Chip icon={<WarningAmberIcon />}
               label={`${preTravelItems.length} pre-travel action${preTravelItems.length !== 1 ? 's' : ''}`}
               size="small" color="warning" onClick={() => setPreTravel(true)}
-              sx={{ cursor: 'pointer', fontWeight: 700 }} />
+              sx={{ fontFamily: D.body, cursor: 'pointer', fontWeight: 700 }} />
           )}
           {indexedItems.filter(i => i.source === 'manual').length > 0 && (
             <Chip label={`${indexedItems.filter(i => i.source === 'manual').length} manual`}
-              size="small" variant="outlined" />
+              size="small" variant="outlined"
+              sx={{ fontFamily: D.body, fontWeight: 600 }} />
           )}
         </Box>
       </Paper>
 
+      {/* ── Add item button ── */}
       <Button variant="outlined" startIcon={<AddIcon />} onClick={() => setAddOpen(true)}
-        fullWidth={mobile} size={mobile ? 'large' : 'medium'} sx={{ mb: 2.5, py: mobile ? 1.5 : 1 }}>
+        fullWidth={mobile} size={mobile ? 'large' : 'medium'}
+        sx={{
+          fontFamily: D.body, fontWeight: 700,
+          mb: 2.5, py: mobile ? 1.5 : 1,
+          borderColor: 'rgba(44,62,80,0.18)', color: D.navy,
+          '&:hover': { borderColor: 'rgba(44,62,80,0.45)', backgroundColor: 'rgba(44,62,80,0.04)' },
+        }}>
         Add item
       </Button>
 
@@ -519,25 +580,51 @@ export default function PackingTab({ tripId, tripType, nights, startDate, fabTri
         const isOpen       = expanded[category] !== undefined ? expanded[category] : !allCatPacked;
 
         return (
-          <Paper key={category} sx={{ mb: 1.5, backgroundColor: 'background.paper', overflow: 'hidden' }}>
+          <Paper key={category} elevation={0} sx={{
+            mb: 1.5,
+            backgroundColor: D.paper,
+            overflow: 'hidden',
+            border: `1.5px solid rgba(44,62,80,0.08)`,
+            borderRadius: 2,
+          }}>
+            {/* Category header */}
             <Box onClick={() => setExpanded(p => ({ ...p, [category]: !isOpen }))} sx={{
               display: 'flex', alignItems: 'center', gap: 1.5,
               px: { xs: 2, sm: 2.5 }, py: { xs: 1.75, sm: 1.5 },
               cursor: 'pointer', userSelect: 'none',
-              '&:hover': { backgroundColor: 'action.hover' },
+              '&:hover': { backgroundColor: 'rgba(44,62,80,0.03)' },
             }}>
               {allCatPacked
-                ? <CheckCircleIcon color="success" sx={{ fontSize: 20, flexShrink: 0 }} />
-                : <Box sx={{ width: 20, height: 20, borderRadius: '50%', border: '2px solid',
+                ? <CheckCircleIcon sx={{ fontSize: 18, flexShrink: 0, color: D.green }} />
+                : <Box sx={{ width: 18, height: 18, borderRadius: '50%', border: '2px solid',
                     borderColor: 'divider', flexShrink: 0 }} />
               }
-              <Typography fontWeight={700} sx={{ flexGrow: 1, fontSize: { xs: '0.95rem', sm: '1rem' } }}>
+              {/* Category name — Archivo Black */}
+              <Typography sx={{
+                fontFamily: D.display,
+                fontSize: { xs: '0.95rem', sm: '1rem' },
+                letterSpacing: '-0.01em',
+                color: allCatPacked ? 'text.disabled' : D.navy,
+                flexGrow: 1,
+              }}>
                 {category}
               </Typography>
-              <Typography variant="caption" color="text.secondary" fontWeight={600} sx={{ mr: 0.5 }}>
-                {packedCount}/{catItems.length}
-              </Typography>
-              {isOpen ? <ExpandLessIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />}
+              {/* Packed count — terracotta when incomplete, muted when done */}
+              <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 0.3, mr: 0.5 }}>
+                <Typography sx={{
+                  fontFamily: D.display,
+                  fontSize: '0.95rem',
+                  letterSpacing: '-0.02em',
+                  lineHeight: 1,
+                  color: allCatPacked ? 'text.disabled' : D.terra,
+                }}>
+                  {packedCount}
+                </Typography>
+                <Typography sx={{ fontFamily: D.body, fontSize: '0.68rem', color: 'text.disabled', fontWeight: 600 }}>
+                  /{catItems.length}
+                </Typography>
+              </Box>
+              {isOpen ? <ExpandLessIcon fontSize="small" sx={{ color: 'text.disabled' }} /> : <ExpandMoreIcon fontSize="small" sx={{ color: 'text.disabled' }} />}
             </Box>
 
             <Collapse in={isOpen}>
@@ -547,54 +634,70 @@ export default function PackingTab({ tripId, tripType, nights, startDate, fabTri
                   <Box sx={{
                     display: 'flex', alignItems: 'flex-start',
                     px: { xs: 2, sm: 2.5 }, py: { xs: 1.5, sm: 1.25 }, gap: 1.5,
-                    opacity: item.packed ? 0.45 : 1, transition: 'opacity 0.2s',
-                    '&:hover': { backgroundColor: 'action.hover' },
+                    opacity: item.packed ? 0.4 : 1, transition: 'opacity 0.2s',
+                    '&:hover': { backgroundColor: 'rgba(44,62,80,0.025)' },
                     '&:hover .catalogue-tune': { opacity: 1 },
                     pointerEvents: toggling === item._idx ? 'none' : 'auto',
                   }}>
                     <Checkbox checked={item.packed} onChange={() => toggleItem(item._idx)}
-                      sx={{ p: 0, flexShrink: 0, mt: 0.25 }} />
+                      sx={{ p: 0, flexShrink: 0, mt: 0.25, color: D.green,
+                        '&.Mui-checked': { color: D.green } }} />
+
                     <Box sx={{ flexGrow: 1, minWidth: 0 }}>
                       <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1.5, flexWrap: 'wrap' }}>
-                        <Typography variant="body1" fontWeight={item.essential ? 700 : 400}
-                          sx={{ textDecoration: item.packed ? 'line-through' : 'none',
-                            fontSize: { xs: '0.95rem', sm: '0.9rem' } }}>
+                        {/* Item name */}
+                        <Typography sx={{
+                          fontFamily: D.body,
+                          fontWeight: item.essential ? 700 : 400,
+                          fontSize: { xs: '0.95rem', sm: '0.9rem' },
+                          textDecoration: item.packed ? 'line-through' : 'none',
+                          color: D.navy,
+                        }}>
                           {item.name}
                         </Typography>
+
+                        {/* Quantity — Archivo Black, terracotta, jumps out */}
                         {item.quantity > 1 && (
-                          <Typography variant="body2" fontWeight={700} sx={{
-                            fontSize: '0.88rem',
-                            color: item.packed ? 'text.disabled' : 'text.secondary',
+                          <Typography sx={{
+                            fontFamily: D.display,
+                            fontSize: '0.82rem',
+                            letterSpacing: '-0.01em',
+                            color: item.packed ? 'text.disabled' : D.terra,
                             flexShrink: 0,
                           }}>
                             {qtyLabel(item)}
                           </Typography>
                         )}
                       </Box>
+
                       {item.advisoryNote && !item.packed && (
                         <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 0.5, mt: 0.5 }}>
                           <InfoOutlinedIcon sx={{ fontSize: 13, color: 'text.disabled', mt: 0.25, flexShrink: 0 }} />
-                          <Typography variant="caption" color="text.disabled" sx={{ fontSize: '0.74rem', lineHeight: 1.4 }}>
+                          <Typography sx={{ fontFamily: D.body, fontSize: '0.74rem',
+                            color: 'text.disabled', lineHeight: 1.4 }}>
                             {item.advisoryNote}
                           </Typography>
                         </Box>
                       )}
+
                       {item.preTravelAction && !item.packed && (
                         <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 0.5, mt: 0.5 }}>
                           <WarningAmberIcon sx={{ fontSize: 13, color: 'warning.main', mt: 0.25, flexShrink: 0 }} />
-                          <Typography variant="caption" sx={{ fontSize: '0.74rem', color: 'warning.dark', lineHeight: 1.4 }}>
+                          <Typography sx={{ fontFamily: D.body, fontSize: '0.74rem',
+                            color: 'warning.dark', lineHeight: 1.4 }}>
                             {item.preTravelNote || 'Pre-travel action required'}
                           </Typography>
                         </Box>
                       )}
                     </Box>
+
                     {item.source === 'auto' && item.masterItemId && !item.packed && (
                       <IconButton className="catalogue-tune" size="small"
                         onClick={e => { e.stopPropagation(); openCatalogueEdit(item); }}
                         aria-label={`Edit catalogue defaults for ${item.name}`}
                         sx={{ opacity: 0, transition: 'opacity 0.15s', flexShrink: 0,
                           alignSelf: 'center', color: 'text.disabled',
-                          '&:hover': { color: 'primary.main' } }}>
+                          '&:hover': { color: D.green } }}>
                         <TuneIcon sx={{ fontSize: '1rem' }} />
                       </IconButton>
                     )}
@@ -612,105 +715,137 @@ export default function PackingTab({ tripId, tripType, nights, startDate, fabTri
       ════════════════════════════════════════════════════════════════════ */}
 
       {/* ── Pre-travel dialog ── */}
-      <Dialog open={preTravel} onClose={() => setPreTravel(false)} maxWidth="sm" fullWidth fullScreen={mobile}>
-        <DialogTitle fontWeight={700}>Pre-travel actions</DialogTitle>
+      <Dialog open={preTravel} onClose={() => setPreTravel(false)} maxWidth="sm" fullWidth fullScreen={mobile}
+        PaperProps={{ sx: { borderRadius: { sm: 2.5 }, backgroundColor: D.paper } }}>
+        <DialogTitle sx={{
+          fontFamily: D.display, fontSize: { xs: '1.4rem', sm: '1.6rem' },
+          letterSpacing: '-0.02em', color: D.navy,
+        }}>
+          Pre-travel actions
+        </DialogTitle>
         <DialogContent>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+          <Typography sx={{ fontFamily: D.body, fontSize: '0.88rem', color: 'text.secondary', mb: 2 }}>
             These items need attention before you can pack them:
           </Typography>
           {preTravelItems.map(item => (
-            <Paper key={item._idx} sx={{ p: 2, mb: 1.5, border: '1px solid', borderColor: 'warning.main' }}>
+            <Paper key={item._idx} elevation={0} sx={{
+              p: 2, mb: 1.5,
+              border: `1.5px solid`,
+              borderColor: 'warning.main',
+              borderRadius: 2,
+              backgroundColor: 'rgba(255,167,38,0.04)',
+            }}>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
                 <WarningAmberIcon color="warning" fontSize="small" />
-                <Typography variant="body2" fontWeight={700}>{item.name}</Typography>
+                <Typography sx={{ fontFamily: D.display, fontSize: '0.95rem',
+                  letterSpacing: '-0.01em', color: D.navy }}>
+                  {item.name}
+                </Typography>
               </Box>
               {item.preTravelNote && (
-                <Typography variant="caption" color="text.secondary">{item.preTravelNote}</Typography>
+                <Typography sx={{ fontFamily: D.body, fontSize: '0.8rem', color: 'text.secondary' }}>
+                  {item.preTravelNote}
+                </Typography>
               )}
             </Paper>
           ))}
 
-          {/* ── Advisory confirmation message ── */}
           {advisoryCreated && (
-            <Box sx={{
-              display: 'flex', alignItems: 'center', gap: 1,
-              mt: 2, p: 1.5, borderRadius: 1.5,
-              backgroundColor: 'success.light',
-            }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 2, p: 1.5,
+              borderRadius: 1.5, backgroundColor: 'success.light' }}>
               <AssignmentTurnedInIcon color="success" fontSize="small" />
-              <Typography variant="body2" fontWeight={700} color="success.dark">
+              <Typography sx={{ fontFamily: D.body, fontWeight: 700, color: 'success.dark', fontSize: '0.88rem' }}>
                 Pre-travel checklist added to Resources → To-dos
               </Typography>
             </Box>
           )}
         </DialogContent>
-
         <DialogActions sx={{ px: 3, pb: 3, gap: 1, flexDirection: { xs: 'column-reverse', sm: 'row' } }}>
-          <Button onClick={() => setPreTravel(false)} fullWidth={mobile} size="large">
+          <Button onClick={() => setPreTravel(false)} fullWidth={mobile} size="large"
+            sx={{ fontFamily: D.body, fontWeight: 600 }}>
             Got it
           </Button>
-          {/* Create reminder — one-shot, disabled after first creation */}
-          <Button
-            variant="outlined"
-            color="warning"
+          <Button variant="outlined" color="warning"
             onClick={() => createPackingAdvisory(preTravelItems)}
             disabled={creatingAdvisory || advisoryCreated}
-            startIcon={
-              creatingAdvisory
-                ? <CircularProgress size={16} color="inherit" />
-                : <AssignmentTurnedInIcon />
-            }
-            fullWidth={mobile}
-            size="large"
-          >
+            startIcon={creatingAdvisory
+              ? <CircularProgress size={16} color="inherit" />
+              : <AssignmentTurnedInIcon />}
+            fullWidth={mobile} size="large"
+            sx={{ fontFamily: D.body, fontWeight: 700 }}>
             {advisoryCreated ? 'Reminder created' : 'Create reminder'}
           </Button>
         </DialogActions>
       </Dialog>
 
       {/* ── Add item dialog ── */}
-      <Dialog open={addOpen} onClose={() => setAddOpen(false)} maxWidth="sm" fullWidth fullScreen={mobile}>
-        <DialogTitle fontWeight={700}>Add item</DialogTitle>
+      <Dialog open={addOpen} onClose={() => setAddOpen(false)} maxWidth="sm" fullWidth fullScreen={mobile}
+        PaperProps={{ sx: { borderRadius: { sm: 2.5 }, backgroundColor: D.paper } }}>
+        <DialogTitle sx={{
+          fontFamily: D.display, fontSize: { xs: '1.4rem', sm: '1.6rem' },
+          letterSpacing: '-0.02em', color: D.navy,
+        }}>
+          Add item
+        </DialogTitle>
         <DialogContent>
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, pt: 1 }}>
             <TextField label="Item name" value={newItem.name} autoFocus fullWidth
-              onChange={e => setNewItem(p => ({ ...p, name: e.target.value }))} />
+              onChange={e => setNewItem(p => ({ ...p, name: e.target.value }))}
+              InputProps={{ sx: { fontFamily: D.body } }}
+              InputLabelProps={{ sx: { fontFamily: D.body } }} />
             <FormControl fullWidth>
-              <InputLabel>Category</InputLabel>
+              <InputLabel sx={{ fontFamily: D.body }}>Category</InputLabel>
               <Select value={newItem.category} label="Category"
-                onChange={e => setNewItem(p => ({ ...p, category: e.target.value }))}>
-                {CATEGORIES.map(c => <MenuItem key={c} value={c}>{c}</MenuItem>)}
+                onChange={e => setNewItem(p => ({ ...p, category: e.target.value }))}
+                sx={{ fontFamily: D.body }}>
+                {CATEGORIES.map(c => <MenuItem key={c} value={c} sx={{ fontFamily: D.body }}>{c}</MenuItem>)}
               </Select>
             </FormControl>
             <TextField label="Quantity" type="number" value={newItem.quantity} fullWidth
               onChange={e => setNewItem(p => ({ ...p, quantity: Number(e.target.value) }))}
-              inputProps={{ min: 1 }} />
+              inputProps={{ min: 1 }}
+              InputProps={{ sx: { fontFamily: D.body } }}
+              InputLabelProps={{ sx: { fontFamily: D.body } }} />
             <TextField label="Note (optional)" value={newItem.advisoryNote} fullWidth
-              onChange={e => setNewItem(p => ({ ...p, advisoryNote: e.target.value }))} />
+              onChange={e => setNewItem(p => ({ ...p, advisoryNote: e.target.value }))}
+              InputProps={{ sx: { fontFamily: D.body } }}
+              InputLabelProps={{ sx: { fontFamily: D.body } }} />
           </Box>
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 3, gap: 1, flexDirection: { xs: 'column-reverse', sm: 'row' } }}>
-          <Button onClick={() => setAddOpen(false)} fullWidth={mobile} size="large">Cancel</Button>
-          <Button variant="contained" onClick={addItem} disabled={!newItem.name} fullWidth={mobile} size="large">
+          <Button onClick={() => setAddOpen(false)} fullWidth={mobile} size="large"
+            sx={{ fontFamily: D.body, fontWeight: 600 }}>Cancel</Button>
+          <Button variant="contained" onClick={addItem} disabled={!newItem.name}
+            fullWidth={mobile} size="large"
+            sx={{
+              fontFamily: D.display, letterSpacing: '-0.01em',
+              backgroundColor: D.navy, boxShadow: 'none',
+              '&:hover': { backgroundColor: 'rgba(44,62,80,0.88)', boxShadow: 'none' },
+            }}>
             Add item
           </Button>
         </DialogActions>
       </Dialog>
 
       {/* ── Catalogue edit dialog ── */}
-      <Dialog open={!!catalogueEdit} onClose={() => setCatalogueEdit(null)} maxWidth="xs" fullWidth fullScreen={mobile}>
-        <DialogTitle fontWeight={700} sx={{ pb: 0.5 }}>Edit catalogue defaults</DialogTitle>
+      <Dialog open={!!catalogueEdit} onClose={() => setCatalogueEdit(null)}
+        maxWidth="xs" fullWidth fullScreen={mobile}
+        PaperProps={{ sx: { borderRadius: { sm: 2.5 }, backgroundColor: D.paper } }}>
+        <DialogTitle sx={{
+          fontFamily: D.display, fontSize: { xs: '1.3rem', sm: '1.5rem' },
+          letterSpacing: '-0.02em', color: D.navy, pb: 0.5,
+        }}>
+          Edit catalogue defaults
+        </DialogTitle>
         {catalogueEdit && (
           <>
             <DialogContent>
-              <Typography variant="body2" color="text.secondary" sx={{ mb: 2.5, fontSize: '0.82rem' }}>
+              <Typography sx={{ fontFamily: D.body, color: 'text.secondary', mb: 2.5, fontSize: '0.82rem' }}>
                 Changes to <strong>{catalogueEdit.name}</strong> update the master catalogue and apply
                 to all future generated lists. Regenerate this trip to apply them here too.
               </Typography>
 
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
-
-                {/* Essential */}
                 <FormControlLabel
                   control={
                     <Switch checked={catalogueEdit.essential} color="primary"
@@ -718,67 +853,56 @@ export default function PackingTab({ tripId, tripType, nights, startDate, fabTri
                   }
                   label={
                     <Box>
-                      <Typography variant="body2" fontWeight={700} sx={{ fontSize: '0.88rem' }}>Essential</Typography>
-                      <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.75rem' }}>
+                      <Typography sx={{ fontFamily: D.body, fontWeight: 700, fontSize: '0.88rem' }}>Essential</Typography>
+                      <Typography sx={{ fontFamily: D.body, fontSize: '0.75rem', color: 'text.secondary' }}>
                         Always highlighted regardless of trip type
                       </Typography>
                     </Box>
                   }
                 />
 
-                {/* Trip types */}
-                <TypeToggleGroup
-                  label="Include on trip types"
-                  options={TRIP_TYPES}
+                <TypeToggleGroup label="Include on trip types" options={TRIP_TYPES}
                   value={catalogueEdit.tripTypes}
                   onChange={val => setCatalogueEdit(p => p ? { ...p, tripTypes: val } : p)}
-                  hint="Leave all unselected to include on all trip types"
-                />
+                  hint="Leave all unselected to include on all trip types" />
 
-                {/* Transport types */}
-                <TypeToggleGroup
-                  label="Only include when transport includes"
-                  options={TRANSPORT_TYPES}
+                <TypeToggleGroup label="Only include when transport includes" options={TRANSPORT_TYPES}
                   value={catalogueEdit.transportTypes}
                   onChange={val => setCatalogueEdit(p => p ? { ...p, transportTypes: val } : p)}
-                  hint="Leave all unselected to include regardless of transport"
-                />
+                  hint="Leave all unselected to include regardless of transport" />
 
-                {/* Accommodation types */}
-                <TypeToggleGroup
-                  label="Only include when accommodation includes"
-                  options={ACCOM_TYPES}
+                <TypeToggleGroup label="Only include when accommodation includes" options={ACCOM_TYPES}
                   value={catalogueEdit.accommodationTypes}
                   onChange={val => setCatalogueEdit(p => p ? { ...p, accommodationTypes: val } : p)}
-                  hint="Leave all unselected to include regardless of accommodation"
-                />
+                  hint="Leave all unselected to include regardless of accommodation" />
 
-                {/* Quantity */}
                 <Box sx={{ display: 'flex', gap: 1.5 }}>
                   <TextField label="Qty" type="number" size="small" sx={{ width: 80 }}
                     value={catalogueEdit.quantity}
                     onChange={e => setCatalogueEdit(p => p ? { ...p, quantity: Number(e.target.value) } : p)}
-                    inputProps={{ min: 1 }} />
+                    inputProps={{ min: 1 }}
+                    InputProps={{ sx: { fontFamily: D.body } }}
+                    InputLabelProps={{ sx: { fontFamily: D.body } }} />
                   <FormControl size="small" sx={{ minWidth: 120 }}>
-                    <InputLabel>Type</InputLabel>
+                    <InputLabel sx={{ fontFamily: D.body }}>Type</InputLabel>
                     <Select value={catalogueEdit.quantityType} label="Type"
+                      sx={{ fontFamily: D.body }}
                       onChange={e => setCatalogueEdit(p => p ? {
                         ...p, quantityType: e.target.value as 'fixed' | 'per_night'
                       } : p)}>
-                      <MenuItem value="fixed">Fixed</MenuItem>
-                      <MenuItem value="per_night">Per night</MenuItem>
+                      <MenuItem value="fixed"     sx={{ fontFamily: D.body }}>Fixed</MenuItem>
+                      <MenuItem value="per_night" sx={{ fontFamily: D.body }}>Per night</MenuItem>
                     </Select>
                   </FormControl>
                 </Box>
 
-                {/* Pre-travel action */}
                 <FormControlLabel
                   control={
                     <Switch checked={catalogueEdit.preTravelAction} color="warning"
                       onChange={e => setCatalogueEdit(p => p ? { ...p, preTravelAction: e.target.checked } : p)} />
                   }
                   label={
-                    <Typography variant="body2" fontWeight={700} sx={{ fontSize: '0.88rem' }}>
+                    <Typography sx={{ fontFamily: D.body, fontWeight: 700, fontSize: '0.88rem' }}>
                       Pre-travel action required
                     </Typography>
                   }
@@ -787,22 +911,30 @@ export default function PackingTab({ tripId, tripType, nights, startDate, fabTri
                   <TextField label="Pre-travel note" size="small" fullWidth
                     value={catalogueEdit.preTravelNote}
                     onChange={e => setCatalogueEdit(p => p ? { ...p, preTravelNote: e.target.value } : p)}
-                    placeholder="e.g. Charge fully before packing" />
+                    placeholder="e.g. Charge fully before packing"
+                    InputProps={{ sx: { fontFamily: D.body } }}
+                    InputLabelProps={{ sx: { fontFamily: D.body } }} />
                 )}
 
-                {/* Advisory note */}
                 <TextField label="Advisory note" size="small" fullWidth
                   value={catalogueEdit.advisoryNote}
                   onChange={e => setCatalogueEdit(p => p ? { ...p, advisoryNote: e.target.value } : p)}
-                  placeholder="Shown on every trip this item appears on" />
-
+                  placeholder="Shown on every trip this item appears on"
+                  InputProps={{ sx: { fontFamily: D.body } }}
+                  InputLabelProps={{ sx: { fontFamily: D.body } }} />
               </Box>
             </DialogContent>
 
             <DialogActions sx={{ px: 3, pb: 3, gap: 1, flexDirection: { xs: 'column-reverse', sm: 'row' } }}>
-              <Button onClick={() => setCatalogueEdit(null)} fullWidth={mobile} size="large">Cancel</Button>
+              <Button onClick={() => setCatalogueEdit(null)} fullWidth={mobile} size="large"
+                sx={{ fontFamily: D.body, fontWeight: 600 }}>Cancel</Button>
               <Button variant="contained" onClick={saveCatalogueEdit}
-                disabled={catalogueSaving} fullWidth={mobile} size="large">
+                disabled={catalogueSaving} fullWidth={mobile} size="large"
+                sx={{
+                  fontFamily: D.display, letterSpacing: '-0.01em',
+                  backgroundColor: D.navy, boxShadow: 'none',
+                  '&:hover': { backgroundColor: 'rgba(44,62,80,0.88)', boxShadow: 'none' },
+                }}>
                 {catalogueSaving ? 'Saving…' : 'Save to catalogue'}
               </Button>
             </DialogActions>

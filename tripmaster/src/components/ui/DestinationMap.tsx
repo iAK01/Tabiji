@@ -54,7 +54,10 @@ export default function DestinationMap({ coordinates, address }: Props) {
 
     mapRef.current = map;
 
-    return () => map.remove();
+    return () => {
+  map.remove();
+  mapRef.current = null;
+};
   }, [coords, token]);
 
   if (!coords) return null;
