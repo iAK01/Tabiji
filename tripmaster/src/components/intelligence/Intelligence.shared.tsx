@@ -123,7 +123,7 @@ export function SectionHeading({ children, action, id }: {
       }}>
         <Typography sx={{
           fontFamily: D.display,
-          fontSize: { xs: '1.5rem', sm: '1.75rem' },
+          fontSize: { xs: '1.8rem', sm: '2rem' },
           color: D.navy, lineHeight: 1, letterSpacing: '-0.02em',
         }}>
           {children}
@@ -214,7 +214,7 @@ export function TimezoneCard({ timezone }: { timezone: Intelligence['timezone'] 
     <Paper elevation={0} sx={{ border: `1px solid ${D.rule}`, borderRadius: 1.5, overflow: 'hidden', backgroundColor: D.paper }}>
       {isSame ? (
         <Box sx={{ p: 2.5, display: 'flex', alignItems: 'baseline', gap: 2 }}>
-          <Typography sx={{ fontFamily: D.display, fontSize: '2.2rem', lineHeight: 1, fontVariantNumeric: 'tabular-nums', color: D.navy }}>
+          <Typography sx={{ fontFamily: D.display, fontSize: '3rem', lineHeight: 1, fontVariantNumeric: 'tabular-nums', color: D.navy }}>
             {fmt(browserTz)}
           </Typography>
           <Box>
@@ -225,10 +225,10 @@ export function TimezoneCard({ timezone }: { timezone: Intelligence['timezone'] 
       ) : (
         <Box sx={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr' }}>
           <Box sx={{ p: 2.5 }}>
-            <Typography sx={{ fontSize: '0.72rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: D.muted, display: 'block', mb: 0.75 }}>
+            <Typography sx={{ fontSize: '0.85rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: D.muted, display: 'block', mb: 0.75 }}>
               Home
             </Typography>
-            <Typography sx={{ fontFamily: D.display, fontSize: { xs: '1.8rem', sm: '2.2rem' }, lineHeight: 1, fontVariantNumeric: 'tabular-nums', color: D.navy }}>
+            <Typography sx={{ fontFamily: D.display, fontSize: { xs: '2.5rem', sm: '3rem' }, lineHeight: 1, fontVariantNumeric: 'tabular-nums', color: D.navy }}>
               {fmt(browserTz)}
             </Typography>
             <Typography sx={{ fontSize: '0.85rem', color: D.muted, display: 'block', mt: 0.5 }}>{fmtDay(browserTz)}</Typography>
@@ -242,11 +242,11 @@ export function TimezoneCard({ timezone }: { timezone: Intelligence['timezone'] 
           </Box>
 
           <Box sx={{ p: 2.5, textAlign: 'right' }}>
-            <Typography sx={{ fontSize: '0.72rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: D.muted, display: 'block', mb: 0.75 }}>
+            <Typography sx={{ fontSize: '0.85rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: D.muted, display: 'block', mb: 0.75 }}>
               There
             </Typography>
             <Typography sx={{
-              fontFamily: D.display, fontSize: { xs: '1.8rem', sm: '2.2rem' },
+              fontFamily: D.display, fontSize: { xs: '2.5rem', sm: '3rem' },
               lineHeight: 1, fontVariantNumeric: 'tabular-nums',
               color: timezone.jetlagRisk === 'significant' ? '#d32f2f' : timezone.jetlagRisk === 'moderate' ? D.terra : D.navy,
             }}>

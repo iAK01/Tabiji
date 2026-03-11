@@ -159,7 +159,7 @@ export default function IntelligenceTab({ tripId }: Props) {
       <Box>
         <Typography sx={{
           fontFamily: D.display,
-          fontSize: { xs: '2rem', sm: '2.5rem' },
+          fontSize: { xs: '2.5rem', sm: '3rem' },
           color: D.navy, lineHeight: 1, letterSpacing: '-0.03em', mb: 0.5,
         }}>
           {intel.destination.city ?? intel.destination.country}

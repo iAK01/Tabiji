@@ -444,7 +444,7 @@ export default function ItineraryTab({ tripId, startDate, endDate, fabTrigger }:
               {/* Day number */}
               <Typography sx={{
                 fontFamily: D.display,
-                fontSize:   isMobile ? '1.4rem' : '1.6rem',
+                fontSize:   isMobile ? '1.8rem' : '2.2rem',
                 lineHeight: 1,
                 color:      active ? '#ffffff' : D.navy,
               }}>

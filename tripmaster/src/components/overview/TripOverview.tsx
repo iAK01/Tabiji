@@ -192,7 +192,7 @@ function Strip({
         <Typography sx={{
           flexGrow: 1,
           fontFamily: D.display,
-          fontSize: '0.85rem',
+          fontSize: '1.2rem',
           letterSpacing: '0.08em',
           textTransform: 'uppercase',
           color: 'white',

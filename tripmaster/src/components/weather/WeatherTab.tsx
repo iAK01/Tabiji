@@ -1013,7 +1013,7 @@ export default function WeatherTab({ tripId, destinationCity, startDate, endDate
         <Box>
           <Typography sx={{
             fontFamily: D.display,
-            fontSize: { xs: '1.1rem', sm: '1.25rem' },
+            fontSize: { xs: '1.8rem', sm: '2rem' },
             color: D.navy, lineHeight: 1,
           }}>
             Weather

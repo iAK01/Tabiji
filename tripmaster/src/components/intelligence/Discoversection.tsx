@@ -208,7 +208,7 @@ export default function Discoversection({ tripId }: Props) {
         action={hasBriefing ? (
           <Tooltip title="Regenerate">
             <IconButton size="small" onClick={generate} disabled={generating} sx={{ p: 0.5 }}>
-              <RefreshIcon sx={{ fontSize: '1.1rem', color: D.muted }} />
+              <RefreshIcon sx={{ fontSize: '1.8rem', color: D.muted }} />
             </IconButton>
           </Tooltip>
         ) : null}

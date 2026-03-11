@@ -384,11 +384,11 @@ export default function PackingTab({ tripId, tripType, nights, startDate, fabTri
       }}>
         Generate your packing list
       </Typography>
-      <Typography sx={{ fontFamily: D.body, fontWeight: 600, color: D.terra, fontSize: '0.8rem',
-        letterSpacing: '0.1em', textTransform: 'uppercase', mb: 1.5 }}>
+      <Typography sx={{ fontFamily: D.body, fontWeight: 800, color: D.terra, fontSize: '2rem',
+        letterSpacing: '0.2em', textTransform: 'uppercase', mb: 1.5 }}>
         {nights} nights · {tripType}
       </Typography>
-      <Typography sx={{ fontFamily: D.body, color: 'text.secondary', fontSize: '0.88rem',
+      <Typography sx={{ fontFamily: D.body, color: 'text.secondary', fontSize: '1rem',
         mb: 4, maxWidth: 360, mx: 'auto', lineHeight: 1.6 }}>
         We'll build a smart list based on your trip type, duration, transport, accommodation, and weather forecast.
       </Typography>
@@ -476,7 +476,7 @@ export default function PackingTab({ tripId, tripType, nights, startDate, fabTri
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
           <Typography sx={{
             fontFamily: D.display,
-            fontSize: { xs: '1.1rem', sm: '1.3rem' },
+            fontSize: { xs: '1.8rem', sm: '2.2rem' },
             letterSpacing: '-0.02em',
             color: D.navy,
           }}>
@@ -590,7 +590,7 @@ export default function PackingTab({ tripId, tripType, nights, startDate, fabTri
             {/* Category header */}
             <Box onClick={() => setExpanded(p => ({ ...p, [category]: !isOpen }))} sx={{
               display: 'flex', alignItems: 'center', gap: 1.5,
-              px: { xs: 2, sm: 2.5 }, py: { xs: 1.75, sm: 1.5 },
+             px: { xs: 2, sm: 2.5 }, py: { xs: 2.5, sm: 2 }, minHeight: 64,
               cursor: 'pointer', userSelect: 'none',
               '&:hover': { backgroundColor: 'rgba(44,62,80,0.03)' },
             }}>
@@ -602,7 +602,7 @@ export default function PackingTab({ tripId, tripType, nights, startDate, fabTri
               {/* Category name — Archivo Black */}
               <Typography sx={{
                 fontFamily: D.display,
-                fontSize: { xs: '0.95rem', sm: '1rem' },
+                fontSize: { xs: '1.2rem', sm: '1.5rem' },
                 letterSpacing: '-0.01em',
                 color: allCatPacked ? 'text.disabled' : D.navy,
                 flexGrow: 1,

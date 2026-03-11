@@ -53,6 +53,18 @@ import NotificationsOffIcon   from '@mui/icons-material/NotificationsOff';
 import AssignmentIcon         from '@mui/icons-material/Assignment';
 import BoltIcon               from '@mui/icons-material/Bolt';
 
+// ─── Design tokens ────────────────────────────────────────────────────────────
+
+const D = {
+  green:   '#6B7C5C',
+  terra:   '#C4714A',
+  navy:    '#2C3E50',
+  bg:      '#F5F0E8',
+  paper:   '#FDFAF5',
+  display: '"Archivo Black", sans-serif',
+  body:    '"Archivo", "Inter", sans-serif',
+} as const;
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface LinkedTo {
@@ -178,7 +190,6 @@ function formatBytes(bytes: number): string {
   return `${(bytes / 1048576).toFixed(1)} MB`;
 }
 
-// Convert a stored ISO date string to separate date (YYYY-MM-DD) and time (HH:MM) parts
 function splitDueAt(iso: string | undefined): { dueDate: string; dueTime: string } {
   if (!iso) return { dueDate: '', dueTime: '' };
   const d = new Date(iso);
@@ -190,14 +201,12 @@ function splitDueAt(iso: string | undefined): { dueDate: string; dueTime: string
   };
 }
 
-// Combine dueDate + dueTime into a UTC ISO string for storage
 function combineDueAt(dueDate: string, dueTime: string): string | null {
   if (!dueDate || !dueTime) return null;
   const d = new Date(`${dueDate}T${dueTime}:00`);
   return isNaN(d.getTime()) ? null : d.toISOString();
 }
 
-// Format a dueAt for display in cards
 function formatDueAt(iso: string | undefined): string {
   if (!iso) return '';
   const d = new Date(iso);
@@ -249,40 +258,20 @@ function buildLinkableItems(logistics: any, itinerary: any): LinkableItem[] {
   const items: LinkableItem[] = [];
   for (let i = 0; i < (logistics?.transportation ?? []).length; i++) {
     const t = logistics.transportation[i];
-    items.push({
-      label:      transportLabel(t),
-      collection: 'transport',
-      entryId:    String(i),
-      group:      '🚀 Transport',
-    });
+    items.push({ label: transportLabel(t), collection: 'transport', entryId: String(i), group: '🚀 Transport' });
   }
   for (let i = 0; i < (logistics?.accommodation ?? []).length; i++) {
     const a = logistics.accommodation[i];
-    items.push({
-      label:      a.name ?? `Accommodation ${i + 1}`,
-      collection: 'accommodation',
-      entryId:    String(i),
-      group:      '🏨 Accommodation',
-    });
+    items.push({ label: a.name ?? `Accommodation ${i + 1}`, collection: 'accommodation', entryId: String(i), group: '🏨 Accommodation' });
   }
   for (let i = 0; i < (logistics?.venues ?? []).length; i++) {
     const v = logistics.venues[i];
-    items.push({
-      label:      v.name ?? `Venue ${i + 1}`,
-      collection: 'venue',
-      entryId:    String(i),
-      group:      '🎟 Venues',
-    });
+    items.push({ label: v.name ?? `Venue ${i + 1}`, collection: 'venue', entryId: String(i), group: '🎟 Venues' });
   }
   for (const day of (itinerary?.days ?? [])) {
     for (const stop of (day.stops ?? [])) {
       if (stop.source === 'logistics' && stop.type === 'transport') continue;
-      items.push({
-        label:      stop.name,
-        collection: 'itinerary',
-        entryId:    stop._id?.toString() ?? `${day.date}-${stop.name}`,
-        group:      `📅 ${day.date?.split('T')[0] ?? 'Itinerary'}`,
-      });
+      items.push({ label: stop.name, collection: 'itinerary', entryId: stop._id?.toString() ?? `${day.date}-${stop.name}`, group: `📅 ${day.date?.split('T')[0] ?? 'Itinerary'}` });
     }
   }
   return items;
@@ -309,14 +298,14 @@ function DropZone({ onFile }: { onFile: (f: File) => void }) {
       onClick={() => inputRef.current?.click()}
       sx={{
         border: '2px dashed',
-        borderColor: over ? '#55702C' : 'divider',
-        borderRadius: 2,
-        p: { xs: 2.5, sm: 3 },
+        borderColor: over ? D.green : 'rgba(44,62,80,0.18)',
+        borderRadius: 2.5,
+        p: { xs: 3, sm: 3.5 },
         textAlign: 'center',
         cursor: 'pointer',
-        backgroundColor: over ? alpha('#55702C', 0.04) : 'transparent',
+        backgroundColor: over ? alpha(D.green, 0.04) : 'transparent',
         transition: 'all 0.15s ease',
-        '&:hover': { borderColor: '#55702C', backgroundColor: alpha('#55702C', 0.03) },
+        '&:hover': { borderColor: D.green, backgroundColor: alpha(D.green, 0.03) },
       }}
     >
       <input
@@ -326,12 +315,24 @@ function DropZone({ onFile }: { onFile: (f: File) => void }) {
         style={{ display: 'none' }}
         onChange={e => { const f = e.target.files?.[0]; if (f) onFile(f); }}
       />
-      <CloudUploadIcon sx={{ fontSize: 32, color: over ? '#55702C' : 'text.disabled', mb: 0.75 }} />
-      <Typography variant="body2" fontWeight={700} color={over ? '#55702C' : 'text.secondary'}>
-        Drop a file or click to browse
+      <CloudUploadIcon sx={{ fontSize: 28, color: over ? D.green : 'text.disabled', mb: 1 }} />
+      <Typography sx={{
+        fontFamily: D.display,
+        fontSize: { xs: '1rem', sm: '1.1rem' },
+        letterSpacing: '-0.01em',
+        color: over ? D.green : D.navy,
+        mb: 0.5,
+      }}>
+        Drop a file or tap to browse
       </Typography>
-      <Typography variant="caption" color="text.disabled" sx={{ mt: 0.5, display: 'block' }}>
-        PDF, JPEG, PNG, WEBP, HEIC · Max 20MB
+      <Typography sx={{
+        fontFamily: D.body,
+        fontSize: '0.74rem',
+        color: 'text.disabled',
+        display: 'block',
+        letterSpacing: '0.04em',
+      }}>
+        PDF · JPEG · PNG · WEBP · HEIC · Max 20MB
       </Typography>
     </Box>
   );
@@ -377,13 +378,83 @@ function LinkToSelector({
   );
 }
 
+// ─── Section header ───────────────────────────────────────────────────────────
+
+function SectionHeader({
+  label, count, icon, color = D.navy,
+}: {
+  label: string;
+  count: number;
+  icon:  React.ReactNode;
+  color?: string;
+}) {
+  return (
+    <Box sx={{
+      px: { xs: 2, sm: 2.5 },
+      py: { xs: 2, sm: 1.75 },
+      display: 'flex',
+      alignItems: 'center',
+      gap: 1.5,
+      borderBottom: '1.5px solid rgba(44,62,80,0.08)',
+      position: 'relative',
+      overflow: 'hidden',
+      minHeight: 60,
+    }}>
+      {/* Ghost watermark */}
+      <Typography sx={{
+        fontFamily: D.display,
+        fontSize: { xs: '3.5rem', sm: '5rem' },
+        letterSpacing: '-0.04em',
+        lineHeight: 0.85,
+        color: 'rgba(44,62,80,0.04)',
+        position: 'absolute',
+        right: -4,
+        bottom: -10,
+        userSelect: 'none',
+        pointerEvents: 'none',
+        textTransform: 'uppercase',
+        whiteSpace: 'nowrap',
+      }}>
+        {label}
+      </Typography>
+
+      {/* Icon */}
+      <Box sx={{ color, display: 'flex', flexShrink: 0, zIndex: 1 }}>
+        {icon}
+      </Box>
+
+      {/* Label */}
+      <Typography sx={{
+        fontFamily: D.display,
+        fontSize: { xs: '1.1rem', sm: '1.3rem' },
+        letterSpacing: '-0.01em',
+        color: D.navy,
+        flexGrow: 1,
+        zIndex: 1,
+      }}>
+        {label}
+      </Typography>
+
+      {/* Count — terracotta numeral */}
+      <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 0.3, zIndex: 1, flexShrink: 0 }}>
+        <Typography sx={{
+          fontFamily: D.display,
+          fontSize: '1.15rem',
+          letterSpacing: '-0.02em',
+          lineHeight: 1,
+          color: D.terra,
+        }}>
+          {count}
+        </Typography>
+      </Box>
+    </Box>
+  );
+}
+
 // ─── To-do card ───────────────────────────────────────────────────────────────
 
 function ToDoCard({
-  file,
-  onDelete,
-  onEdit,
-  onToggleComplete,
+  file, onDelete, onEdit, onToggleComplete,
 }: {
   file:             TripFile;
   onDelete:         (id: string) => void;
@@ -396,7 +467,7 @@ function ToDoCard({
 
   const isPacking  = file.type === 'packing_advisory';
   const isComplete = !!file.completed;
-  const color      = isPacking ? '#b45309' : '#1D2642';
+  const color      = isPacking ? '#b45309' : D.navy;
 
   const handleToggle = async () => {
     setToggling(true);
@@ -430,43 +501,47 @@ function ToDoCard({
         {/* Content */}
         <Box sx={{ flexGrow: 1, minWidth: 0 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', mb: 0.25 }}>
-            {isPacking && (
-              <BoltIcon sx={{ fontSize: 15, color: '#b45309', flexShrink: 0 }} />
-            )}
-            <Typography
-              variant="body2"
-              fontWeight={700}
-              sx={{
-                fontSize: '0.9rem',
-                textDecoration: isComplete ? 'line-through' : 'none',
-                color: isComplete ? 'text.disabled' : 'text.primary',
-              }}
-            >
+            {isPacking && <BoltIcon sx={{ fontSize: 15, color: '#b45309', flexShrink: 0 }} />}
+            <Typography sx={{
+              fontFamily: D.body,
+              fontWeight: 700,
+              fontSize: '0.9rem',
+              textDecoration: isComplete ? 'line-through' : 'none',
+              color: isComplete ? 'text.disabled' : D.navy,
+            }}>
               {file.name}
             </Typography>
             {file.notification?.enabled && !isComplete && (
-              <NotificationsIcon sx={{ fontSize: 14, color: '#55702C', flexShrink: 0 }} />
+              <NotificationsIcon sx={{ fontSize: 14, color: D.green, flexShrink: 0 }} />
             )}
           </Box>
 
           {file.body && (
-            <Typography
-              variant="body2"
-              color={isComplete ? 'text.disabled' : 'text.secondary'}
-              sx={{ fontSize: '0.82rem', mb: 0.5, mt: 0.25 }}
-            >
+            <Typography sx={{
+              fontFamily: D.body,
+              fontSize: '0.82rem',
+              color: isComplete ? 'text.disabled' : 'text.secondary',
+              mb: 0.5,
+              mt: 0.25,
+            }}>
               {file.body}
             </Typography>
           )}
 
           {file.dueAt && (
-            <Typography variant="caption" sx={{ fontSize: '0.72rem', color: isComplete ? 'text.disabled' : color, fontWeight: 600, display: 'block' }}>
+            <Typography sx={{
+              fontFamily: D.body,
+              fontSize: '0.72rem',
+              color: isComplete ? 'text.disabled' : color,
+              fontWeight: 700,
+              display: 'block',
+            }}>
               {isComplete ? '✓ Done' : `Due: ${formatDueAt(file.dueAt)}`}
             </Typography>
           )}
 
           {isComplete && file.completedAt && (
-            <Typography variant="caption" color="text.disabled" sx={{ fontSize: '0.7rem', display: 'block' }}>
+            <Typography sx={{ fontFamily: D.body, fontSize: '0.7rem', color: 'text.disabled', display: 'block' }}>
               Completed {new Date(file.completedAt).toLocaleString('en-IE', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
             </Typography>
           )}
@@ -480,25 +555,29 @@ function ToDoCard({
 
       <Menu anchorEl={menuAnchor} open={Boolean(menuAnchor)} onClose={() => setMenuAnchor(null)}
         transformOrigin={{ horizontal: 'right', vertical: 'top' }} anchorOrigin={{ horizontal: 'right', vertical: 'bottom' }}>
-        <MenuItem onClick={() => { setMenuAnchor(null); onEdit(file); }} sx={{ gap: 1.5, fontSize: '0.875rem' }}>
+        <MenuItem onClick={() => { setMenuAnchor(null); onEdit(file); }} sx={{ gap: 1.5, fontSize: '0.875rem', fontFamily: D.body }}>
           <EditIcon fontSize="small" /> Edit
         </MenuItem>
         <Divider />
-        <MenuItem onClick={() => { setMenuAnchor(null); setConfirmOpen(true); }} sx={{ gap: 1.5, fontSize: '0.875rem', color: 'error.main' }}>
+        <MenuItem onClick={() => { setMenuAnchor(null); setConfirmOpen(true); }} sx={{ gap: 1.5, fontSize: '0.875rem', color: 'error.main', fontFamily: D.body }}>
           <DeleteIcon fontSize="small" /> Delete
         </MenuItem>
       </Menu>
 
-      <Dialog open={confirmOpen} onClose={() => setConfirmOpen(false)} maxWidth="xs" fullWidth>
-        <DialogTitle fontWeight={700} sx={{ fontSize: '1.1rem' }}>Delete to-do?</DialogTitle>
+      <Dialog open={confirmOpen} onClose={() => setConfirmOpen(false)} maxWidth="xs" fullWidth
+        PaperProps={{ sx: { backgroundColor: D.paper, borderRadius: 2.5 } }}>
+        <DialogTitle sx={{ fontFamily: D.display, fontSize: '1.2rem', letterSpacing: '-0.02em', color: D.navy }}>
+          Delete to-do?
+        </DialogTitle>
         <DialogContent>
-          <Typography variant="body2" color="text.secondary">
+          <Typography sx={{ fontFamily: D.body, fontSize: '0.88rem', color: 'text.secondary' }}>
             <strong>{file.name}</strong> will be permanently removed. This cannot be undone.
           </Typography>
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 2.5, gap: 1 }}>
-          <Button onClick={() => setConfirmOpen(false)}>Cancel</Button>
-          <Button variant="contained" color="error" onClick={() => { setConfirmOpen(false); onDelete(file._id); }}>Delete</Button>
+          <Button onClick={() => setConfirmOpen(false)} sx={{ fontFamily: D.body, fontWeight: 600 }}>Cancel</Button>
+          <Button variant="contained" color="error" onClick={() => { setConfirmOpen(false); onDelete(file._id); }}
+            sx={{ fontFamily: D.body, fontWeight: 700 }}>Delete</Button>
         </DialogActions>
       </Dialog>
     </>
@@ -510,7 +589,7 @@ function ToDoCard({
 function NoteCard({ file, onDelete, onEdit }: { file: TripFile; onDelete: (id: string) => void; onEdit: (file: TripFile) => void }) {
   const [menuAnchor,  setMenuAnchor]  = useState<null | HTMLElement>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
-  const color    = TYPE_COLOUR[file.type] ?? '#55702C';
+  const color    = TYPE_COLOUR[file.type] ?? D.green;
   const typeMeta = NOTE_TYPES.find(t => t.value === file.type);
 
   return (
@@ -519,15 +598,25 @@ function NoteCard({ file, onDelete, onEdit }: { file: TripFile; onDelete: (id: s
         <Box sx={{ width: 3, alignSelf: 'stretch', borderRadius: 2, backgroundColor: color, flexShrink: 0 }} />
         <Box sx={{ flexGrow: 1, minWidth: 0 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', mb: file.body ? 0.5 : 0 }}>
-            {file.name && <Typography variant="body2" fontWeight={800} sx={{ fontSize: '0.9rem' }}>{file.name}</Typography>}
-            {typeMeta && <Chip label={typeMeta.label} size="small" sx={{ height: 18, fontSize: '0.68rem', fontWeight: 700, backgroundColor: alpha(color, 0.12), color }} />}
+            {file.name && (
+              <Typography sx={{ fontFamily: D.body, fontWeight: 800, fontSize: '0.9rem', color: D.navy }}>
+                {file.name}
+              </Typography>
+            )}
+            {typeMeta && (
+              <Chip label={typeMeta.label} size="small" sx={{
+                height: 18, fontSize: '0.68rem', fontWeight: 700,
+                fontFamily: D.body,
+                backgroundColor: alpha(color, 0.12), color,
+              }} />
+            )}
           </Box>
           {file.body && (
-            <Typography variant="body2" color="text.secondary" sx={{ fontSize: '0.85rem', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+            <Typography sx={{ fontFamily: D.body, fontSize: '0.85rem', color: 'text.secondary', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
               {file.body}
             </Typography>
           )}
-          <Typography variant="caption" color="text.disabled" sx={{ fontSize: '0.7rem', display: 'block', mt: 0.5 }}>
+          <Typography sx={{ fontFamily: D.body, fontSize: '0.7rem', color: 'text.disabled', display: 'block', mt: 0.5 }}>
             {new Date(file.createdAt).toLocaleString('en-IE', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
             {file.linkedTo?.label ? ` · ${file.linkedTo.label}` : ''}
           </Typography>
@@ -539,19 +628,29 @@ function NoteCard({ file, onDelete, onEdit }: { file: TripFile; onDelete: (id: s
 
       <Menu anchorEl={menuAnchor} open={Boolean(menuAnchor)} onClose={() => setMenuAnchor(null)}
         transformOrigin={{ horizontal: 'right', vertical: 'top' }} anchorOrigin={{ horizontal: 'right', vertical: 'bottom' }}>
-        <MenuItem onClick={() => { setMenuAnchor(null); onEdit(file); }} sx={{ gap: 1.5, fontSize: '0.875rem' }}><EditIcon fontSize="small" /> Edit</MenuItem>
+        <MenuItem onClick={() => { setMenuAnchor(null); onEdit(file); }} sx={{ gap: 1.5, fontSize: '0.875rem', fontFamily: D.body }}>
+          <EditIcon fontSize="small" /> Edit
+        </MenuItem>
         <Divider />
-        <MenuItem onClick={() => { setMenuAnchor(null); setConfirmOpen(true); }} sx={{ gap: 1.5, fontSize: '0.875rem', color: 'error.main' }}><DeleteIcon fontSize="small" /> Delete</MenuItem>
+        <MenuItem onClick={() => { setMenuAnchor(null); setConfirmOpen(true); }} sx={{ gap: 1.5, fontSize: '0.875rem', color: 'error.main', fontFamily: D.body }}>
+          <DeleteIcon fontSize="small" /> Delete
+        </MenuItem>
       </Menu>
 
-      <Dialog open={confirmOpen} onClose={() => setConfirmOpen(false)} maxWidth="xs" fullWidth>
-        <DialogTitle fontWeight={700} sx={{ fontSize: '1.1rem' }}>Delete note?</DialogTitle>
+      <Dialog open={confirmOpen} onClose={() => setConfirmOpen(false)} maxWidth="xs" fullWidth
+        PaperProps={{ sx: { backgroundColor: D.paper, borderRadius: 2.5 } }}>
+        <DialogTitle sx={{ fontFamily: D.display, fontSize: '1.2rem', letterSpacing: '-0.02em', color: D.navy }}>
+          Delete note?
+        </DialogTitle>
         <DialogContent>
-          <Typography variant="body2" color="text.secondary"><strong>{file.name || 'This note'}</strong> will be permanently removed. This cannot be undone.</Typography>
+          <Typography sx={{ fontFamily: D.body, fontSize: '0.88rem', color: 'text.secondary' }}>
+            <strong>{file.name || 'This note'}</strong> will be permanently removed. This cannot be undone.
+          </Typography>
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 2.5, gap: 1 }}>
-          <Button onClick={() => setConfirmOpen(false)}>Cancel</Button>
-          <Button variant="contained" color="error" onClick={() => { setConfirmOpen(false); onDelete(file._id); }}>Delete</Button>
+          <Button onClick={() => setConfirmOpen(false)} sx={{ fontFamily: D.body, fontWeight: 600 }}>Cancel</Button>
+          <Button variant="contained" color="error" onClick={() => { setConfirmOpen(false); onDelete(file._id); }}
+            sx={{ fontFamily: D.body, fontWeight: 700 }}>Delete</Button>
         </DialogActions>
       </Dialog>
     </>
@@ -575,26 +674,42 @@ function ContactCard({ file, onDelete, onEdit }: { file: TripFile; onDelete: (id
         </Box>
         <Box sx={{ flexGrow: 1, minWidth: 0 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-            <Typography variant="body2" fontWeight={800} sx={{ fontSize: '0.9rem' }}>{file.name}</Typography>
-            {typeMeta && <Chip label={typeMeta.label} size="small" sx={{ height: 18, fontSize: '0.68rem', fontWeight: 700, backgroundColor: alpha(color, 0.12), color }} />}
+            <Typography sx={{ fontFamily: D.body, fontWeight: 800, fontSize: '0.9rem', color: D.navy }}>
+              {file.name}
+            </Typography>
+            {typeMeta && (
+              <Chip label={typeMeta.label} size="small" sx={{
+                height: 18, fontSize: '0.68rem', fontWeight: 700,
+                fontFamily: D.body,
+                backgroundColor: alpha(color, 0.12), color,
+              }} />
+            )}
           </Box>
           {(file.phone || file.email) && (
             <Box sx={{ display: 'flex', gap: 1, mt: 1, flexWrap: 'wrap' }}>
               {file.phone && (
-                <Button component="a" href={`tel:${file.phone}`} size="small" startIcon={<PhoneIcon sx={{ fontSize: '0.95rem !important' }} />} variant="outlined"
-                  sx={{ fontSize: '0.78rem', fontWeight: 700, py: 0.5, px: 1.25, borderColor: alpha(color, 0.35), color, '&:hover': { borderColor: color, backgroundColor: alpha(color, 0.06) }, minHeight: 32 }}>
+                <Button component="a" href={`tel:${file.phone}`} size="small"
+                  startIcon={<PhoneIcon sx={{ fontSize: '0.95rem !important' }} />} variant="outlined"
+                  sx={{ fontFamily: D.body, fontSize: '0.78rem', fontWeight: 700, py: 0.5, px: 1.25, borderColor: alpha(color, 0.35), color,
+                    '&:hover': { borderColor: color, backgroundColor: alpha(color, 0.06) }, minHeight: 32 }}>
                   {file.phone}
                 </Button>
               )}
               {file.email && (
-                <Button component="a" href={`mailto:${file.email}`} size="small" startIcon={<EmailIcon sx={{ fontSize: '0.95rem !important' }} />} variant="outlined"
-                  sx={{ fontSize: '0.78rem', fontWeight: 700, py: 0.5, px: 1.25, borderColor: alpha(color, 0.35), color, '&:hover': { borderColor: color, backgroundColor: alpha(color, 0.06) }, minHeight: 32 }}>
+                <Button component="a" href={`mailto:${file.email}`} size="small"
+                  startIcon={<EmailIcon sx={{ fontSize: '0.95rem !important' }} />} variant="outlined"
+                  sx={{ fontFamily: D.body, fontSize: '0.78rem', fontWeight: 700, py: 0.5, px: 1.25, borderColor: alpha(color, 0.35), color,
+                    '&:hover': { borderColor: color, backgroundColor: alpha(color, 0.06) }, minHeight: 32 }}>
                   {file.email}
                 </Button>
               )}
             </Box>
           )}
-          {file.notes && <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.75, fontSize: '0.78rem' }}>{file.notes}</Typography>}
+          {file.notes && (
+            <Typography sx={{ fontFamily: D.body, fontSize: '0.78rem', color: 'text.secondary', display: 'block', mt: 0.75 }}>
+              {file.notes}
+            </Typography>
+          )}
         </Box>
         <IconButton size="small" onClick={e => setMenuAnchor(e.currentTarget)} sx={{ flexShrink: 0, alignSelf: 'flex-start', mt: 0.25 }}>
           <MoreVertIcon fontSize="small" />
@@ -603,22 +718,28 @@ function ContactCard({ file, onDelete, onEdit }: { file: TripFile; onDelete: (id
 
       <Menu anchorEl={menuAnchor} open={Boolean(menuAnchor)} onClose={() => setMenuAnchor(null)}
         transformOrigin={{ horizontal: 'right', vertical: 'top' }} anchorOrigin={{ horizontal: 'right', vertical: 'bottom' }}>
-        {file.phone && <MenuItem component="a" href={`tel:${file.phone}`} onClick={() => setMenuAnchor(null)} sx={{ gap: 1.5, fontSize: '0.875rem' }}><PhoneIcon fontSize="small" /> Call {file.phone}</MenuItem>}
-        {file.email && <MenuItem component="a" href={`mailto:${file.email}`} onClick={() => setMenuAnchor(null)} sx={{ gap: 1.5, fontSize: '0.875rem' }}><EmailIcon fontSize="small" /> Email</MenuItem>}
+        {file.phone && <MenuItem component="a" href={`tel:${file.phone}`} onClick={() => setMenuAnchor(null)} sx={{ gap: 1.5, fontSize: '0.875rem', fontFamily: D.body }}><PhoneIcon fontSize="small" /> Call {file.phone}</MenuItem>}
+        {file.email && <MenuItem component="a" href={`mailto:${file.email}`} onClick={() => setMenuAnchor(null)} sx={{ gap: 1.5, fontSize: '0.875rem', fontFamily: D.body }}><EmailIcon fontSize="small" /> Email</MenuItem>}
         {(file.phone || file.email) && <Divider />}
-        <MenuItem onClick={() => { setMenuAnchor(null); onEdit(file); }} sx={{ gap: 1.5, fontSize: '0.875rem' }}><EditIcon fontSize="small" /> Edit</MenuItem>
+        <MenuItem onClick={() => { setMenuAnchor(null); onEdit(file); }} sx={{ gap: 1.5, fontSize: '0.875rem', fontFamily: D.body }}><EditIcon fontSize="small" /> Edit</MenuItem>
         <Divider />
-        <MenuItem onClick={() => { setMenuAnchor(null); setConfirmOpen(true); }} sx={{ gap: 1.5, fontSize: '0.875rem', color: 'error.main' }}><DeleteIcon fontSize="small" /> Delete</MenuItem>
+        <MenuItem onClick={() => { setMenuAnchor(null); setConfirmOpen(true); }} sx={{ gap: 1.5, fontSize: '0.875rem', color: 'error.main', fontFamily: D.body }}><DeleteIcon fontSize="small" /> Delete</MenuItem>
       </Menu>
 
-      <Dialog open={confirmOpen} onClose={() => setConfirmOpen(false)} maxWidth="xs" fullWidth>
-        <DialogTitle fontWeight={700} sx={{ fontSize: '1.1rem' }}>Remove contact?</DialogTitle>
+      <Dialog open={confirmOpen} onClose={() => setConfirmOpen(false)} maxWidth="xs" fullWidth
+        PaperProps={{ sx: { backgroundColor: D.paper, borderRadius: 2.5 } }}>
+        <DialogTitle sx={{ fontFamily: D.display, fontSize: '1.2rem', letterSpacing: '-0.02em', color: D.navy }}>
+          Remove contact?
+        </DialogTitle>
         <DialogContent>
-          <Typography variant="body2" color="text.secondary"><strong>{file.name}</strong> will be permanently removed. This cannot be undone.</Typography>
+          <Typography sx={{ fontFamily: D.body, fontSize: '0.88rem', color: 'text.secondary' }}>
+            <strong>{file.name}</strong> will be permanently removed. This cannot be undone.
+          </Typography>
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 2.5, gap: 1 }}>
-          <Button onClick={() => setConfirmOpen(false)}>Cancel</Button>
-          <Button variant="contained" color="error" onClick={() => { setConfirmOpen(false); onDelete(file._id); }}>Remove</Button>
+          <Button onClick={() => setConfirmOpen(false)} sx={{ fontFamily: D.body, fontWeight: 600 }}>Cancel</Button>
+          <Button variant="contained" color="error" onClick={() => { setConfirmOpen(false); onDelete(file._id); }}
+            sx={{ fontFamily: D.body, fontWeight: 700 }}>Remove</Button>
         </DialogActions>
       </Dialog>
     </>
@@ -639,21 +760,34 @@ function ResourceCard({ file, onDelete, onEdit }: { file: TripFile; onDelete: (i
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, px: { xs: 2, sm: 2.5 }, py: { xs: 1.5, sm: 1.75 } }}>
         <Box sx={{ width: 3, alignSelf: 'stretch', borderRadius: 2, backgroundColor: color, flexShrink: 0 }} />
         <Box sx={{ flexShrink: 0 }}>
-          {isLink
-            ? <LinkIcon sx={{ fontSize: 20, color }} />
-            : <MimeIcon mimeType={file.mimeType} size={20} />
-          }
+          {isLink ? <LinkIcon sx={{ fontSize: 20, color }} /> : <MimeIcon mimeType={file.mimeType} size={20} />}
         </Box>
         <Box sx={{ flexGrow: 1, minWidth: 0 }}>
-          <Typography variant="body2" fontWeight={700} sx={{ fontSize: '0.88rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          <Typography sx={{
+            fontFamily: D.body,
+            fontWeight: 700,
+            fontSize: '0.88rem',
+            color: D.navy,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}>
             {file.name}
           </Typography>
-          {file.notes && <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.75rem', display: 'block' }}>{file.notes}</Typography>}
+          {file.notes && (
+            <Typography sx={{ fontFamily: D.body, fontSize: '0.75rem', color: 'text.secondary', display: 'block' }}>
+              {file.notes}
+            </Typography>
+          )}
           {!isLink && file.size && (
-            <Typography variant="caption" color="text.disabled" sx={{ fontSize: '0.72rem' }}>{formatBytes(file.size)}</Typography>
+            <Typography sx={{ fontFamily: D.body, fontSize: '0.72rem', color: 'text.disabled' }}>
+              {formatBytes(file.size)}
+            </Typography>
           )}
           {file.linkedTo?.label && (
-            <Typography variant="caption" color="text.disabled" sx={{ fontSize: '0.7rem', display: 'block' }}>↳ {file.linkedTo.label}</Typography>
+            <Typography sx={{ fontFamily: D.body, fontSize: '0.7rem', color: 'text.disabled', display: 'block' }}>
+              ↳ {file.linkedTo.label}
+            </Typography>
           )}
         </Box>
         {actionUrl && (
@@ -670,24 +804,34 @@ function ResourceCard({ file, onDelete, onEdit }: { file: TripFile; onDelete: (i
       <Menu anchorEl={menuAnchor} open={Boolean(menuAnchor)} onClose={() => setMenuAnchor(null)}
         transformOrigin={{ horizontal: 'right', vertical: 'top' }} anchorOrigin={{ horizontal: 'right', vertical: 'bottom' }}>
         {actionUrl && (
-          <MenuItem component="a" href={actionUrl} target="_blank" rel="noopener noreferrer" onClick={() => setMenuAnchor(null)} sx={{ gap: 1.5, fontSize: '0.875rem' }}>
+          <MenuItem component="a" href={actionUrl} target="_blank" rel="noopener noreferrer" onClick={() => setMenuAnchor(null)} sx={{ gap: 1.5, fontSize: '0.875rem', fontFamily: D.body }}>
             {isLink ? <OpenInNewIcon fontSize="small" /> : <DownloadIcon fontSize="small" />}
             {isLink ? 'Open link' : 'Download'}
           </MenuItem>
         )}
-        <MenuItem onClick={() => { setMenuAnchor(null); onEdit(file); }} sx={{ gap: 1.5, fontSize: '0.875rem' }}><EditIcon fontSize="small" /> Edit details</MenuItem>
+        <MenuItem onClick={() => { setMenuAnchor(null); onEdit(file); }} sx={{ gap: 1.5, fontSize: '0.875rem', fontFamily: D.body }}>
+          <EditIcon fontSize="small" /> Edit details
+        </MenuItem>
         <Divider />
-        <MenuItem onClick={() => { setMenuAnchor(null); setConfirmOpen(true); }} sx={{ gap: 1.5, fontSize: '0.875rem', color: 'error.main' }}><DeleteIcon fontSize="small" /> {isLink ? 'Remove link' : 'Delete file'}</MenuItem>
+        <MenuItem onClick={() => { setMenuAnchor(null); setConfirmOpen(true); }} sx={{ gap: 1.5, fontSize: '0.875rem', color: 'error.main', fontFamily: D.body }}>
+          <DeleteIcon fontSize="small" /> {isLink ? 'Remove link' : 'Delete file'}
+        </MenuItem>
       </Menu>
 
-      <Dialog open={confirmOpen} onClose={() => setConfirmOpen(false)} maxWidth="xs" fullWidth>
-        <DialogTitle fontWeight={700} sx={{ fontSize: '1.1rem' }}>{isLink ? 'Remove link?' : 'Delete file?'}</DialogTitle>
+      <Dialog open={confirmOpen} onClose={() => setConfirmOpen(false)} maxWidth="xs" fullWidth
+        PaperProps={{ sx: { backgroundColor: D.paper, borderRadius: 2.5 } }}>
+        <DialogTitle sx={{ fontFamily: D.display, fontSize: '1.2rem', letterSpacing: '-0.02em', color: D.navy }}>
+          {isLink ? 'Remove link?' : 'Delete file?'}
+        </DialogTitle>
         <DialogContent>
-          <Typography variant="body2" color="text.secondary"><strong>{file.name}</strong> will be permanently removed. This cannot be undone.</Typography>
+          <Typography sx={{ fontFamily: D.body, fontSize: '0.88rem', color: 'text.secondary' }}>
+            <strong>{file.name}</strong> will be permanently removed. This cannot be undone.
+          </Typography>
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 2.5, gap: 1 }}>
-          <Button onClick={() => setConfirmOpen(false)}>Cancel</Button>
-          <Button variant="contained" color="error" onClick={() => { setConfirmOpen(false); onDelete(file._id); }}>{isLink ? 'Remove' : 'Delete'}</Button>
+          <Button onClick={() => setConfirmOpen(false)} sx={{ fontFamily: D.body, fontWeight: 600 }}>Cancel</Button>
+          <Button variant="contained" color="error" onClick={() => { setConfirmOpen(false); onDelete(file._id); }}
+            sx={{ fontFamily: D.body, fontWeight: 700 }}>{isLink ? 'Remove' : 'Delete'}</Button>
         </DialogActions>
       </Dialog>
     </>
@@ -717,9 +861,6 @@ export default function FilesTab({ tripId, fabTrigger }: FilesTabProps) {
   const [error,         setError]         = useState<string | null>(null);
   const [editingFile,   setEditingFile]   = useState<TripFile | null>(null);
 
-  // Refs for the date/time inputs — MUI's synthetic event layer can silently
-  // drop onChange on type="date" and type="time" in some versions.
-  // Reading from the DOM directly at submit time is bulletproof.
   const dueDateRef = useRef<HTMLInputElement>(null);
   const dueTimeRef = useRef<HTMLInputElement>(null);
 
@@ -754,10 +895,10 @@ export default function FilesTab({ tripId, fabTrigger }: FilesTabProps) {
   };
 
   useEffect(() => {
-  if (!fabTrigger) return;
-  const validModes: Mode[] = ['file', 'link', 'contact', 'note', 'todo'];
-  if (validModes.includes(fabTrigger.action as Mode)) openDialog(fabTrigger.action as Mode);
-}, [fabTrigger]);
+    if (!fabTrigger) return;
+    const validModes: Mode[] = ['file', 'link', 'contact', 'note', 'todo'];
+    if (validModes.includes(fabTrigger.action as Mode)) openDialog(fabTrigger.action as Mode);
+  }, [fabTrigger]);
 
   const openEdit = (file: TripFile) => {
     setEditingFile(file);
@@ -771,13 +912,7 @@ export default function FilesTab({ tripId, fabTrigger }: FilesTabProps) {
     if (file.resourceType === 'todo') {
       setMode('todo');
       const { dueDate, dueTime } = splitDueAt(file.dueAt);
-      setTodoForm({
-        name:                file.name ?? '',
-        body:                file.body ?? '',
-        dueDate,
-        dueTime,
-        notificationEnabled: file.notification?.enabled ?? false,
-      });
+      setTodoForm({ name: file.name ?? '', body: file.body ?? '', dueDate, dueTime, notificationEnabled: file.notification?.enabled ?? false });
     } else if (file.resourceType === 'note') {
       setMode('note');
       setNoteForm({ name: file.name ?? '', type: file.type as NoteTypeValue, body: file.body ?? '' });
@@ -803,25 +938,19 @@ export default function FilesTab({ tripId, fabTrigger }: FilesTabProps) {
     if (!dialogOpen) setDialogOpen(true);
   };
 
-  // ── Toggle complete (PATCH) ────────────────────────────────────────────────
   const handleToggleComplete = async (file: TripFile) => {
     const newCompleted = !file.completed;
-    // Optimistic update
     setFiles(prev => prev.map(f =>
       f._id === file._id ? { ...f, completed: newCompleted, completedAt: newCompleted ? new Date().toISOString() : undefined } : f
     ));
     try {
       const res  = await fetch(`/api/trips/${tripId}/files/${file._id}`, {
-        method:  'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ completed: newCompleted }),
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ completed: newCompleted }),
       });
       const data = await res.json();
-      if (res.ok && data.file) {
-        setFiles(prev => prev.map(f => f._id === file._id ? data.file : f));
-      }
+      if (res.ok && data.file) setFiles(prev => prev.map(f => f._id === file._id ? data.file : f));
     } catch {
-      // Revert on failure
       setFiles(prev => prev.map(f =>
         f._id === file._id ? { ...f, completed: file.completed, completedAt: file.completedAt } : f
       ));
@@ -836,23 +965,15 @@ export default function FilesTab({ tripId, fabTrigger }: FilesTabProps) {
     const fd = new FormData();
 
     if (linkedTo) {
-      fd.append('linkedTo', JSON.stringify({
-        label:      linkedTo.label,
-        collection: linkedTo.collection,
-        entryId:    linkedTo.entryId,
-      }));
+      fd.append('linkedTo', JSON.stringify({ label: linkedTo.label, collection: linkedTo.collection, entryId: linkedTo.entryId }));
     }
 
     if (mode === 'todo') {
       if (!todoForm.name.trim()) { setError('Title is required'); setUploading(false); return; }
-
-      // Read directly from DOM — bypasses any MUI synthetic event issues
-      const dueDate = dueDateRef.current?.value ?? '';
-      const dueTime = dueTimeRef.current?.value ?? '';
+      const dueDate  = dueDateRef.current?.value ?? '';
+      const dueTime  = dueTimeRef.current?.value ?? '';
       const dueAtIso = combineDueAt(dueDate, dueTime);
-
       console.log('[todo submit] dueDate:', dueDate, 'dueTime:', dueTime, 'iso:', dueAtIso);
-
       fd.append('resourceType', 'todo');
       fd.append('name', todoForm.name.trim());
       if (todoForm.body.trim()) fd.append('body', todoForm.body.trim());
@@ -862,9 +983,9 @@ export default function FilesTab({ tripId, fabTrigger }: FilesTabProps) {
     } else if (mode === 'note') {
       if (!noteForm.body.trim()) { setError('Note content is required'); setUploading(false); return; }
       fd.append('resourceType', 'note');
-      fd.append('name',  noteForm.name.trim());
-      fd.append('type',  noteForm.type);
-      fd.append('body',  noteForm.body.trim());
+      fd.append('name', noteForm.name.trim());
+      fd.append('type', noteForm.type);
+      fd.append('body', noteForm.body.trim());
     } else if (mode === 'contact') {
       if (!contactForm.name) { setError('Name is required'); setUploading(false); return; }
       if (!contactForm.phone && !contactForm.email) { setError('At least one of phone or email is required'); setUploading(false); return; }
@@ -931,28 +1052,24 @@ export default function FilesTab({ tripId, fabTrigger }: FilesTabProps) {
 
   // ── Derived ───────────────────────────────────────────────────────────────
 
-  // Split todos from all other resource types
   const todos    = files.filter(f => f.resourceType === 'todo');
   const nonTodos = files.filter(f => f.resourceType !== 'todo');
 
-  // Sort todos: incomplete first (by dueAt asc), then completed (by completedAt desc)
   const sortedTodos = [...todos].sort((a, b) => {
     if (a.completed !== b.completed) return Number(a.completed) - Number(b.completed);
     if (!a.completed && !b.completed) {
-      // Both incomplete — sort by dueAt ascending (soonest first), undated last
       if (!a.dueAt && !b.dueAt) return 0;
       if (!a.dueAt) return 1;
       if (!b.dueAt) return -1;
       return new Date(a.dueAt).getTime() - new Date(b.dueAt).getTime();
     }
-    // Both complete — most recently completed first
     const aAt = a.completedAt ? new Date(a.completedAt).getTime() : 0;
     const bAt = b.completedAt ? new Date(b.completedAt).getTime() : 0;
     return bAt - aAt;
   });
 
-  const pendingTodos    = sortedTodos.filter(t => !t.completed);
-  const completedTodos  = sortedTodos.filter(t => t.completed);
+  const pendingTodos   = sortedTodos.filter(t => !t.completed);
+  const completedTodos = sortedTodos.filter(t => t.completed);
 
   const grouped    = groupByType(nonTodos);
   const typeOrder  = ALL_TYPES.map(t => t.value);
@@ -996,36 +1113,85 @@ export default function FilesTab({ tripId, fabTrigger }: FilesTabProps) {
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, pb: 10 }}>
 
       {/* ── Header ── */}
-      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 1.5 }}>
+      <Box sx={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', flexWrap: 'wrap', gap: 1.5 }}>
         <Box>
-          <Typography variant="h6" fontWeight={800} sx={{ fontSize: { xs: '1.05rem', sm: '1.15rem' } }}>
-            Resources
-          </Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.25 }}>
-            {totalCount === 0 ? 'No resources yet' : `${totalCount} item${totalCount !== 1 ? 's' : ''}`}
-          </Typography>
+          {/* Large display count */}
+          <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1 }}>
+            <Typography sx={{
+              fontFamily: D.display,
+              fontSize: { xs: '3rem', sm: '3.5rem' },
+              letterSpacing: '-0.04em',
+              lineHeight: 1,
+              color: totalCount === 0 ? 'text.disabled' : D.navy,
+            }}>
+              {totalCount}
+            </Typography>
+            <Typography sx={{
+              fontFamily: D.body,
+              fontWeight: 700,
+              fontSize: '0.85rem',
+              color: 'text.secondary',
+              pb: 0.5,
+              letterSpacing: '0.01em',
+            }}>
+              {totalCount === 1 ? 'resource' : 'resources'}
+            </Typography>
+          </Box>
         </Box>
         <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-          <Button variant="outlined" startIcon={<AssignmentIcon />} onClick={() => openDialog('todo')} sx={{ fontWeight: 700 }}>Add to-do</Button>
-          <Button variant="outlined" startIcon={<PersonIcon />} onClick={() => openDialog('contact')} sx={{ fontWeight: 700 }}>Add contact</Button>
-          <Button variant="outlined" startIcon={<LinkIcon />} onClick={() => openDialog('link')} sx={{ fontWeight: 700 }}>Add link</Button>
-          <Button variant="outlined" startIcon={<NoteAddIcon />} onClick={() => openDialog('note')} sx={{ fontWeight: 700 }}>Add note</Button>
-          <Button variant="contained" startIcon={<AddIcon />} onClick={() => openDialog('file')} sx={{ fontWeight: 700 }}>Upload file</Button>
+          <Button variant="outlined" startIcon={<AssignmentIcon />} onClick={() => openDialog('todo')}
+            sx={{ fontFamily: D.body, fontWeight: 700, borderColor: 'rgba(44,62,80,0.18)', color: D.navy,
+              '&:hover': { borderColor: 'rgba(44,62,80,0.45)', backgroundColor: 'rgba(44,62,80,0.04)' } }}>
+            Add to-do
+          </Button>
+          <Button variant="outlined" startIcon={<PersonIcon />} onClick={() => openDialog('contact')}
+            sx={{ fontFamily: D.body, fontWeight: 700, borderColor: 'rgba(44,62,80,0.18)', color: D.navy,
+              '&:hover': { borderColor: 'rgba(44,62,80,0.45)', backgroundColor: 'rgba(44,62,80,0.04)' } }}>
+            Add contact
+          </Button>
+          <Button variant="outlined" startIcon={<LinkIcon />} onClick={() => openDialog('link')}
+            sx={{ fontFamily: D.body, fontWeight: 700, borderColor: 'rgba(44,62,80,0.18)', color: D.navy,
+              '&:hover': { borderColor: 'rgba(44,62,80,0.45)', backgroundColor: 'rgba(44,62,80,0.04)' } }}>
+            Add link
+          </Button>
+          <Button variant="outlined" startIcon={<NoteAddIcon />} onClick={() => openDialog('note')}
+            sx={{ fontFamily: D.body, fontWeight: 700, borderColor: 'rgba(44,62,80,0.18)', color: D.navy,
+              '&:hover': { borderColor: 'rgba(44,62,80,0.45)', backgroundColor: 'rgba(44,62,80,0.04)' } }}>
+            Add note
+          </Button>
+          <Button variant="contained" startIcon={<AddIcon />} onClick={() => openDialog('file')}
+            sx={{ fontFamily: D.display, letterSpacing: '-0.01em', backgroundColor: D.navy, boxShadow: 'none',
+              '&:hover': { backgroundColor: 'rgba(44,62,80,0.88)', boxShadow: 'none' } }}>
+            Upload file
+          </Button>
         </Box>
       </Box>
 
       {loading && (
         <Box sx={{ display: 'flex', justifyContent: 'center', py: 6 }}>
-          <CircularProgress size={28} />
+          <CircularProgress size={28} sx={{ color: D.green }} />
         </Box>
       )}
 
       {!loading && totalCount === 0 && (
-        <Paper sx={{ p: { xs: 3, sm: 4 }, backgroundColor: 'background.paper' }}>
+        <Paper elevation={0} sx={{
+          p: { xs: 3, sm: 4 },
+          backgroundColor: D.paper,
+          border: '1.5px solid rgba(44,62,80,0.08)',
+          borderRadius: 2.5,
+        }}>
           <Box sx={{ textAlign: 'center', mb: 3 }}>
-            <FolderOpenIcon sx={{ fontSize: 52, color: 'text.disabled', mb: 1.5 }} />
-            <Typography variant="body1" fontWeight={700} color="text.secondary" gutterBottom>No resources yet</Typography>
-            <Typography variant="body2" color="text.disabled" sx={{ maxWidth: 380, mx: 'auto' }}>
+            <FolderOpenIcon sx={{ fontSize: 48, color: 'text.disabled', mb: 1.5, opacity: 0.5 }} />
+            <Typography sx={{
+              fontFamily: D.display,
+              fontSize: { xs: '1.4rem', sm: '1.8rem' },
+              letterSpacing: '-0.02em',
+              color: D.navy,
+              mb: 0.5,
+            }}>
+              No resources yet
+            </Typography>
+            <Typography sx={{ fontFamily: D.body, fontSize: '0.9rem', color: 'text.disabled', maxWidth: 380, mx: 'auto', lineHeight: 1.6 }}>
               Upload boarding passes and documents, save links, add key contacts, jot a note, or add a to-do with reminders.
             </Typography>
           </Box>
@@ -1035,55 +1201,32 @@ export default function FilesTab({ tripId, fabTrigger }: FilesTabProps) {
 
       {!loading && totalCount > 0 && (
         <>
-          {/* ── To-dos section — always first ── */}
+          {/* ── To-dos section ── */}
           {sortedTodos.length > 0 && (
-            <Paper sx={{ backgroundColor: 'background.paper', overflow: 'hidden' }}>
-              <Box sx={{
-                px: { xs: 2, sm: 2.5 }, py: 1.5,
-                display: 'flex', alignItems: 'center', gap: 1.25,
-                borderBottom: '1px solid', borderColor: 'divider',
-                backgroundColor: alpha('#1D2642', 0.04),
-              }}>
-                <AssignmentIcon sx={{ fontSize: 17, color: '#1D2642' }} />
-                <Typography variant="subtitle2" fontWeight={800} sx={{ fontSize: '0.82rem', letterSpacing: 0.3, textTransform: 'uppercase', color: '#1D2642' }}>
-                  To-dos
-                </Typography>
-                {pendingTodos.length > 0 && (
-                  <Chip
-                    label={`${pendingTodos.length} pending`}
-                    size="small"
-                    sx={{ ml: 'auto', height: 20, backgroundColor: alpha('#1D2642', 0.12), color: '#1D2642', fontWeight: 800, fontSize: '0.72rem' }}
-                  />
-                )}
-                {completedTodos.length > 0 && pendingTodos.length === 0 && (
-                  <Chip
-                    label={`${completedTodos.length} done`}
-                    size="small"
-                    color="success"
-                    sx={{ ml: 'auto', height: 20, fontWeight: 800, fontSize: '0.72rem' }}
-                  />
-                )}
-              </Box>
+            <Paper elevation={0} sx={{
+              backgroundColor: D.paper,
+              overflow: 'hidden',
+              border: '1.5px solid rgba(44,62,80,0.08)',
+              borderRadius: 2.5,
+            }}>
+              <SectionHeader
+                label="To-dos"
+                count={pendingTodos.length > 0 ? pendingTodos.length : completedTodos.length}
+                icon={<AssignmentIcon sx={{ fontSize: 17 }} />}
+              />
 
-              {/* Pending todos */}
               {pendingTodos.map((todo, i) => (
                 <Box key={todo._id}>
                   {i > 0 && <Divider />}
-                  <ToDoCard
-                    file={todo}
-                    onDelete={handleDelete}
-                    onEdit={openEdit}
-                    onToggleComplete={handleToggleComplete}
-                  />
+                  <ToDoCard file={todo} onDelete={handleDelete} onEdit={openEdit} onToggleComplete={handleToggleComplete} />
                 </Box>
               ))}
 
-              {/* Completed todos — shown below pending with a subtle separator */}
               {completedTodos.length > 0 && (
                 <>
                   {pendingTodos.length > 0 && (
                     <Box sx={{ px: 2.5, py: 1, backgroundColor: alpha('#000', 0.02), borderTop: '1px solid', borderColor: 'divider' }}>
-                      <Typography variant="caption" fontWeight={700} color="text.disabled" sx={{ fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                      <Typography sx={{ fontFamily: D.body, fontWeight: 700, color: 'text.disabled', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: 0.5 }}>
                         Completed
                       </Typography>
                     </Box>
@@ -1091,12 +1234,7 @@ export default function FilesTab({ tripId, fabTrigger }: FilesTabProps) {
                   {completedTodos.map((todo, i) => (
                     <Box key={todo._id}>
                       {(i > 0 || pendingTodos.length > 0) && <Divider />}
-                      <ToDoCard
-                        file={todo}
-                        onDelete={handleDelete}
-                        onEdit={openEdit}
-                        onToggleComplete={handleToggleComplete}
-                      />
+                      <ToDoCard file={todo} onDelete={handleDelete} onEdit={openEdit} onToggleComplete={handleToggleComplete} />
                     </Box>
                   ))}
                 </>
@@ -1104,23 +1242,27 @@ export default function FilesTab({ tripId, fabTrigger }: FilesTabProps) {
             </Paper>
           )}
 
-          {/* ── Drop zone for files ── */}
+          {/* ── Drop zone ── */}
           <DropZone onFile={f => { setMode('file'); handleFileSelected(f); }} />
 
-          {/* ── Grouped resources (files / links / contacts / notes) ── */}
+          {/* ── Grouped resources ── */}
           {sortedKeys.map(type => {
             const group    = grouped.get(type) ?? [];
             const typeMeta = ALL_TYPES.find(t => t.value === type);
             const color    = TYPE_COLOUR[type] ?? '#6b7280';
             return (
-              <Paper key={type} sx={{ backgroundColor: 'background.paper', overflow: 'hidden' }}>
-                <Box sx={{ px: { xs: 2, sm: 2.5 }, py: 1.5, display: 'flex', alignItems: 'center', gap: 1.25, borderBottom: '1px solid', borderColor: 'divider', backgroundColor: alpha(color, 0.04) }}>
-                  <Box sx={{ color, display: 'flex' }}><TypeIcon type={type} size={17} /></Box>
-                  <Typography variant="subtitle2" fontWeight={800} sx={{ fontSize: '0.82rem', letterSpacing: 0.3, textTransform: 'uppercase', color }}>
-                    {typeMeta?.label ?? type}
-                  </Typography>
-                  <Chip label={group.length} size="small" sx={{ ml: 'auto', height: 20, backgroundColor: alpha(color, 0.12), color, fontWeight: 800, fontSize: '0.72rem' }} />
-                </Box>
+              <Paper key={type} elevation={0} sx={{
+                backgroundColor: D.paper,
+                overflow: 'hidden',
+                border: '1.5px solid rgba(44,62,80,0.08)',
+                borderRadius: 2.5,
+              }}>
+                <SectionHeader
+                  label={typeMeta?.label ?? type}
+                  count={group.length}
+                  icon={<TypeIcon type={type} size={17} />}
+                  color={color}
+                />
                 {group.map((file, i) => (
                   <Box key={file._id}>
                     {i > 0 && <Divider />}
@@ -1143,8 +1285,14 @@ export default function FilesTab({ tripId, fabTrigger }: FilesTabProps) {
         open={dialogOpen}
         onClose={() => { if (!uploading) { setDialogOpen(false); setEditingFile(null); setLinkedTo(null); } }}
         maxWidth="sm" fullWidth fullScreen={mobile}
+        PaperProps={{ sx: { backgroundColor: D.paper, borderRadius: { sm: 2.5 } } }}
       >
-        <DialogTitle fontWeight={700} sx={{ fontSize: { xs: '1.15rem', sm: '1.2rem' } }}>
+        <DialogTitle sx={{
+          fontFamily: D.display,
+          fontSize: { xs: '1.4rem', sm: '1.6rem' },
+          letterSpacing: '-0.02em',
+          color: D.navy,
+        }}>
           {dialogTitle}
         </DialogTitle>
 
@@ -1155,31 +1303,22 @@ export default function FilesTab({ tripId, fabTrigger }: FilesTabProps) {
             {mode === 'todo' && (
               <>
                 <TextField
-                  label="Title"
-                  value={todoForm.name}
-                  autoFocus
-                  fullWidth
-                  required
-                  disabled={uploading}
+                  label="Title" value={todoForm.name} autoFocus fullWidth required disabled={uploading}
                   onChange={e => setTodoForm(p => ({ ...p, name: e.target.value }))}
                   placeholder="e.g. Charge all devices before packing"
-                  InputProps={{ sx: mobile ? { fontSize: '1rem' } : {} }}
+                  InputProps={{ sx: { fontFamily: D.body, ...(mobile ? { fontSize: '1rem' } : {}) } }}
+                  InputLabelProps={{ sx: { fontFamily: D.body } }}
                 />
                 <TextField
-                  label="Notes (optional)"
-                  value={todoForm.body}
-                  fullWidth
-                  multiline
-                  rows={3}
-                  disabled={uploading}
+                  label="Notes (optional)" value={todoForm.body} fullWidth multiline rows={3} disabled={uploading}
                   onChange={e => setTodoForm(p => ({ ...p, body: e.target.value }))}
                   placeholder="Any extra detail..."
-                  InputProps={{ sx: mobile ? { fontSize: '1rem' } : {} }}
+                  InputProps={{ sx: { fontFamily: D.body, ...(mobile ? { fontSize: '1rem' } : {}) } }}
+                  InputLabelProps={{ sx: { fontFamily: D.body } }}
                 />
-                {/* Plain inputs — MUI wrappers swallow onChange/refs on date in this MUI build */}
                 <Box sx={{ display: 'flex', gap: 1.5 }}>
                   <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 0.5 }}>
-                    <Typography variant="caption" color="text.secondary" fontWeight={600} sx={{ fontSize: '0.75rem' }}>
+                    <Typography sx={{ fontFamily: D.body, fontSize: '0.75rem', color: 'text.secondary', fontWeight: 600 }}>
                       Due date
                     </Typography>
                     <input
@@ -1188,21 +1327,16 @@ export default function FilesTab({ tripId, fabTrigger }: FilesTabProps) {
                       defaultValue={todoForm.dueDate}
                       disabled={uploading}
                       style={{
-                        width: '100%',
-                        padding: '12px 14px',
+                        width: '100%', padding: '12px 14px',
                         fontSize: mobile ? '1rem' : '0.875rem',
-                        border: '1px solid rgba(0,0,0,0.23)',
-                        borderRadius: 4,
-                        backgroundColor: 'transparent',
-                        outline: 'none',
-                        color: 'inherit',
-                        fontFamily: 'inherit',
-                        boxSizing: 'border-box',
+                        border: '1px solid rgba(0,0,0,0.23)', borderRadius: 4,
+                        backgroundColor: 'transparent', outline: 'none',
+                        color: 'inherit', fontFamily: 'inherit', boxSizing: 'border-box',
                       }}
                     />
                   </Box>
                   <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 0.5 }}>
-                    <Typography variant="caption" color="text.secondary" fontWeight={600} sx={{ fontSize: '0.75rem' }}>
+                    <Typography sx={{ fontFamily: D.body, fontSize: '0.75rem', color: 'text.secondary', fontWeight: 600 }}>
                       Due time
                     </Typography>
                     <input
@@ -1211,40 +1345,31 @@ export default function FilesTab({ tripId, fabTrigger }: FilesTabProps) {
                       defaultValue={todoForm.dueTime}
                       disabled={uploading}
                       style={{
-                        width: '100%',
-                        padding: '12px 14px',
+                        width: '100%', padding: '12px 14px',
                         fontSize: mobile ? '1rem' : '0.875rem',
-                        border: '1px solid rgba(0,0,0,0.23)',
-                        borderRadius: 4,
-                        backgroundColor: 'transparent',
-                        outline: 'none',
-                        color: 'inherit',
-                        fontFamily: 'inherit',
-                        boxSizing: 'border-box',
+                        border: '1px solid rgba(0,0,0,0.23)', borderRadius: 4,
+                        backgroundColor: 'transparent', outline: 'none',
+                        color: 'inherit', fontFamily: 'inherit', boxSizing: 'border-box',
                       }}
                     />
                   </Box>
                 </Box>
-                <Typography variant="caption" color="text.secondary" sx={{ mt: -1.5 }}>
+                <Typography sx={{ fontFamily: D.body, fontSize: '0.75rem', color: 'text.secondary', mt: -1.5 }}>
                   Set both to enable push notification
                 </Typography>
-                {/* Notification toggle — always visible so user can enable it after setting the date/time */}
                 <FormControlLabel
                   control={
-                    <Switch
-                      checked={todoForm.notificationEnabled}
+                    <Switch checked={todoForm.notificationEnabled}
                       onChange={e => setTodoForm(p => ({ ...p, notificationEnabled: e.target.checked }))}
-                      disabled={uploading}
-                      color="primary"
-                    />
+                      disabled={uploading} color="primary" />
                   }
                   label={
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
                       {todoForm.notificationEnabled
-                        ? <NotificationsIcon sx={{ fontSize: 18, color: '#55702C' }} />
+                        ? <NotificationsIcon sx={{ fontSize: 18, color: D.green }} />
                         : <NotificationsOffIcon sx={{ fontSize: 18, color: 'text.disabled' }} />
                       }
-                      <Typography variant="body2" fontWeight={600}>
+                      <Typography sx={{ fontFamily: D.body, fontSize: '0.88rem', fontWeight: 600 }}>
                         {todoForm.notificationEnabled ? 'Push notification on (requires due date + time)' : 'Push notification off'}
                       </Typography>
                     </Box>
@@ -1260,17 +1385,20 @@ export default function FilesTab({ tripId, fabTrigger }: FilesTabProps) {
                   label="Title (optional)" value={noteForm.name} autoFocus fullWidth disabled={uploading}
                   onChange={e => setNoteForm(p => ({ ...p, name: e.target.value }))}
                   placeholder="e.g. Amazing support act, must check out"
+                  InputProps={{ sx: { fontFamily: D.body } }} InputLabelProps={{ sx: { fontFamily: D.body } }}
                 />
                 <FormControl fullWidth disabled={uploading}>
-                  <InputLabel>Note type</InputLabel>
-                  <Select value={noteForm.type} label="Note type" onChange={e => setNoteForm(p => ({ ...p, type: e.target.value as NoteTypeValue }))}>
-                    {NOTE_TYPES.map(({ value, label }) => <MenuItem key={value} value={value}>{label}</MenuItem>)}
+                  <InputLabel sx={{ fontFamily: D.body }}>Note type</InputLabel>
+                  <Select value={noteForm.type} label="Note type" sx={{ fontFamily: D.body }}
+                    onChange={e => setNoteForm(p => ({ ...p, type: e.target.value as NoteTypeValue }))}>
+                    {NOTE_TYPES.map(({ value, label }) => <MenuItem key={value} value={value} sx={{ fontFamily: D.body }}>{label}</MenuItem>)}
                   </Select>
                 </FormControl>
                 <TextField
                   label="Note" value={noteForm.body} fullWidth multiline rows={5} disabled={uploading}
                   onChange={e => setNoteForm(p => ({ ...p, body: e.target.value }))}
                   placeholder="What's on your mind?"
+                  InputProps={{ sx: { fontFamily: D.body } }} InputLabelProps={{ sx: { fontFamily: D.body } }}
                 />
                 <LinkToSelector items={linkableItems} value={linkedTo} onChange={setLinkedTo} />
               </>
@@ -1282,25 +1410,24 @@ export default function FilesTab({ tripId, fabTrigger }: FilesTabProps) {
                 <TextField
                   label="Name" value={contactForm.name} autoFocus fullWidth required disabled={uploading}
                   onChange={e => setContactForm(p => ({ ...p, name: e.target.value }))}
+                  InputProps={{ sx: { fontFamily: D.body } }} InputLabelProps={{ sx: { fontFamily: D.body } }}
                 />
                 <FormControl fullWidth disabled={uploading}>
-                  <InputLabel>Contact type</InputLabel>
-                  <Select value={contactForm.type} label="Contact type" onChange={e => setContactForm(p => ({ ...p, type: e.target.value as ContactTypeValue }))}>
-                    {CONTACT_TYPES.map(({ value, label }) => <MenuItem key={value} value={value}>{label}</MenuItem>)}
+                  <InputLabel sx={{ fontFamily: D.body }}>Contact type</InputLabel>
+                  <Select value={contactForm.type} label="Contact type" sx={{ fontFamily: D.body }}
+                    onChange={e => setContactForm(p => ({ ...p, type: e.target.value as ContactTypeValue }))}>
+                    {CONTACT_TYPES.map(({ value, label }) => <MenuItem key={value} value={value} sx={{ fontFamily: D.body }}>{label}</MenuItem>)}
                   </Select>
                 </FormControl>
-                <TextField
-                  label="Phone" value={contactForm.phone} fullWidth disabled={uploading} type="tel"
+                <TextField label="Phone" value={contactForm.phone} fullWidth disabled={uploading} type="tel"
                   onChange={e => setContactForm(p => ({ ...p, phone: e.target.value }))}
-                />
-                <TextField
-                  label="Email" value={contactForm.email} fullWidth disabled={uploading} type="email"
+                  InputProps={{ sx: { fontFamily: D.body } }} InputLabelProps={{ sx: { fontFamily: D.body } }} />
+                <TextField label="Email" value={contactForm.email} fullWidth disabled={uploading} type="email"
                   onChange={e => setContactForm(p => ({ ...p, email: e.target.value }))}
-                />
-                <TextField
-                  label="Notes (optional)" value={contactForm.notes} fullWidth disabled={uploading}
+                  InputProps={{ sx: { fontFamily: D.body } }} InputLabelProps={{ sx: { fontFamily: D.body } }} />
+                <TextField label="Notes (optional)" value={contactForm.notes} fullWidth disabled={uploading}
                   onChange={e => setContactForm(p => ({ ...p, notes: e.target.value }))}
-                />
+                  InputProps={{ sx: { fontFamily: D.body } }} InputLabelProps={{ sx: { fontFamily: D.body } }} />
                 <LinkToSelector items={linkableItems} value={linkedTo} onChange={setLinkedTo} />
               </>
             )}
@@ -1312,22 +1439,22 @@ export default function FilesTab({ tripId, fabTrigger }: FilesTabProps) {
                   label="Name" value={linkForm.name} autoFocus fullWidth required disabled={uploading}
                   onChange={e => setLinkForm(p => ({ ...p, name: e.target.value }))}
                   placeholder="e.g. Venue website"
+                  InputProps={{ sx: { fontFamily: D.body } }} InputLabelProps={{ sx: { fontFamily: D.body } }}
                 />
                 <FormControl fullWidth disabled={uploading}>
-                  <InputLabel>Link type</InputLabel>
-                  <Select value={linkForm.type} label="Link type" onChange={e => setLinkForm(p => ({ ...p, type: e.target.value as LinkTypeValue }))}>
-                    {LINK_TYPES.map(({ value, label }) => <MenuItem key={value} value={value}>{label}</MenuItem>)}
+                  <InputLabel sx={{ fontFamily: D.body }}>Link type</InputLabel>
+                  <Select value={linkForm.type} label="Link type" sx={{ fontFamily: D.body }}
+                    onChange={e => setLinkForm(p => ({ ...p, type: e.target.value as LinkTypeValue }))}>
+                    {LINK_TYPES.map(({ value, label }) => <MenuItem key={value} value={value} sx={{ fontFamily: D.body }}>{label}</MenuItem>)}
                   </Select>
                 </FormControl>
-                <TextField
-                  label="URL" value={linkForm.url} fullWidth required disabled={uploading} type="url"
+                <TextField label="URL" value={linkForm.url} fullWidth required disabled={uploading} type="url"
                   onChange={e => setLinkForm(p => ({ ...p, url: e.target.value }))}
                   placeholder="https://"
-                />
-                <TextField
-                  label="Notes (optional)" value={linkForm.notes} fullWidth disabled={uploading}
+                  InputProps={{ sx: { fontFamily: D.body } }} InputLabelProps={{ sx: { fontFamily: D.body } }} />
+                <TextField label="Notes (optional)" value={linkForm.notes} fullWidth disabled={uploading}
                   onChange={e => setLinkForm(p => ({ ...p, notes: e.target.value }))}
-                />
+                  InputProps={{ sx: { fontFamily: D.body } }} InputLabelProps={{ sx: { fontFamily: D.body } }} />
                 <LinkToSelector items={linkableItems} value={linkedTo} onChange={setLinkedTo} />
               </>
             )}
@@ -1335,20 +1462,26 @@ export default function FilesTab({ tripId, fabTrigger }: FilesTabProps) {
             {/* ── File mode ── */}
             {mode === 'file' && !pendingFile && !editingFile && <DropZone onFile={handleFileSelected} />}
             {mode === 'file' && editingFile && (
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, p: 1.5, borderRadius: 1.5, backgroundColor: alpha('#55702C', 0.06), border: '1px solid', borderColor: alpha('#55702C', 0.2) }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, p: 1.5, borderRadius: 1.5,
+                backgroundColor: alpha(D.green, 0.06), border: '1px solid', borderColor: alpha(D.green, 0.2) }}>
                 <MimeIcon mimeType={editingFile.mimeType} size={22} />
                 <Box sx={{ flexGrow: 1, minWidth: 0 }}>
-                  <Typography variant="body2" fontWeight={700}>{editingFile.name}</Typography>
-                  <Typography variant="caption" color="text.secondary">Editing metadata only — file cannot be replaced</Typography>
+                  <Typography sx={{ fontFamily: D.body, fontWeight: 700, fontSize: '0.88rem' }}>{editingFile.name}</Typography>
+                  <Typography sx={{ fontFamily: D.body, fontSize: '0.75rem', color: 'text.secondary' }}>Editing metadata only — file cannot be replaced</Typography>
                 </Box>
               </Box>
             )}
             {mode === 'file' && pendingFile && (
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, p: 1.5, borderRadius: 1.5, backgroundColor: alpha('#55702C', 0.06), border: '1px solid', borderColor: alpha('#55702C', 0.2) }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, p: 1.5, borderRadius: 1.5,
+                backgroundColor: alpha(D.green, 0.06), border: '1px solid', borderColor: alpha(D.green, 0.2) }}>
                 <MimeIcon mimeType={pendingFile.type} size={22} />
                 <Box sx={{ flexGrow: 1, minWidth: 0 }}>
-                  <Typography variant="body2" fontWeight={700} sx={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{pendingFile.name}</Typography>
-                  <Typography variant="caption" color="text.secondary">{formatBytes(pendingFile.size)}</Typography>
+                  <Typography sx={{ fontFamily: D.body, fontWeight: 700, fontSize: '0.88rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {pendingFile.name}
+                  </Typography>
+                  <Typography sx={{ fontFamily: D.body, fontSize: '0.75rem', color: 'text.secondary' }}>
+                    {formatBytes(pendingFile.size)}
+                  </Typography>
                 </Box>
                 {!uploading && <IconButton size="small" onClick={() => setPendingFile(null)}><DeleteIcon fontSize="small" /></IconButton>}
               </Box>
@@ -1359,28 +1492,32 @@ export default function FilesTab({ tripId, fabTrigger }: FilesTabProps) {
                   label="Display name" value={fileForm.name} autoFocus={!!pendingFile} fullWidth disabled={uploading}
                   onChange={e => setFileForm(p => ({ ...p, name: e.target.value }))}
                   placeholder="e.g. Outbound boarding pass"
+                  InputProps={{ sx: { fontFamily: D.body } }} InputLabelProps={{ sx: { fontFamily: D.body } }}
                 />
                 <FormControl fullWidth disabled={uploading}>
-                  <InputLabel>Document type</InputLabel>
-                  <Select value={fileForm.type} label="Document type" onChange={e => setFileForm(p => ({ ...p, type: e.target.value as FileTypeValue }))}>
-                    {FILE_TYPES.map(({ value, label }) => <MenuItem key={value} value={value}>{label}</MenuItem>)}
+                  <InputLabel sx={{ fontFamily: D.body }}>Document type</InputLabel>
+                  <Select value={fileForm.type} label="Document type" sx={{ fontFamily: D.body }}
+                    onChange={e => setFileForm(p => ({ ...p, type: e.target.value as FileTypeValue }))}>
+                    {FILE_TYPES.map(({ value, label }) => <MenuItem key={value} value={value} sx={{ fontFamily: D.body }}>{label}</MenuItem>)}
                   </Select>
                 </FormControl>
                 <TextField
                   label="Notes (optional)" value={fileForm.notes} fullWidth disabled={uploading}
                   onChange={e => setFileForm(p => ({ ...p, notes: e.target.value }))}
+                  InputProps={{ sx: { fontFamily: D.body } }} InputLabelProps={{ sx: { fontFamily: D.body } }}
                 />
                 <LinkToSelector items={linkableItems} value={linkedTo} onChange={setLinkedTo} />
               </>
             )}
 
-            {/* Upload progress */}
             {uploading && uploadPct > 0 && mode === 'file' && (
               <LinearProgress variant="determinate" value={uploadPct} sx={{ borderRadius: 2, height: 6 }} />
             )}
 
             {error && (
-              <Typography variant="body2" color="error" sx={{ mt: 0.5 }}>{error}</Typography>
+              <Typography sx={{ fontFamily: D.body, fontSize: '0.88rem', color: 'error.main', mt: 0.5 }}>
+                {error}
+              </Typography>
             )}
           </Box>
         </DialogContent>
@@ -1391,6 +1528,7 @@ export default function FilesTab({ tripId, fabTrigger }: FilesTabProps) {
             disabled={uploading}
             fullWidth={mobile}
             size={mobile ? 'large' : 'medium'}
+            sx={{ fontFamily: D.body, fontWeight: 600 }}
           >
             Cancel
           </Button>
@@ -1400,6 +1538,13 @@ export default function FilesTab({ tripId, fabTrigger }: FilesTabProps) {
             disabled={uploading || !canSubmit}
             fullWidth={mobile}
             size={mobile ? 'large' : 'medium'}
+            sx={{
+              fontFamily: D.display,
+              letterSpacing: '-0.01em',
+              backgroundColor: D.navy,
+              boxShadow: 'none',
+              '&:hover': { backgroundColor: 'rgba(44,62,80,0.88)', boxShadow: 'none' },
+            }}
           >
             {submitLabel}
           </Button>
