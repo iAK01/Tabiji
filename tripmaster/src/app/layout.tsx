@@ -21,11 +21,13 @@ export default function RootLayout({
 
   return (
     <html lang="en">
-      <head>
-        <link rel="manifest" href="/manifest.json" />
-        <meta name="theme-color" content="#6B7C5C" />
-        <meta name="apple-mobile-web-app-capable" content="yes" />
-      </head>
+<head>
+  <title>Tabiji</title>
+  <link rel="icon" href="/favicon.ico" />
+  <link rel="manifest" href="/manifest.json" />
+  <meta name="theme-color" content="#6B7C5C" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+</head>
       <body>
         <SessionProvider>
           <ThemeProvider theme={theme}>
