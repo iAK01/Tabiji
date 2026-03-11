@@ -355,11 +355,11 @@ export default function TripOverview({ trip, onNavigate }: Props) {
 
   const flightsStatus: 'ok' | 'warn' | 'empty' =
     flights.length === 0 ? 'empty' :
-    flights.every((f: any) => f.status === 'confirmed') ? 'ok' : 'warn';
+    flights.every((f: any) => ['confirmed', 'booked'].includes(f.status)) ? 'ok' : 'warn';
 
   const accomStatus: 'ok' | 'warn' | 'empty' =
     accommodation.length === 0 ? 'empty' :
-    accommodation.every((a: any) => a.status === 'confirmed') ? 'ok' : 'warn';
+    accommodation.every((a: any) => ['confirmed', 'booked'].includes(a.status)) ? 'ok' : 'warn';
 
   const venueStatus: 'ok' | 'warn' | 'empty' =
     venues.length === 0 ? 'empty' :
@@ -367,7 +367,7 @@ export default function TripOverview({ trip, onNavigate }: Props) {
 
   const transportStatus: 'ok' | 'warn' | 'empty' =
     nonFlights.length === 0 ? 'empty' :
-    nonFlights.every((t: any) => t.status === 'confirmed') ? 'ok' : 'warn';
+    nonFlights.every((t: any) => ['confirmed', 'booked'].includes(t.status)) ? 'ok' : 'warn';
 
   const logisticsOverall: 'ok' | 'warn' | 'empty' = (() => {
     const active = [
@@ -592,7 +592,7 @@ export default function TripOverview({ trip, onNavigate }: Props) {
                     value={
                       flights.length === 0 ? 'Not added' :
                       flights.map((f: any) => f.details?.flightNumber || f.flightNumber || f.details?.airline || 'Flight').join(' · ')
-                      + (flights.every((f: any) => f.status === 'confirmed') ? ' · Confirmed' : ` · ${flights.filter((f: any) => f.status === 'confirmed').length}/${flights.length} confirmed`)
+                      + (flights.every((f: any) => ['confirmed','booked'].includes(f.status)) ? ' · Booked' : ` · ${flights.filter((f: any) => ['confirmed','booked'].includes(f.status)).length}/${flights.length} booked`)
                     }
                   />
                 )}
@@ -605,7 +605,7 @@ export default function TripOverview({ trip, onNavigate }: Props) {
                     value={
                       accommodation.length === 0 ? 'Not added' :
                       accommodation.map((a: any) => a.name).join(', ')
-                      + (accommodation.every((a: any) => a.status === 'confirmed') ? ' · Confirmed' : ' · Not confirmed')
+                      + (accommodation.every((a: any) => ['confirmed','booked'].includes(a.status)) ? ' · Booked' : ' · Not confirmed')
                     }
                   />
                 )}

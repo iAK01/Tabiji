@@ -15,6 +15,8 @@ const MasterPackingItemSchema = new Schema({
   preTravelNote:      String,
   advisoryNote:       String,
   photoUrl:           String,
+  serialNumber:       String,
+  purchaseValue:      Number,
 }, { timestamps: true });
 
 export default mongoose.models.MasterPackingItem || mongoose.model('MasterPackingItem', MasterPackingItemSchema);

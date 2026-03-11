@@ -30,6 +30,7 @@ import GroupIcon             from '@mui/icons-material/Group';
 import NaturePeopleIcon      from '@mui/icons-material/NaturePeople';
 import OtherHousesIcon       from '@mui/icons-material/OtherHouses';
 import CloseIcon             from '@mui/icons-material/Close';
+import AddCircleOutlineIcon  from '@mui/icons-material/AddCircleOutline';
 // Category icons
 import ArticleIcon           from '@mui/icons-material/Article';
 import DevicesIcon           from '@mui/icons-material/Devices';
@@ -45,7 +46,7 @@ import SpaIcon               from '@mui/icons-material/CleanHands';
 import MedicationIcon        from '@mui/icons-material/Medication';
 import BusinessCenterIcon    from '@mui/icons-material/BusinessCenter';
 import LuggageIcon           from '@mui/icons-material/Luggage';
-import DiamondIcon           from '@mui/icons-material/Style';
+import StyleIcon             from '@mui/icons-material/Style';
 import CoffeeIcon            from '@mui/icons-material/Coffee';
 import CategoryIcon          from '@mui/icons-material/Category';
 import DirectionsWalkIcon    from '@mui/icons-material/DirectionsRun';
@@ -82,7 +83,7 @@ const CATEGORY_ICONS: Record<string, React.ElementType> = {
   'Medicines':          MedicationIcon,
   'Work Gear':          BusinessCenterIcon,
   'Luggage':            LuggageIcon,
-  'Accessories':        DiamondIcon,
+  'Accessories':        StyleIcon,
   'Coffee':             CoffeeIcon,
   'Other':              CategoryIcon,
 };
@@ -132,6 +133,8 @@ interface PackingItem {
   preTravelNote:      string;
   advisoryNote:       string;
   photoUrl?:          string;
+  serialNumber?:      string;
+  purchaseValue?:     number;
 }
 
 const emptyForm = {
@@ -148,6 +151,8 @@ const emptyForm = {
   preTravelAction:    false,
   preTravelNote:      '',
   advisoryNote:       '',
+  serialNumber:       '',
+  purchaseValue:      undefined as number | undefined,
 };
 
 // ─── Toggle group helper ──────────────────────────────────────────────────────
@@ -163,7 +168,7 @@ function FilterToggleGroup({
 }) {
   return (
     <Box>
-      <Typography sx={{ fontSize: '0.88rem', fontWeight: 700, fontFamily: D.body, mb: 0.5 }}>{label}</Typography>
+      <Typography sx={{ fontFamily: D.display, fontSize: '1rem', color: D.navy, mb: 0.5, letterSpacing: '-0.01em' }}>{label}</Typography>
       <Typography sx={{ fontSize: '0.75rem', color: D.muted, display: 'block', mb: 1 }}>{hint}</Typography>
       <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
         {options.map(({ value: v, label: l, Icon }) => {
@@ -211,7 +216,7 @@ function PhotoLightbox({ src, name, onClose }: { src: string; name: string; onCl
         onClick={onClose}
         sx={{
           position: 'fixed', inset: 0,
-          backgroundColor: 'rgba(0,0,0,0.55)',
+          backgroundColor: 'rgba(0,0,0,0.3)', backdropFilter: 'blur(4px)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           cursor: 'zoom-out', outline: 'none',
         }}
@@ -317,6 +322,8 @@ export default function PackingCataloguePage() {
       preTravelAction:    item.preTravelAction,
       preTravelNote:      item.preTravelNote || '',
       advisoryNote:       item.advisoryNote  || '',
+      serialNumber:       item.serialNumber  || '',
+      purchaseValue:      item.purchaseValue,
     });
     setPhotoPreview(item.photoUrl || null);
     setSelectedPhoto(null);
@@ -680,8 +687,14 @@ export default function PackingCataloguePage() {
 
       {/* ── Add / Edit Dialog ── */}
       <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle sx={{ fontFamily: D.display, fontSize: '1.1rem', color: D.navy }}>
-          {editTarget ? `Edit — ${editTarget.name}` : 'Add Packing Item'}
+        <DialogTitle sx={{ position: 'relative', overflow: 'hidden', pb: 1.5 }}>
+          <AddCircleOutlineIcon sx={{
+            position: 'absolute', bottom: -24, right: -16,
+            fontSize: 140, color: D.navy, opacity: 0.04, pointerEvents: 'none',
+          }} />
+          <Typography sx={{ fontFamily: D.display, fontSize: '1.5rem', color: D.navy, letterSpacing: '-0.02em', lineHeight: 1.1 }}>
+            {editTarget ? `Edit — ${editTarget.name}` : 'Add Packing Item'}
+          </Typography>
         </DialogTitle>
         <DialogContent>
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, pt: 1 }}>
@@ -730,7 +743,7 @@ export default function PackingCataloguePage() {
             <Divider />
 
             <Box>
-              <Typography sx={{ fontSize: '0.88rem', fontWeight: 700, fontFamily: D.body, mb: 0.5 }}>Trip type</Typography>
+              <Typography sx={{ fontFamily: D.display, fontSize: '1rem', color: D.navy, mb: 0.5, letterSpacing: '-0.01em' }}>Trip type</Typography>
               <Typography sx={{ fontSize: '0.75rem', color: D.muted, display: 'block', mb: 1 }}>
                 Leave all unselected to include on all trip types
               </Typography>
@@ -761,7 +774,7 @@ export default function PackingCataloguePage() {
             <Divider />
 
             <Box>
-              <Typography sx={{ fontSize: '0.88rem', fontWeight: 700, fontFamily: D.body, mb: 1 }}>Quantity</Typography>
+              <Typography sx={{ fontFamily: D.display, fontSize: '1rem', color: D.navy, mb: 1, letterSpacing: '-0.01em' }}>Quantity</Typography>
               <ToggleButtonGroup value={form.quantityType} exclusive
                 onChange={(_, val) => val && setForm(p => ({ ...p, quantityType: val }))} sx={{ mb: 2 }}>
                 <ToggleButton value="fixed"     size="small" sx={{ textTransform: 'none', fontFamily: D.body }}>Fixed</ToggleButton>
@@ -798,6 +811,37 @@ export default function PackingCataloguePage() {
                 value={form.preTravelNote} fullWidth
                 onChange={e => setForm(p => ({ ...p, preTravelNote: e.target.value }))} />
             )}
+            {/* Insurance fields — only for relevant categories */}
+            {['Electronics', 'Tech Accessories', 'Work Gear', 'Accessories', 'Luggage', 'Hobby / Creative'].includes(form.category) && (
+              <>
+                <Divider />
+                <Box>
+                  <Typography sx={{ fontFamily: D.display, fontSize: '1rem', color: D.navy, mb: 0.5, letterSpacing: '-0.01em' }}>
+                    Insurance details
+                  </Typography>
+                  <Typography sx={{ fontSize: '0.75rem', color: D.muted, mb: 1.5 }}>
+                    Optional — used to generate a claim report if your bag is lost or stolen
+                  </Typography>
+                  <Box sx={{ display: 'flex', gap: 2 }}>
+                    <TextField
+                      label="Serial number"
+                      placeholder="e.g. SN123456"
+                      value={form.serialNumber} fullWidth
+                      onChange={e => setForm(p => ({ ...p, serialNumber: e.target.value }))}
+                    />
+                    <TextField
+                      label="Purchase value (€)"
+                      type="number"
+                      placeholder="e.g. 299"
+                      value={form.purchaseValue ?? ''} fullWidth
+                      inputProps={{ min: 0, step: 1 }}
+                      onChange={e => setForm(p => ({ ...p, purchaseValue: e.target.value === '' ? undefined : Number(e.target.value) }))}
+                    />
+                  </Box>
+                </Box>
+              </>
+            )}
+
             <TextField label="Advisory note (optional)" placeholder="e.g. 100ml or less for carry-on"
               value={form.advisoryNote} fullWidth
               onChange={e => setForm(p => ({ ...p, advisoryNote: e.target.value }))} />
