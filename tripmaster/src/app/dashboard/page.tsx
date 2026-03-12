@@ -325,7 +325,7 @@ function ActiveTripBanner({
         <Box sx={{ flexGrow: 1 }}>
           <Typography sx={{
             fontFamily: D.display, color: 'white', lineHeight: 1.05,
-            fontSize: { xs: '1.7rem', sm: '2.4rem' }, letterSpacing: '-0.03em', mb: 0.5,
+            fontSize: { xs: '2rem', sm: '3rem' }, letterSpacing: '-0.03em', mb: 0.5,
           }}>
             {trip.name}
           </Typography>
@@ -344,7 +344,7 @@ function ActiveTripBanner({
 
       {/* Next action panel */}
       <Box sx={{ px: { xs: 2.5, sm: 3 }, pt: 2.25, pb: 2.75 }}>
-        <Typography sx={{ fontFamily: D.body, fontSize: '0.62rem', fontWeight: 800,
+        <Typography sx={{ fontFamily: D.body, fontSize: '0.92rem', fontWeight: 800,
           letterSpacing: '0.22em', color: 'text.disabled', textTransform: 'uppercase',
           display: 'block', mb: 1.5 }}>
           {isPast ? 'Trip complete' : rightNow?.inProgress ? 'Right now' : 'Up next'}
@@ -415,7 +415,7 @@ function ActiveTripBanner({
         )}
 
         <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: rightNow ? 2 : 0.5 }}>
-          <Typography sx={{ fontFamily: D.body, color: D.green, fontWeight: 800, fontSize: '0.72rem',
+          <Typography sx={{ fontFamily: D.body, color: D.green, fontWeight: 800, fontSize: '1.1rem',
             display: 'flex', alignItems: 'center', gap: 0.5, letterSpacing: '0.1em', textTransform: 'uppercase' }}>
             Open trip <KeyboardArrowRightIcon sx={{ fontSize: 15 }} />
           </Typography>
@@ -881,7 +881,7 @@ export default function Dashboard() {
                             <Box>
                               <Typography sx={{
                                 fontFamily: D.display,
-                                fontSize: { xs: '1.8rem', sm: '2.1rem', md: '2.4rem' },
+                                fontSize: { xs: '2rem', sm: '2.5rem', md: '2.8rem' },
                                 letterSpacing: '-0.03em', lineHeight: 1.0,
                                 color: D.navy, mb: 0.75,
                               }}>
@@ -917,7 +917,7 @@ export default function Dashboard() {
                                   </>
                                 ) : daysUntil === 1 ? (
                                   <Typography sx={{ fontFamily: D.display, color: D.terra,
-                                    fontSize: { xs: '2rem', sm: '2.5rem' }, letterSpacing: '-0.03em', lineHeight: 1 }}>
+                                    fontSize: { xs: '1.8rem', sm: '2rem' }, letterSpacing: '-0.03em', lineHeight: 1 }}>
                                     Tomorrow
                                   </Typography>
                                 ) : daysUntil === 0 ? (
@@ -945,7 +945,7 @@ export default function Dashboard() {
                                 <Typography sx={{ fontFamily: D.body, fontSize: '0.72rem', color: 'text.secondary', mt: 0.3 }}>
                                   {trip.nights} nights · {TRIP_TYPE_LABEL[trip.tripType] ?? trip.tripType}
                                 </Typography>
-                                <Typography sx={{ fontFamily: D.body, fontSize: '0.7rem', color: D.green,
+                                <Typography sx={{ fontFamily: D.body, fontSize: '0.9rem', color: D.green,
                                   fontWeight: 800, letterSpacing: '0.1em', textTransform: 'uppercase', mt: 1 }}>
                                   View →
                                 </Typography>
