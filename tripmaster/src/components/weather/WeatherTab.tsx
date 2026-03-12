@@ -161,7 +161,7 @@ function SourceChip({ source }: { source: DayWeather['source'] }) {
   const s = map[source] ?? map.forecast;
   return (
     <Chip label={s.label} size="small" sx={{
-      height: 16, fontSize: '0.58rem', fontWeight: 800,
+      height: 16, fontSize: '0.8rem', fontWeight: 800,
       fontFamily: D.body, letterSpacing: '0.05em',
       backgroundColor: s.bg, color: s.color,
     }} />
@@ -188,7 +188,7 @@ function DayCard({ day, compact = false }: { day: DayWeather; compact?: boolean 
     }}>
       {/* Date */}
       <Typography sx={{
-        fontSize: '0.6rem', fontWeight: 800, letterSpacing: '0.08em',
+        fontSize: '0.8rem', fontWeight: 800, letterSpacing: '0.08em',
         textTransform: 'uppercase', color: D.terra, lineHeight: 1,
         fontFamily: D.body,
       }}>
@@ -208,16 +208,16 @@ function DayCard({ day, compact = false }: { day: DayWeather; compact?: boolean 
       </Typography>
 
       {/* High / low */}
-      <Typography sx={{ fontSize: '0.65rem', color: D.muted, lineHeight: 1, fontFamily: D.body }}>
+      <Typography sx={{ fontSize: '0.85rem', color: D.muted, lineHeight: 1, fontFamily: D.body }}>
         {day.tempMax}° / {day.tempMin}°
       </Typography>
 
       {/* Rain */}
       <Box sx={{ width: '100%', mt: 0.5 }}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.3, px: 0.25 }}>
-          <UmbrellaIcon sx={{ fontSize: '0.6rem', color: D.muted }} />
+          <UmbrellaIcon sx={{ fontSize: '1rem', color: D.muted }} />
           <Typography sx={{
-            fontSize: '0.62rem',
+            fontSize: '1rem',
             color: rainHigh ? '#0891b2' : D.muted,
             fontWeight: rainHigh ? 800 : 400,
             fontFamily: D.body,
@@ -236,7 +236,7 @@ function DayCard({ day, compact = false }: { day: DayWeather; compact?: boolean 
       </Box>
 
       {day.windKph !== null && (
-        <Typography sx={{ fontSize: '0.6rem', color: D.muted, fontFamily: D.body }}>
+        <Typography sx={{ fontSize: '1rem', color: D.muted, fontFamily: D.body }}>
           {day.windKph} km/h
         </Typography>
       )}
@@ -278,7 +278,7 @@ function DayGrid({ days, compact = false }: { days: DayWeather[]; compact?: bool
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
     <Typography sx={{
-      fontSize: '0.63rem', fontWeight: 800, letterSpacing: '0.1em',
+      fontSize: '1.2rem', fontWeight: 800, letterSpacing: '0.1em',
       textTransform: 'uppercase', color: D.muted, fontFamily: D.body,
       display: 'block', mb: 1.25,
     }}>
@@ -310,11 +310,11 @@ function StatStrip({ days }: { days: DayWeather[] }) {
           flex: 1, py: 1.25, textAlign: 'center',
           borderRight: i < stats.length - 1 ? `1px solid ${D.rule}` : 'none',
         }}>
-          <Icon sx={{ fontSize: '0.85rem', color: D.muted, display: 'block', mx: 'auto', mb: 0.3 }} />
-          <Typography sx={{ fontFamily: D.display, fontSize: '0.95rem', lineHeight: 1, color: D.navy }}>
+          <Icon sx={{ fontSize: '0.95rem', color: D.muted, display: 'block', mx: 'auto', mb: 0.3 }} />
+          <Typography sx={{ fontFamily: D.display, fontSize: '1rem', lineHeight: 1, color: D.navy }}>
             {value}
           </Typography>
-          <Typography sx={{ fontSize: '0.62rem', color: D.muted, mt: 0.3, fontFamily: D.body }}>
+          <Typography sx={{ fontSize: '0.68rem', color: D.muted, mt: 0.3, fontFamily: D.body }}>
             {label}
           </Typography>
         </Box>
@@ -331,8 +331,8 @@ function PackingNotes({ notes }: { notes: string[] }) {
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.75 }}>
       {notes.map((note, i) => (
         <Box key={i} sx={{ display: 'flex', alignItems: 'flex-start', gap: 1 }}>
-          <LuggageIcon sx={{ fontSize: '0.9rem', color: D.green, mt: 0.2, flexShrink: 0 }} />
-          <Typography sx={{ fontSize: '0.85rem', color: D.muted, lineHeight: 1.45, fontFamily: D.body }}>
+          <LuggageIcon sx={{ fontSize: '1rem', color: D.green, mt: 0.2, flexShrink: 0 }} />
+          <Typography sx={{ fontSize: '1rem', color: D.muted, lineHeight: 1.45, fontFamily: D.body }}>
             {note}
           </Typography>
         </Box>
@@ -349,7 +349,7 @@ function HomeComparison({ c }: { c: HomeComparison }) {
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
-      <Typography sx={{ fontSize: '0.88rem', color: D.muted, lineHeight: 1.5, fontFamily: D.body }}>
+      <Typography sx={{ fontSize: '1rem', color: D.muted, lineHeight: 1.5, fontFamily: D.body }}>
         {c.summary}
       </Typography>
 
@@ -486,7 +486,7 @@ function DataSources({ weather, destinationCity }: { weather: WeatherResult; des
                   </Box>
                 )}
               </Box>
-              <Typography sx={{ fontSize: '0.63rem', color: D.muted, mt: 1, fontFamily: D.body }}>
+              <Typography sx={{ fontSize: '0.88rem', color: D.muted, mt: 1, fontFamily: D.body }}>
                 {weather.climateNormals.note}
               </Typography>
             </Paper>
@@ -549,7 +549,7 @@ function PlanningView({
           }}>
             Historical averages
           </Typography>
-          <Typography sx={{ fontSize: '0.73rem', color: D.muted, fontFamily: D.body }}>
+          <Typography sx={{ fontSize: '0.83rem', color: D.muted, fontFamily: D.body }}>
             Based on {weather.historicalYears?.length ?? 5} years of recorded data
             {weather.forecastAvailableFrom
               ? ` · Live forecast from ${new Date(weather.forecastAvailableFrom)
@@ -610,7 +610,7 @@ function PlanningView({
         {/* Summary */}
         {weather.summary && (
           <Typography sx={{
-            fontSize: '0.85rem', color: D.muted,
+            fontSize: '1rem', color: D.muted,
             lineHeight: 1.5, fontFamily: D.body, mt: 1.25,
           }}>
             {weather.summary}
@@ -651,7 +651,7 @@ function PlanningView({
           icon={<HomeIcon fontSize="small" />}
           sx={{ py: 0.75, borderRadius: '10px' }}
         >
-          <Typography sx={{ fontSize: '0.82rem', fontFamily: D.body }}>
+          <Typography sx={{ fontSize: '0.92rem', fontFamily: D.body }}>
             Set your home location in your profile to compare with home.
           </Typography>
         </Alert>
@@ -702,13 +702,13 @@ function ForecastView({
               display: 'flex', flexDirection: 'column', gap: 0.5,
             }}>
               <Typography sx={{
-                fontSize: '0.6rem', fontWeight: 800, letterSpacing: '0.1em',
+                fontSize: '0.8rem', fontWeight: 800, letterSpacing: '0.1em',
                 textTransform: 'uppercase', color: accentColor, fontFamily: D.body,
               }}>
                 {label}
               </Typography>
               <Typography sx={{
-                fontSize: '0.7rem', color: D.muted,
+                fontSize: '0.8rem', color: D.muted,
                 fontFamily: D.body, fontWeight: 700,
               }}>
                 {day.label}
@@ -724,10 +724,10 @@ function ForecastView({
               }}>
                 {day.tempMax}°
               </Typography>
-              <Typography sx={{ fontSize: '0.72rem', color: D.muted, fontFamily: D.body }}>
+              <Typography sx={{ fontSize: '0.82rem', color: D.muted, fontFamily: D.body }}>
                 {day.condition}
               </Typography>
-              <Typography sx={{ fontSize: '0.65rem', color: D.muted, fontFamily: D.body }}>
+              <Typography sx={{ fontSize: '0.75rem', color: D.muted, fontFamily: D.body }}>
                 {day.chanceOfRain}% rain
               </Typography>
             </Paper>
@@ -738,7 +738,7 @@ function ForecastView({
       {/* Summary */}
       {weather.summary && (
         <Typography sx={{
-          fontSize: '0.88rem', color: D.muted,
+          fontSize: '1.2rem', color: D.muted,
           lineHeight: 1.5, fontFamily: D.body,
         }}>
           {weather.summary}
@@ -789,7 +789,7 @@ function NowView({
   if (!today) {
     return (
       <Alert severity="info" sx={{ borderRadius: '10px' }}>
-        <Typography sx={{ fontSize: '0.85rem', fontFamily: D.body }}>
+        <Typography sx={{ fontSize: '0.95rem', fontFamily: D.body }}>
           Current conditions not available for {destinationCity}.
         </Typography>
       </Alert>
@@ -815,7 +815,7 @@ function NowView({
           {/* Temperature */}
           <Box>
             <Typography sx={{
-              fontSize: '0.6rem', fontWeight: 800, letterSpacing: '0.1em',
+              fontSize: '0.7rem', fontWeight: 800, letterSpacing: '0.1em',
               textTransform: 'uppercase', color: D.terra,
               fontFamily: D.body, mb: 0.5,
             }}>
@@ -830,13 +830,13 @@ function NowView({
               {today.tempAvg}°C
             </Typography>
             <Typography sx={{
-              fontSize: '0.88rem', color: D.muted,
+              fontSize: '0.98rem', color: D.muted,
               fontFamily: D.body, mt: 0.5,
             }}>
               {today.condition}
             </Typography>
             <Typography sx={{
-              fontSize: '0.75rem', color: D.muted,
+              fontSize: '0.85rem', color: D.muted,
               fontFamily: D.body, mt: 0.25,
             }}>
               {destinationCity} · {today.label}
@@ -856,7 +856,7 @@ function NowView({
               {today.tempMax}° / {today.tempMin}°
             </Typography>
             {today.windKph !== null && (
-              <Typography sx={{ fontSize: '0.68rem', color: D.muted, fontFamily: D.body }}>
+              <Typography sx={{ fontSize: '0.78rem', color: D.muted, fontFamily: D.body }}>
                 {today.windKph} km/h
               </Typography>
             )}
@@ -871,7 +871,7 @@ function NowView({
                 Rain chance today
               </Typography>
               <Typography sx={{
-                fontSize: '0.7rem', fontWeight: 800,
+                fontSize: '0.95rem', fontWeight: 800,
                 color: '#0891b2', fontFamily: D.body,
               }}>
                 {today.chanceOfRain}%
@@ -1020,7 +1020,7 @@ export default function WeatherTab({ tripId, destinationCity, startDate, endDate
           </Typography>
           {cachedAge && (
             <Typography sx={{
-              fontSize: '0.65rem', color: D.muted,
+              fontSize: '0.85rem', color: D.muted,
               fontFamily: D.body, mt: 0.35,
             }}>
               Updated {cachedAge}
@@ -1055,7 +1055,7 @@ export default function WeatherTab({ tripId, destinationCity, startDate, endDate
               onClick={() => setDisplayMode(key === smartDefault ? null : key)}
               sx={{
                 height: 28,
-                fontSize: '0.72rem', fontWeight: 800,
+                fontSize: '0.92rem', fontWeight: 800,
                 fontFamily: D.body, letterSpacing: '0.02em',
                 backgroundColor: isActive ? D.navy : 'transparent',
                 color:           isActive ? '#fff' : D.muted,
