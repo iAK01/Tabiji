@@ -29,7 +29,7 @@ export default function SignInPage() {
         }}
       >
         <Typography variant="h4" color="text.primary" fontWeight={700}>
-          TripMaster
+          Tabiji
         </Typography>
         <Typography variant="body1" color="text.secondary" textAlign="center">
           Your personal travel orchestration platform
