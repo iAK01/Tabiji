@@ -16,8 +16,6 @@ import TuneOutlinedIcon from '@mui/icons-material/TuneOutlined';
 import GroupOutlinedIcon from '@mui/icons-material/GroupOutlined';
 import NotificationsOutlinedIcon from '@mui/icons-material/NotificationsOutlined';
 import WifiOffOutlinedIcon from '@mui/icons-material/WifiOff';
-import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
-import { useState, useEffect } from 'react';
 
 const D = {
   navy:    '#1D2642',
@@ -135,13 +133,6 @@ function GoogleButton({ label }: { label: string }) {
 }
 
 export default function Home() {
-  const [scrolled, setScrolled] = useState(false);
-
-  useEffect(() => {
-    const onScroll = () => setScrolled(window.scrollY > 80);
-    window.addEventListener('scroll', onScroll, { passive: true });
-    return () => window.removeEventListener('scroll', onScroll);
-  }, []);
 
   return (
     <Box sx={{ backgroundColor: D.bg, minHeight: '100vh' }}>
@@ -155,17 +146,13 @@ export default function Home() {
           alignItems: 'center',
           justifyContent: 'center',
           px: { xs: 3, sm: 4 },
-          py: { xs: 10, sm: 14 },
+          pt: { xs: 6, sm: 8 },
+          pb: { xs: 10, sm: 12 },
           textAlign: 'center',
-          position: 'relative',
-          '@keyframes bounce': {
-            '0%, 100%': { transform: 'translateY(0)' },
-            '50%':       { transform: 'translateY(8px)' },
-          },
         }}
       >
         {/* Logomark */}
-        <Box sx={{ mb: 4 }}>
+        <Box sx={{ mb: 2.5 }}>
           <Image
             src="/logomark.png"
             alt="Tabiji"
@@ -179,7 +166,7 @@ export default function Home() {
         <Typography
           sx={{
             fontFamily: D.display,
-            fontSize: { xs: '3.8rem', sm: '5.5rem', md: '7rem' },
+            fontSize: { xs: '3.2rem', sm: '5rem', md: '6.5rem' },
             letterSpacing: '-0.04em',
             lineHeight: 0.9,
             color: D.navy,
@@ -197,7 +184,7 @@ export default function Home() {
             letterSpacing: '0.3em',
             color: D.muted,
             textTransform: 'uppercase',
-            mb: 4,
+            mb: 2.5,
           }}
         >
           旅路
@@ -210,7 +197,7 @@ export default function Home() {
             height: 3,
             backgroundColor: D.terra,
             borderRadius: 2,
-            mb: 5,
+            mb: 3.5,
           }}
         />
 
@@ -223,7 +210,7 @@ export default function Home() {
             lineHeight: 1.2,
             color: D.navy,
             maxWidth: 640,
-            mb: 3,
+            mb: 2,
           }}
         >
           A system for journeys,<br />not just plans.
@@ -237,7 +224,7 @@ export default function Home() {
             lineHeight: 1.75,
             color: D.muted,
             maxWidth: 520,
-            mb: 3,
+            mb: 2,
           }}
         >
           Tabiji holds the entire shape of a trip — where you are going, how you
@@ -252,7 +239,7 @@ export default function Home() {
             fontSize: { xs: '1rem', sm: '1.1rem' },
             letterSpacing: '-0.01em',
             color: D.terra,
-            mb: 5,
+            mb: 3,
           }}
         >
           One trip, fully understood.
@@ -272,42 +259,6 @@ export default function Home() {
           Your trips stay private. No feeds, no followers.
         </Typography>
 
-        {/* Scroll cue — fixed so it's always in viewport */}
-        <Box
-          sx={{
-            position: 'fixed',
-            bottom: 36,
-            left: '50%',
-            transform: 'translateX(-50%)',
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            gap: 0.75,
-            opacity: scrolled ? 0 : 1,
-            transition: 'opacity 0.4s ease',
-            pointerEvents: 'none',
-            zIndex: 10,
-            '@keyframes bounce': {
-              '0%, 100%': { transform: 'translateY(0)' },
-              '50%':       { transform: 'translateY(7px)' },
-            },
-            animation: 'bounce 2s ease-in-out infinite',
-          }}
-        >
-          <Typography
-            sx={{
-              fontFamily: D.body,
-              fontSize: '0.65rem',
-              letterSpacing: '0.22em',
-              textTransform: 'uppercase',
-              color: D.navy,
-              fontWeight: 600,
-            }}
-          >
-            Scroll
-          </Typography>
-          <KeyboardArrowDownIcon sx={{ fontSize: 22, color: D.terra }} />
-        </Box>
       </Box>
 
       {/* ── What Tabiji does ──────────────────────────────────────── */}
