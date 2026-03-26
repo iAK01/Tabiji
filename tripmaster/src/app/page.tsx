@@ -17,6 +17,7 @@ import GroupOutlinedIcon from '@mui/icons-material/GroupOutlined';
 import NotificationsOutlinedIcon from '@mui/icons-material/NotificationsOutlined';
 import WifiOffOutlinedIcon from '@mui/icons-material/WifiOff';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
+import { useState, useEffect } from 'react';
 
 const D = {
   navy:    '#1D2642',
@@ -134,6 +135,14 @@ function GoogleButton({ label }: { label: string }) {
 }
 
 export default function Home() {
+  const [scrolled, setScrolled] = useState(false);
+
+  useEffect(() => {
+    const onScroll = () => setScrolled(window.scrollY > 80);
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
+
   return (
     <Box sx={{ backgroundColor: D.bg, minHeight: '100vh' }}>
 
@@ -263,32 +272,41 @@ export default function Home() {
           Your trips stay private. No feeds, no followers.
         </Typography>
 
-        {/* Scroll cue */}
+        {/* Scroll cue — fixed so it's always in viewport */}
         <Box
           sx={{
-            position: 'absolute',
-            bottom: 32,
+            position: 'fixed',
+            bottom: 36,
             left: '50%',
             transform: 'translateX(-50%)',
             display: 'flex',
             flexDirection: 'column',
             alignItems: 'center',
-            gap: 0.5,
+            gap: 0.75,
+            opacity: scrolled ? 0 : 1,
+            transition: 'opacity 0.4s ease',
+            pointerEvents: 'none',
+            zIndex: 10,
+            '@keyframes bounce': {
+              '0%, 100%': { transform: 'translateY(0)' },
+              '50%':       { transform: 'translateY(7px)' },
+            },
             animation: 'bounce 2s ease-in-out infinite',
           }}
         >
           <Typography
             sx={{
               fontFamily: D.body,
-              fontSize: '0.62rem',
-              letterSpacing: '0.2em',
+              fontSize: '0.65rem',
+              letterSpacing: '0.22em',
               textTransform: 'uppercase',
-              color: D.muted,
+              color: D.navy,
+              fontWeight: 600,
             }}
           >
-            Explore
+            Scroll
           </Typography>
-          <KeyboardArrowDownIcon sx={{ fontSize: 18, color: D.muted }} />
+          <KeyboardArrowDownIcon sx={{ fontSize: 22, color: D.terra }} />
         </Box>
       </Box>
 
