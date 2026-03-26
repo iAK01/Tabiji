@@ -27,6 +27,9 @@ export default function RootLayout({
   <link rel="manifest" href="/manifest.json" />
   <meta name="theme-color" content="#6B7C5C" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+  <link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Archivo:wght@400;500;600;700&display=swap" rel="stylesheet" />
 </head>
       <body>
         <SessionProvider>
