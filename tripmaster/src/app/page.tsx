@@ -16,6 +16,7 @@ import TuneOutlinedIcon from '@mui/icons-material/TuneOutlined';
 import GroupOutlinedIcon from '@mui/icons-material/GroupOutlined';
 import NotificationsOutlinedIcon from '@mui/icons-material/NotificationsOutlined';
 import WifiOffOutlinedIcon from '@mui/icons-material/WifiOff';
+import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 
 const D = {
   navy:    '#1D2642',
@@ -148,6 +149,10 @@ export default function Home() {
           py: { xs: 10, sm: 14 },
           textAlign: 'center',
           position: 'relative',
+          '@keyframes bounce': {
+            '0%, 100%': { transform: 'translateY(0)' },
+            '50%':       { transform: 'translateY(8px)' },
+          },
         }}
       >
         {/* Logomark */}
@@ -257,6 +262,34 @@ export default function Home() {
         >
           Your trips stay private. No feeds, no followers.
         </Typography>
+
+        {/* Scroll cue */}
+        <Box
+          sx={{
+            position: 'absolute',
+            bottom: 32,
+            left: '50%',
+            transform: 'translateX(-50%)',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            gap: 0.5,
+            animation: 'bounce 2s ease-in-out infinite',
+          }}
+        >
+          <Typography
+            sx={{
+              fontFamily: D.body,
+              fontSize: '0.62rem',
+              letterSpacing: '0.2em',
+              textTransform: 'uppercase',
+              color: D.muted,
+            }}
+          >
+            Explore
+          </Typography>
+          <KeyboardArrowDownIcon sx={{ fontSize: 18, color: D.muted }} />
+        </Box>
       </Box>
 
       {/* ── What Tabiji does ──────────────────────────────────────── */}
