@@ -150,7 +150,7 @@ export default function Home() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const scrollTo = (ref: React.RefObject<HTMLDivElement>) =>
+  const scrollTo = (ref: React.RefObject<HTMLDivElement | null>) =>
     ref.current?.scrollIntoView({ behavior: 'smooth' });
 
   return (
