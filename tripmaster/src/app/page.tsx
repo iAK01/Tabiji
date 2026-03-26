@@ -250,7 +250,7 @@ export default function Home() {
           <Image src="/logomark.png" alt="Tabiji" width={46} height={46} style={{ objectFit: 'contain' }} />
         </Box>
 
-        <Typography sx={{ fontFamily: D.display, fontSize: { xs: '5rem', sm: '8rem', md: '11rem' }, letterSpacing: '-0.04em', lineHeight: 0.88, color: D.navy, mb: 1.5 }}>
+        <Typography sx={{ fontFamily: D.display, fontSize: { xs: '4rem', sm: '7rem', md: '10rem' }, letterSpacing: '-0.04em', lineHeight: 0.88, color: D.navy, mb: 1.5 }}>
           Tabiji
         </Typography>
 
