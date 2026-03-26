@@ -30,18 +30,22 @@ const D = {
   body:    '"Archivo", "Inter", sans-serif',
 };
 
-const FEATURE_GROUPS = [
+type Feature = { icon: React.ElementType; title: string; body: string };
+
+const FEATURE_GROUPS: { label: string; screen: string; features: Feature[] }[] = [
   {
     label: 'Planning',
+    screen: '/screens/tabs/itinerarytab.png',
     features: [
-      { icon: RouteOutlinedIcon,         title: 'Plan from idea to arrival',      body: 'Build trips with multiple destinations, each with their own timing and purpose. Move through stages as plans develop. Nothing gets lost along the way.' },
-      { icon: CalendarTodayOutlinedIcon, title: 'Your itinerary, your way',        body: 'Construct each day as it actually unfolds. Build manually or let AI draft a starting point. Add movement, pauses, and commitments. Adjust without breaking the structure.' },
-      { icon: LuggageOutlinedIcon,       title: 'Packing lists that think ahead', body: 'Generated from your trip length, transport, accommodation, and type. Items scale with time — three shirts, not just shirts. Flag what to do before you leave. Regenerate as plans change.' },
-      { icon: GroupOutlinedIcon,         title: 'Travel with others',             body: 'Trips can be shared. Roles are clear. Edits are controlled. Everyone works from the same version.' },
+      { icon: RouteOutlinedIcon,        title: 'Plan from idea to arrival',      body: 'Build trips with multiple destinations, each with their own timing and purpose. Move through stages as plans develop. Nothing gets lost along the way.' },
+      { icon: CalendarTodayOutlinedIcon, title: 'Your itinerary, your way',      body: 'Construct each day as it actually unfolds. Build manually or let AI draft a starting point. Add movement, pauses, and commitments. Adjust without breaking the structure.' },
+      { icon: LuggageOutlinedIcon,      title: 'Packing lists that think ahead', body: 'Generated from your trip length, transport, accommodation, and type. Items scale with time — three shirts, not just shirts. Flag what to do before you leave. Regenerate as plans change.' },
+      { icon: GroupOutlinedIcon,        title: 'Travel with others',             body: 'Trips can be shared. Roles are clear. Edits are controlled. Everyone works from the same version.' },
     ],
   },
   {
     label: 'Logistics',
+    screen: '/screens/tabs/logisticstab.png',
     features: [
       { icon: FlightOutlinedIcon,        title: 'Logistics in one place',             body: 'Flights, trains, ferries, cars, accommodation, venues. Each piece sits in context, connected to the rest of the trip. Pre-departure steps and arrival details accounted for.' },
       { icon: FolderOutlinedIcon,        title: 'Everything attached, nothing loose', body: 'Documents, links, booking references, contacts, notes, and tasks — connected directly to the part of the trip they belong to. Not sitting in a folder somewhere.' },
@@ -51,13 +55,16 @@ const FEATURE_GROUPS = [
   },
   {
     label: 'Context',
+    screen: '/screens/tabs/weathertab.png',
     features: [
-      { icon: PublicOutlinedIcon,        title: 'Know before you go',         body: 'Visa requirements, currency, time zones, electrical systems, language essentials, emergency numbers, local context. Surfaced without searching.' },
-      { icon: WbSunnyOutlinedIcon,       title: 'Weather, in perspective',    body: 'Forecasts when they matter, climate normals when you are planning further ahead. Always in relation to where you are starting from.' },
-      { icon: TuneOutlinedIcon,          title: 'Built around how you travel', body: 'Your home city, passport, unit preferences, and navigation app per transport mode inform every trip. Every "navigate" link opens exactly where you want it.' },
+      { icon: PublicOutlinedIcon,  title: 'Know before you go',          body: 'Visa requirements, currency, time zones, electrical systems, language essentials, emergency numbers, local context. Surfaced without searching.' },
+      { icon: WbSunnyOutlinedIcon, title: 'Weather, in perspective',     body: 'Forecasts when they matter, climate normals when you are planning further ahead. Always in relation to where you are starting from.' },
+      { icon: TuneOutlinedIcon,    title: 'Built around how you travel', body: 'Your home city, passport, unit preferences, and navigation app per transport mode inform every trip. Every "navigate" link opens exactly where you want it.' },
     ],
   },
 ];
+
+// ── Hooks ────────────────────────────────────────────────────────────────────
 
 function useInView(threshold = 0.15) {
   const ref = useRef<HTMLDivElement>(null);
@@ -75,7 +82,7 @@ function useInView(threshold = 0.15) {
   return { ref, inView };
 }
 
-type Feature = { icon: React.ElementType; title: string; body: string };
+// ── Sub-components ───────────────────────────────────────────────────────────
 
 function FeatureRow({ feature, index }: { feature: Feature; index: number }) {
   const { ref, inView } = useInView(0.1);
@@ -85,36 +92,24 @@ function FeatureRow({ feature, index }: { feature: Feature; index: number }) {
       ref={ref}
       sx={{
         display: 'flex',
-        gap: 3,
+        gap: 2.5,
         alignItems: 'flex-start',
-        py: 3.5,
+        py: 3,
         borderBottom: `1px solid ${D.rule}`,
         '&:last-child': { borderBottom: 'none' },
         opacity: inView ? 1 : 0,
-        transform: inView ? 'translateY(0)' : 'translateY(28px)',
+        transform: inView ? 'translateY(0)' : 'translateY(24px)',
         transition: `opacity 0.55s ease ${index * 55}ms, transform 0.55s ease ${index * 55}ms`,
       }}
     >
-      <Box
-        sx={{
-          width: 36,
-          height: 36,
-          borderRadius: 1.5,
-          backgroundColor: alpha(D.green, 0.1),
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          flexShrink: 0,
-          mt: 0.25,
-        }}
-      >
-        <Icon sx={{ fontSize: 18, color: D.green }} />
+      <Box sx={{ width: 34, height: 34, borderRadius: 1.5, backgroundColor: alpha(D.green, 0.1), display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, mt: 0.2 }}>
+        <Icon sx={{ fontSize: 17, color: D.green }} />
       </Box>
       <Box>
-        <Typography sx={{ fontFamily: D.display, fontSize: '0.95rem', letterSpacing: '-0.01em', color: D.navy, mb: 0.75, lineHeight: 1.2 }}>
+        <Typography sx={{ fontFamily: D.display, fontSize: '0.92rem', letterSpacing: '-0.01em', color: D.navy, mb: 0.6, lineHeight: 1.2 }}>
           {feature.title}
         </Typography>
-        <Typography sx={{ fontFamily: D.body, fontSize: '0.85rem', lineHeight: 1.7, color: D.muted }}>
+        <Typography sx={{ fontFamily: D.body, fontSize: '0.83rem', lineHeight: 1.7, color: D.muted }}>
           {feature.body}
         </Typography>
       </Box>
@@ -147,18 +142,42 @@ function GoogleButton({ label }: { label: string }) {
   );
 }
 
+// ── Page ─────────────────────────────────────────────────────────────────────
+
 export default function Home() {
-  const [active, setActive] = useState(0);
-  const heroRef    = useRef<HTMLDivElement>(null);
-  const featuresRef = useRef<HTMLDivElement>(null);
-  const ctaRef     = useRef<HTMLDivElement>(null);
-  const sections   = [heroRef, featuresRef, ctaRef];
+  // Nav dot tracking
+  const [active, setActive]           = useState(0);
+  const heroRef                        = useRef<HTMLDivElement>(null);
+  const featuresRef                    = useRef<HTMLDivElement>(null);
+  const ctaRef                         = useRef<HTMLDivElement>(null);
+  const navSections                    = [heroRef, featuresRef, ctaRef];
+
+  // Feature group tracking (for sticky screenshot crossfade)
+  const [activeGroup, setActiveGroup] = useState(0);
+  const groupRefs = [
+    useRef<HTMLDivElement>(null),
+    useRef<HTMLDivElement>(null),
+    useRef<HTMLDivElement>(null),
+  ];
 
   useEffect(() => {
-    const observers = sections.map((ref, i) => {
+    const observers = navSections.map((ref, i) => {
       const obs = new IntersectionObserver(
         ([e]) => { if (e.isIntersecting) setActive(i); },
         { threshold: 0.35 }
+      );
+      if (ref.current) obs.observe(ref.current);
+      return obs;
+    });
+    return () => observers.forEach(o => o.disconnect());
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    const observers = groupRefs.map((ref, i) => {
+      const obs = new IntersectionObserver(
+        ([e]) => { if (e.isIntersecting) setActiveGroup(i); },
+        { threshold: 0.3 }
       );
       if (ref.current) obs.observe(ref.current);
       return obs;
@@ -173,21 +192,9 @@ export default function Home() {
   return (
     <Box sx={{ backgroundColor: D.bg }}>
 
-      {/* ── Nav dots ─────────────────────────────────────────────── */}
-      <Box
-        sx={{
-          position: 'fixed',
-          right: { xs: 16, sm: 28 },
-          top: '50%',
-          transform: 'translateY(-50%)',
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          gap: 1.5,
-          zIndex: 100,
-        }}
-      >
-        {sections.map((ref, i) => (
+      {/* ── Nav dots ───────────────────────────────────────────────── */}
+      <Box sx={{ position: 'fixed', right: { xs: 14, sm: 24 }, top: '50%', transform: 'translateY(-50%)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1.5, zIndex: 100 }}>
+        {navSections.map((ref, i) => (
           <Box
             key={i}
             onClick={() => scrollTo(ref)}
@@ -204,7 +211,7 @@ export default function Home() {
         ))}
       </Box>
 
-      {/* ── Hero ─────────────────────────────────────────────────── */}
+      {/* ── Hero ───────────────────────────────────────────────────── */}
       <Box
         ref={heroRef}
         sx={{
@@ -212,84 +219,38 @@ export default function Home() {
           display: 'flex',
           flexDirection: 'column',
           alignItems: 'center',
-          justifyContent: 'center',
           px: { xs: 3, sm: 4 },
-          pt: { xs: 6, sm: 8 },
+          pt: { xs: 8, sm: 10 },
           pb: 0,
           textAlign: 'center',
-          background: `linear-gradient(to bottom, ${D.bg} 70%, ${D.paper} 100%)`,
         }}
       >
+        {/* Wordmark block */}
         <Box sx={{ mb: 2.5 }}>
-          <Image src="/logomark.png" alt="Tabiji" width={48} height={48} style={{ objectFit: 'contain' }} />
+          <Image src="/logomark.png" alt="Tabiji" width={46} height={46} style={{ objectFit: 'contain' }} />
         </Box>
 
-        <Typography
-          sx={{
-            fontFamily: D.display,
-            fontSize: { xs: '3.2rem', sm: '5rem', md: '6.5rem' },
-            letterSpacing: '-0.04em',
-            lineHeight: 0.9,
-            color: D.navy,
-            mb: 1.5,
-          }}
-        >
+        <Typography sx={{ fontFamily: D.display, fontSize: { xs: '3rem', sm: '4.8rem', md: '6.5rem' }, letterSpacing: '-0.04em', lineHeight: 0.9, color: D.navy, mb: 1.5 }}>
           Tabiji
         </Typography>
 
-        <Typography
-          sx={{
-            fontFamily: D.body,
-            fontSize: '0.72rem',
-            letterSpacing: '0.3em',
-            color: D.muted,
-            textTransform: 'uppercase',
-            mb: 3,
-          }}
-        >
+        <Typography sx={{ fontFamily: D.body, fontSize: '0.72rem', letterSpacing: '0.3em', color: D.muted, textTransform: 'uppercase', mb: 3 }}>
           旅路
         </Typography>
 
-        <Box sx={{ width: 44, height: 3, backgroundColor: D.terra, borderRadius: 2, mb: 4 }} />
+        <Box sx={{ width: 44, height: 3, backgroundColor: D.terra, borderRadius: 2, mb: 3.5 }} />
 
-        <Typography
-          sx={{
-            fontFamily: D.display,
-            fontSize: { xs: '1.6rem', sm: '2rem', md: '2.6rem' },
-            letterSpacing: '-0.02em',
-            lineHeight: 1.2,
-            color: D.navy,
-            maxWidth: 600,
-            mb: 2.5,
-          }}
-        >
+        <Typography sx={{ fontFamily: D.display, fontSize: { xs: '1.55rem', sm: '1.95rem', md: '2.5rem' }, letterSpacing: '-0.02em', lineHeight: 1.2, color: D.navy, maxWidth: 580, mb: 2 }}>
           A system for journeys,<br />not just plans.
         </Typography>
 
-        <Typography
-          sx={{
-            fontFamily: D.body,
-            fontSize: { xs: '0.9rem', sm: '1rem' },
-            lineHeight: 1.75,
-            color: D.muted,
-            maxWidth: 480,
-            mb: 2.5,
-          }}
-        >
+        <Typography sx={{ fontFamily: D.body, fontSize: { xs: '0.88rem', sm: '0.98rem' }, lineHeight: 1.75, color: D.muted, maxWidth: 460, mb: 2 }}>
           Tabiji holds the entire shape of a trip — where you are going, how you
           are moving, what you need, and everything that sits around it. Built
           from the perspective of someone who travels with intent.
         </Typography>
 
-        <Typography
-          sx={{
-            fontFamily: D.display,
-            fontSize: { xs: '1rem', sm: '1.1rem' },
-            letterSpacing: '-0.01em',
-            color: D.terra,
-            mb: 4,
-          }}
-        >
+        <Typography sx={{ fontFamily: D.display, fontSize: '1rem', letterSpacing: '-0.01em', color: D.terra, mb: 3.5 }}>
           One trip, fully understood.
         </Typography>
 
@@ -299,72 +260,72 @@ export default function Home() {
           Your trips stay private. No feeds, no followers.
         </Typography>
 
-        {/* Visual bridge — draws the eye downward */}
+        {/* Product screenshot peek — pulls eye downward */}
         <Box
-          onClick={() => scrollTo(featuresRef)}
           sx={{
-            mt: 'auto',
-            pt: 6,
-            pb: 5,
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            gap: 1.25,
-            cursor: 'pointer',
-            opacity: 0.6,
-            '&:hover': { opacity: 1 },
-            transition: 'opacity 0.2s ease',
+            mt: 6,
+            width: '100%',
+            maxWidth: 780,
+            position: 'relative',
+            borderRadius: '12px 12px 0 0',
+            overflow: 'hidden',
+            border: `1.5px solid ${D.rule}`,
+            borderBottom: 'none',
+            boxShadow: `0 -4px 40px ${alpha(D.navy, 0.08)}`,
           }}
         >
-          <Typography
+          {/* Browser chrome */}
+          <Box sx={{ height: 32, backgroundColor: D.navy, display: 'flex', alignItems: 'center', px: 2, gap: 0.75, flexShrink: 0 }}>
+            {[D.terra, '#E5A855', D.green].map((c, i) => (
+              <Box key={i} sx={{ width: 9, height: 9, borderRadius: '50%', backgroundColor: c, opacity: 0.75 }} />
+            ))}
+          </Box>
+          <Image
+            src="/screens/triplist.png"
+            alt="Tabiji trip list"
+            width={780}
+            height={440}
+            style={{ width: '100%', height: 'auto', display: 'block' }}
+          />
+          {/* Gradient fade — draws eye downward */}
+          <Box sx={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: '55%', background: `linear-gradient(to bottom, transparent, ${D.bg})`, pointerEvents: 'none' }} />
+          {/* Scroll cue inside fade zone */}
+          <Box
+            onClick={() => scrollTo(featuresRef)}
             sx={{
-              fontFamily: D.body,
-              fontSize: '0.65rem',
-              letterSpacing: '0.22em',
-              textTransform: 'uppercase',
-              color: D.navy,
-              fontWeight: 700,
+              position: 'absolute',
+              bottom: 20,
+              left: '50%',
+              transform: 'translateX(-50%)',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              gap: 0.75,
+              cursor: 'pointer',
+              '@keyframes nudge': {
+                '0%, 100%': { transform: 'translateX(-50%) translateY(0)' },
+                '50%':      { transform: 'translateX(-50%) translateY(5px)' },
+              },
+              animation: 'nudge 2s ease-in-out infinite',
             }}
           >
-            What Tabiji does
-          </Typography>
-          {/* Animated tick-down line */}
-          <Box
-            sx={{
-              width: 1,
-              height: 32,
-              borderLeft: `1.5px solid ${alpha(D.navy, 0.35)}`,
-              '@keyframes grow': {
-                '0%':   { height: 0, opacity: 0 },
-                '50%':  { opacity: 1 },
-                '100%': { height: 32, opacity: 0.6 },
-              },
-              animation: 'grow 1.8s ease-in-out infinite',
-            }}
-          />
+            <Typography sx={{ fontFamily: D.body, fontSize: '0.65rem', fontWeight: 700, letterSpacing: '0.22em', textTransform: 'uppercase', color: D.navy }}>
+              See what's inside
+            </Typography>
+            <Box sx={{ width: 1, height: 20, borderLeft: `1.5px solid ${alpha(D.navy, 0.3)}` }} />
+          </Box>
         </Box>
       </Box>
 
-      {/* ── Features — scrollytelling ─────────────────────────────── */}
-      <Box
-        ref={featuresRef}
-        sx={{
-          backgroundColor: D.paper,
-          borderTop: `1.5px solid ${D.rule}`,
-        }}
-      >
+      {/* ── Features — scrollytelling ──────────────────────────────── */}
+      <Box ref={featuresRef} sx={{ backgroundColor: D.paper, borderTop: `1.5px solid ${D.rule}` }}>
         <Container maxWidth="lg">
-          <Box
-            sx={{
-              display: 'flex',
-              flexDirection: { xs: 'column', md: 'row' },
-              alignItems: 'flex-start',
-            }}
-          >
-            {/* Sticky left panel */}
+          <Box sx={{ display: 'flex', flexDirection: { xs: 'column', md: 'row' }, alignItems: 'flex-start' }}>
+
+            {/* Sticky left — text + crossfading screenshot */}
             <Box
               sx={{
-                width: { xs: '100%', md: '36%' },
+                width: { xs: '100%', md: '40%' },
                 position: { md: 'sticky' },
                 top: 0,
                 height: { md: '100vh' },
@@ -372,50 +333,54 @@ export default function Home() {
                 flexDirection: 'column',
                 justifyContent: { md: 'center' },
                 py: { xs: 8, md: 0 },
-                pr: { md: 8 },
+                pr: { md: 7 },
                 borderBottom: { xs: `1.5px solid ${D.rule}`, md: 'none' },
                 borderRight: { md: `1.5px solid ${D.rule}` },
               }}
             >
-              <Typography
-                sx={{
-                  fontFamily: D.body,
-                  fontSize: '0.68rem',
-                  fontWeight: 700,
-                  letterSpacing: '0.28em',
-                  textTransform: 'uppercase',
-                  color: D.muted,
-                  mb: 2.5,
-                }}
-              >
+              <Typography sx={{ fontFamily: D.body, fontSize: '0.68rem', fontWeight: 700, letterSpacing: '0.28em', textTransform: 'uppercase', color: D.muted, mb: 2 }}>
                 What Tabiji does
               </Typography>
-              <Typography
-                sx={{
-                  fontFamily: D.display,
-                  fontSize: { xs: '1.8rem', md: '2rem' },
-                  letterSpacing: '-0.03em',
-                  lineHeight: 1.15,
-                  color: D.navy,
-                  mb: 3,
-                }}
-              >
+              <Typography sx={{ fontFamily: D.display, fontSize: { xs: '1.7rem', md: '1.9rem' }, letterSpacing: '-0.03em', lineHeight: 1.15, color: D.navy, mb: 2.5 }}>
                 Trips are not just destinations.
               </Typography>
-              <Typography
-                sx={{
-                  fontFamily: D.body,
-                  fontSize: '0.88rem',
-                  lineHeight: 1.75,
-                  color: D.muted,
-                  mb: 4,
-                }}
-              >
+              <Typography sx={{ fontFamily: D.body, fontSize: '0.87rem', lineHeight: 1.75, color: D.muted, mb: 3.5 }}>
                 They are timelines, dependencies, and decisions. Tabiji connects
                 planning, logistics, documents, and context into a single
-                continuous view — from first idea to return home. Nothing is
-                overwritten. Nothing disappears.
+                continuous view — from first idea to return home.
               </Typography>
+
+              {/* Crossfading screenshots — desktop only */}
+              <Box
+                sx={{
+                  display: { xs: 'none', md: 'block' },
+                  position: 'relative',
+                  borderRadius: 2,
+                  overflow: 'hidden',
+                  border: `1.5px solid ${D.rule}`,
+                  boxShadow: `0 12px 32px ${alpha(D.navy, 0.1)}`,
+                  mb: 3.5,
+                  aspectRatio: '16/10',
+                }}
+              >
+                {/* Default — overview */}
+                <Box sx={{ position: 'absolute', inset: 0, opacity: 1, transition: 'opacity 0.5s ease' }}>
+                  <Image src="/screens/tabs/overviewtab.png" alt="Trip overview" fill style={{ objectFit: 'cover', objectPosition: 'top' }} />
+                </Box>
+                {/* Group-synced screens */}
+                {FEATURE_GROUPS.map((g, i) => (
+                  <Box key={g.label} sx={{ position: 'absolute', inset: 0, opacity: activeGroup === i ? 1 : 0, transition: 'opacity 0.5s ease' }}>
+                    <Image src={g.screen} alt={g.label} fill style={{ objectFit: 'cover', objectPosition: 'top' }} />
+                  </Box>
+                ))}
+                {/* Active group label badge */}
+                <Box sx={{ position: 'absolute', bottom: 12, left: 12, backgroundColor: alpha(D.navy, 0.85), borderRadius: 1, px: 1.5, py: 0.5, backdropFilter: 'blur(4px)' }}>
+                  <Typography sx={{ fontFamily: D.body, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.18em', textTransform: 'uppercase', color: '#fff' }}>
+                    {FEATURE_GROUPS[activeGroup].label}
+                  </Typography>
+                </Box>
+              </Box>
+
               <Box sx={{ display: { xs: 'none', md: 'block' } }}>
                 <GoogleButton label="Get started" />
               </Box>
@@ -425,9 +390,8 @@ export default function Home() {
             <Box sx={{ flex: 1, pl: { md: 6 }, py: { xs: 4, md: 6 } }}>
               {(() => {
                 let globalIndex = 0;
-                return FEATURE_GROUPS.map((group) => (
-                  <Box key={group.label} sx={{ mb: 2 }}>
-                    {/* Group label */}
+                return FEATURE_GROUPS.map((group, gi) => (
+                  <Box key={group.label} ref={groupRefs[gi]} sx={{ mb: 2 }}>
                     <Typography
                       sx={{
                         fontFamily: D.body,
@@ -438,7 +402,6 @@ export default function Home() {
                         color: D.terra,
                         py: 1.5,
                         borderBottom: `1px solid ${D.rule}`,
-                        mb: 0,
                       }}
                     >
                       {group.label}
@@ -455,11 +418,11 @@ export default function Home() {
         </Container>
       </Box>
 
-      {/* ── CTA ──────────────────────────────────────────────────── */}
+      {/* ── CTA ────────────────────────────────────────────────────── */}
       <Box
         ref={ctaRef}
         sx={{
-          py: { xs: 14, sm: 18 },
+          py: { xs: 16, sm: 20 },
           backgroundColor: D.bg,
           borderTop: `1.5px solid ${D.rule}`,
           display: 'flex',
@@ -471,38 +434,13 @@ export default function Home() {
           gap: 3,
         }}
       >
-        <Typography
-          sx={{
-            fontFamily: D.body,
-            fontSize: '0.68rem',
-            fontWeight: 700,
-            letterSpacing: '0.28em',
-            textTransform: 'uppercase',
-            color: D.muted,
-          }}
-        >
+        <Typography sx={{ fontFamily: D.body, fontSize: '0.68rem', fontWeight: 700, letterSpacing: '0.28em', textTransform: 'uppercase', color: D.muted }}>
           Early access
         </Typography>
-        <Typography
-          sx={{
-            fontFamily: D.display,
-            fontSize: { xs: '2.4rem', sm: '3.2rem', md: '4rem' },
-            letterSpacing: '-0.04em',
-            lineHeight: 1,
-            color: D.navy,
-          }}
-        >
+        <Typography sx={{ fontFamily: D.display, fontSize: { xs: '2.4rem', sm: '3.2rem', md: '4rem' }, letterSpacing: '-0.04em', lineHeight: 1, color: D.navy }}>
           Start planning.
         </Typography>
-        <Typography
-          sx={{
-            fontFamily: D.body,
-            fontSize: '0.9rem',
-            color: D.muted,
-            maxWidth: 300,
-            lineHeight: 1.65,
-          }}
-        >
+        <Typography sx={{ fontFamily: D.body, fontSize: '0.9rem', color: D.muted, maxWidth: 300, lineHeight: 1.65 }}>
           Tabiji is free to use during early access.
         </Typography>
         <GoogleButton label="Continue with Google" />
@@ -511,25 +449,9 @@ export default function Home() {
         </Typography>
       </Box>
 
-      {/* ── Footer ───────────────────────────────────────────────── */}
-      <Box
-        sx={{
-          borderTop: `1.5px solid ${D.rule}`,
-          py: 5,
-          textAlign: 'center',
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          gap: 1.5,
-        }}
-      >
-        <Image
-          src="/logomark.png"
-          alt="Tabiji"
-          width={26}
-          height={26}
-          style={{ objectFit: 'contain', opacity: 0.45 }}
-        />
+      {/* ── Footer ─────────────────────────────────────────────────── */}
+      <Box sx={{ borderTop: `1.5px solid ${D.rule}`, py: 5, textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1.5 }}>
+        <Image src="/logomark.png" alt="Tabiji" width={26} height={26} style={{ objectFit: 'contain', opacity: 0.4 }} />
         <Typography sx={{ fontFamily: D.display, fontSize: '0.95rem', letterSpacing: '-0.01em', color: D.navy }}>
           Travel, held together.
         </Typography>
