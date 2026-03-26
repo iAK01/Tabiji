@@ -35,20 +35,20 @@ const FEATURE_GROUPS: { label: string; screen: string; features: Feature[] }[] =
     label: 'Planning',
     screen: '/screens/tabs/itinerarytab.png',
     features: [
-      { icon: RouteOutlinedIcon,        title: 'Plan from idea to arrival',      body: 'Build trips with multiple destinations, each with their own timing and purpose. Move through stages as plans develop. Nothing gets lost along the way.' },
+      { icon: RouteOutlinedIcon,        title: 'Plan from idea to arrival',      body: 'Build trips with multiple destinations, each with their own timing and purpose. Move through stages as plans develop.' },
       { icon: CalendarTodayOutlinedIcon, title: 'Your itinerary, your way',      body: 'Construct each day as it actually unfolds. Build manually or let AI draft a starting point. Add movement, pauses, and commitments. Adjust without breaking the structure.' },
       { icon: LuggageOutlinedIcon,      title: 'Packing lists that think ahead', body: 'Generated from your trip length, transport, accommodation, and type. Items scale with time — three shirts, not just shirts. Flag what to do before you leave. Regenerate as plans change.' },
-      { icon: GroupOutlinedIcon,        title: 'Travel with others',             body: 'Trips can be shared. Roles are clear. Edits are controlled. Everyone works from the same version.' },
+      { icon: GroupOutlinedIcon,        title: 'Travel with others',             body: 'Trips can be shared. Roles are clear. Everyone works from the same version.' },
     ],
   },
   {
     label: 'Logistics',
     screen: '/screens/tabs/logisticstab.png',
     features: [
-      { icon: FlightOutlinedIcon,        title: 'Logistics in one place',             body: 'Flights, trains, ferries, cars, accommodation, venues. Each piece sits in context, connected to the rest of the trip. Pre-departure steps and arrival details accounted for.' },
+      { icon: FlightOutlinedIcon,        title: 'Logistics in one place',             body: 'Flights, trains, ferries, cars, accommodation, venues. Each piece sits in context, connected to the rest of the trip.' },
       { icon: FolderOutlinedIcon,        title: 'Everything attached, nothing loose', body: 'Documents, links, booking references, contacts, notes, and tasks — connected directly to the part of the trip they belong to. Not sitting in a folder somewhere.' },
-      { icon: NotificationsOutlinedIcon, title: "Notifications that aren't noise",    body: 'Alerts for flights, check-ins, itinerary stops, and todos — with adjustable lead times per item. Duplication removed.' },
-      { icon: WifiOffIcon,               title: 'Works offline',                      body: 'Trip data cached to your device. Accessible anywhere, regardless of signal.' },
+      { icon: NotificationsOutlinedIcon, title: "Notifications that aren't noise",    body: 'Alerts for flights, check-ins, itinerary stops, and todos. You set how far ahead you want each one.' },
+      { icon: WifiOffIcon,               title: 'Works offline',                      body: 'Your trip lives on your device. No signal needed.' },
     ],
   },
   {
@@ -57,7 +57,7 @@ const FEATURE_GROUPS: { label: string; screen: string; features: Feature[] }[] =
     features: [
       { icon: PublicOutlinedIcon,  title: 'Know before you go',          body: 'Visa requirements, currency, time zones, electrical systems, language essentials, emergency numbers, local context. Surfaced without searching.' },
       { icon: WbSunnyOutlinedIcon, title: 'Weather, in perspective',     body: 'Forecasts when they matter, climate normals when you are planning further ahead. Always in relation to where you are starting from.' },
-      { icon: TuneOutlinedIcon,    title: 'Built around how you travel', body: 'Your home city, passport, unit preferences, and navigation app per transport mode inform every trip. Every "navigate" link opens exactly where you want it.' },
+      { icon: TuneOutlinedIcon,    title: 'Built around how you travel', body: 'Set your home city, passport, and navigation preferences once. Every trip builds from that.' },
     ],
   },
 ];
@@ -244,7 +244,7 @@ export default function Home() {
           <Image src="/logomark.png" alt="Tabiji" width={46} height={46} style={{ objectFit: 'contain' }} />
         </Box>
 
-        <Typography sx={{ fontFamily: D.display, fontSize: { xs: '3rem', sm: '4.8rem', md: '6.5rem' }, letterSpacing: '-0.04em', lineHeight: 0.9, color: D.navy, mb: 1.5 }}>
+        <Typography sx={{ fontFamily: D.display, fontSize: { xs: '5rem', sm: '8rem', md: '11rem' }, letterSpacing: '-0.04em', lineHeight: 0.88, color: D.navy, mb: 1.5 }}>
           Tabiji
         </Typography>
 
@@ -254,7 +254,7 @@ export default function Home() {
 
         <Box sx={{ width: 44, height: 3, backgroundColor: D.terra, borderRadius: 2, mb: 3.5 }} />
 
-        <Typography sx={{ fontFamily: D.display, fontSize: { xs: '1.55rem', sm: '1.95rem', md: '2.5rem' }, letterSpacing: '-0.02em', lineHeight: 1.2, color: D.navy, maxWidth: 580, mb: 2 }}>
+        <Typography sx={{ fontFamily: D.display, fontSize: { xs: '2rem', sm: '2.8rem', md: '3.8rem' }, letterSpacing: '-0.03em', lineHeight: 1.1, color: D.navy, maxWidth: 700, mb: 2 }}>
           A system for journeys,<br />not just plans.
         </Typography>
 
@@ -264,7 +264,7 @@ export default function Home() {
           from the perspective of someone who travels with intent.
         </Typography>
 
-        <Typography sx={{ fontFamily: D.display, fontSize: '1rem', letterSpacing: '-0.01em', color: D.terra, mb: 3.5 }}>
+        <Typography sx={{ fontFamily: D.display, fontSize: { xs: '1.15rem', sm: '1.35rem' }, letterSpacing: '-0.02em', color: D.terra, mb: 3.5 }}>
           One trip, fully understood.
         </Typography>
 
@@ -356,13 +356,11 @@ export default function Home() {
               <Typography sx={{ fontFamily: D.body, fontSize: '0.68rem', fontWeight: 700, letterSpacing: '0.28em', textTransform: 'uppercase', color: D.muted, mb: 2 }}>
                 What Tabiji does
               </Typography>
-              <Typography sx={{ fontFamily: D.display, fontSize: { xs: '1.7rem', md: '1.9rem' }, letterSpacing: '-0.03em', lineHeight: 1.15, color: D.navy, mb: 2.5 }}>
+              <Typography sx={{ fontFamily: D.display, fontSize: { xs: '2.2rem', md: '2.8rem' }, letterSpacing: '-0.03em', lineHeight: 1.1, color: D.navy, mb: 2.5 }}>
                 Trips are not just destinations.
               </Typography>
               <Typography sx={{ fontFamily: D.body, fontSize: '0.87rem', lineHeight: 1.75, color: D.muted, mb: 3.5 }}>
-                They are timelines, dependencies, and decisions. Tabiji connects
-                planning, logistics, documents, and context into a single
-                continuous view — from first idea to return home.
+                They are timelines, dependencies, and decisions. Tabiji holds all of it — from first idea to the journey home.
               </Typography>
 
               {/* Crossfading screenshots — desktop only */}
@@ -452,7 +450,7 @@ export default function Home() {
         <Typography sx={{ fontFamily: D.body, fontSize: '0.68rem', fontWeight: 700, letterSpacing: '0.28em', textTransform: 'uppercase', color: D.muted }}>
           Early access
         </Typography>
-        <Typography sx={{ fontFamily: D.display, fontSize: { xs: '2.4rem', sm: '3.2rem', md: '4rem' }, letterSpacing: '-0.04em', lineHeight: 1, color: D.navy }}>
+        <Typography sx={{ fontFamily: D.display, fontSize: { xs: '3.2rem', sm: '4.8rem', md: '6.5rem' }, letterSpacing: '-0.04em', lineHeight: 0.92, color: D.navy }}>
           Start planning.
         </Typography>
         <Typography sx={{ fontFamily: D.body, fontSize: '0.9rem', color: D.muted, maxWidth: 300, lineHeight: 1.65 }}>
