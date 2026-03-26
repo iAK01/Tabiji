@@ -85,7 +85,7 @@ export default function SignInPage() {
           mb: 1.5,
         }}
       >
-        Start planning.
+        Welcome back.
       </Typography>
 
       <Typography
@@ -96,9 +96,10 @@ export default function SignInPage() {
           mb: 4,
           maxWidth: 280,
           lineHeight: 1.6,
+          textAlign: 'center',
         }}
       >
-        Tabiji is free to use during early access.
+        Tabiji is currently by invitation only. Sign in below if you have access.
       </Typography>
 
       <Button

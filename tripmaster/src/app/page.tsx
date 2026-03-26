@@ -1,11 +1,9 @@
 'use client';
 
-import { signIn } from 'next-auth/react';
 import { useEffect, useRef, useState } from 'react';
 import { Box, Button, Container, Typography } from '@mui/material';
 import { alpha } from '@mui/material/styles';
 import Image from 'next/image';
-import GoogleIcon from '@mui/icons-material/Google';
 import RouteOutlinedIcon from '@mui/icons-material/RouteOutlined';
 import CalendarTodayOutlinedIcon from '@mui/icons-material/CalendarTodayOutlined';
 import LuggageOutlinedIcon from '@mui/icons-material/LuggageOutlined';
@@ -117,28 +115,44 @@ function FeatureRow({ feature, index }: { feature: Feature; index: number }) {
   );
 }
 
-function GoogleButton({ label }: { label: string }) {
+function InterestForm() {
   return (
-    <Button
-      variant="contained"
-      size="large"
-      startIcon={<GoogleIcon />}
-      onClick={() => signIn('google', { callbackUrl: '/dashboard' })}
-      sx={{
-        backgroundColor: D.navy,
-        color: '#fff',
-        fontFamily: D.body,
-        fontWeight: 700,
-        fontSize: '0.9rem',
-        px: 4,
-        py: 1.5,
-        borderRadius: 2,
-        textTransform: 'none',
-        '&:hover': { backgroundColor: alpha(D.navy, 0.85) },
-      }}
-    >
-      {label}
-    </Button>
+    <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1.5 }}>
+      <Button
+        variant="contained"
+        component="a"
+        href="mailto:kenneth.killeen@gmail.com?subject=Tabiji — I'm interested"
+        sx={{
+          backgroundColor: D.navy,
+          color: '#fff',
+          fontFamily: D.body,
+          fontWeight: 700,
+          fontSize: '0.9rem',
+          px: 4,
+          py: 1.5,
+          borderRadius: 2,
+          textTransform: 'none',
+          '&:hover': { backgroundColor: alpha(D.navy, 0.85) },
+        }}
+      >
+        Register your interest
+      </Button>
+      <Typography
+        component="a"
+        href="/signin"
+        sx={{
+          fontFamily: D.body,
+          fontSize: '0.75rem',
+          color: D.muted,
+          textDecoration: 'none',
+          borderBottom: `1px solid ${alpha(D.navy, 0.2)}`,
+          '&:hover': { color: D.navy },
+          transition: 'color 0.2s ease',
+        }}
+      >
+        Already invited? Sign in →
+      </Typography>
+    </Box>
   );
 }
 
@@ -254,11 +268,12 @@ export default function Home() {
           One trip, fully understood.
         </Typography>
 
-        <GoogleButton label="Sign in with Google" />
-
-        <Typography sx={{ fontFamily: D.body, fontSize: '0.72rem', color: D.muted, mt: 2 }}>
-          Your trips stay private. No feeds, no followers.
-        </Typography>
+        <Box sx={{ mt: 1, mb: 1 }}>
+          <Typography sx={{ fontFamily: D.body, fontSize: '0.72rem', fontWeight: 700, letterSpacing: '0.18em', textTransform: 'uppercase', color: D.terra, mb: 2.5, textAlign: 'center' }}>
+            Private beta — invitation only
+          </Typography>
+          <InterestForm />
+        </Box>
 
         {/* Product screenshot peek — pulls eye downward */}
         <Box
@@ -382,7 +397,7 @@ export default function Home() {
               </Box>
 
               <Box sx={{ display: { xs: 'none', md: 'block' } }}>
-                <GoogleButton label="Get started" />
+                <InterestForm />
               </Box>
             </Box>
 
@@ -441,12 +456,9 @@ export default function Home() {
           Start planning.
         </Typography>
         <Typography sx={{ fontFamily: D.body, fontSize: '0.9rem', color: D.muted, maxWidth: 300, lineHeight: 1.65 }}>
-          Tabiji is free to use during early access.
+          Currently in private beta. Register below and we'll be in touch.
         </Typography>
-        <GoogleButton label="Continue with Google" />
-        <Typography sx={{ fontFamily: D.body, fontSize: '0.72rem', color: D.muted }}>
-          Your trips stay private. No feeds, no followers.
-        </Typography>
+        <InterestForm />
       </Box>
 
       {/* ── Footer ─────────────────────────────────────────────────── */}
