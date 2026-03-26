@@ -296,7 +296,8 @@ export default function Home() {
               }}
             />
           </Box>
-          ,<br />not just plans.
+          <Box component="span" sx={{ color: D.navy }}>,</Box>
+          <br />not just plans.
         </Typography>
 
         <Typography sx={{ fontFamily: D.body, fontSize: { xs: '0.88rem', sm: '0.98rem' }, lineHeight: 1.75, color: D.muted, maxWidth: 460, mb: 2 }}>
