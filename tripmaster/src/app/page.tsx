@@ -30,18 +30,33 @@ const D = {
   body:    '"Archivo", "Inter", sans-serif',
 };
 
-const FEATURES = [
-  { icon: RouteOutlinedIcon,          title: 'Plan from idea to arrival',          body: 'Build trips with multiple destinations, each with their own timing and purpose. Move through stages as plans develop. Nothing gets lost along the way.' },
-  { icon: CalendarTodayOutlinedIcon,  title: 'Your itinerary, your way',           body: 'Construct each day as it actually unfolds. Build manually or let AI draft a starting point. Add movement, pauses, and commitments. Adjust without breaking the structure.' },
-  { icon: LuggageOutlinedIcon,        title: 'Packing lists that think ahead',     body: 'Generated from your trip length, transport, accommodation, and type. Items scale with time — three shirts, not just shirts. Flag what to do before you leave. Regenerate as plans change.' },
-  { icon: FlightOutlinedIcon,         title: 'Logistics in one place',             body: 'Flights, trains, ferries, cars, accommodation, venues. Each piece sits in context, connected to the rest of the trip. Pre-departure steps and arrival details accounted for.' },
-  { icon: FolderOutlinedIcon,         title: 'Everything attached, nothing loose', body: 'Documents, links, booking references, contacts, notes, and tasks — connected directly to the part of the trip they belong to. Not sitting in a folder somewhere.' },
-  { icon: PublicOutlinedIcon,         title: 'Know before you go',                 body: 'Visa requirements, currency, time zones, electrical systems, language essentials, emergency numbers, local context. Surfaced without searching.' },
-  { icon: WbSunnyOutlinedIcon,        title: 'Weather, in perspective',            body: 'Forecasts when they matter, climate normals when you are planning further ahead. Always in relation to where you are starting from.' },
-  { icon: TuneOutlinedIcon,           title: 'Built around how you travel',        body: 'Your home city, passport, unit preferences, and navigation app per transport mode inform every trip. Every "navigate" link opens exactly where you want it.' },
-  { icon: GroupOutlinedIcon,          title: 'Travel with others',                 body: 'Trips can be shared. Roles are clear. Edits are controlled. Everyone works from the same version.' },
-  { icon: NotificationsOutlinedIcon,  title: "Notifications that aren't noise",    body: 'Alerts for flights, check-ins, itinerary stops, and todos — with adjustable lead times per item. Duplication removed.' },
-  { icon: WifiOffIcon,                title: 'Works offline',                      body: 'Trip data cached to your device. Accessible anywhere, regardless of signal.' },
+const FEATURE_GROUPS = [
+  {
+    label: 'Planning',
+    features: [
+      { icon: RouteOutlinedIcon,         title: 'Plan from idea to arrival',      body: 'Build trips with multiple destinations, each with their own timing and purpose. Move through stages as plans develop. Nothing gets lost along the way.' },
+      { icon: CalendarTodayOutlinedIcon, title: 'Your itinerary, your way',        body: 'Construct each day as it actually unfolds. Build manually or let AI draft a starting point. Add movement, pauses, and commitments. Adjust without breaking the structure.' },
+      { icon: LuggageOutlinedIcon,       title: 'Packing lists that think ahead', body: 'Generated from your trip length, transport, accommodation, and type. Items scale with time — three shirts, not just shirts. Flag what to do before you leave. Regenerate as plans change.' },
+      { icon: GroupOutlinedIcon,         title: 'Travel with others',             body: 'Trips can be shared. Roles are clear. Edits are controlled. Everyone works from the same version.' },
+    ],
+  },
+  {
+    label: 'Logistics',
+    features: [
+      { icon: FlightOutlinedIcon,        title: 'Logistics in one place',             body: 'Flights, trains, ferries, cars, accommodation, venues. Each piece sits in context, connected to the rest of the trip. Pre-departure steps and arrival details accounted for.' },
+      { icon: FolderOutlinedIcon,        title: 'Everything attached, nothing loose', body: 'Documents, links, booking references, contacts, notes, and tasks — connected directly to the part of the trip they belong to. Not sitting in a folder somewhere.' },
+      { icon: NotificationsOutlinedIcon, title: "Notifications that aren't noise",    body: 'Alerts for flights, check-ins, itinerary stops, and todos — with adjustable lead times per item. Duplication removed.' },
+      { icon: WifiOffIcon,               title: 'Works offline',                      body: 'Trip data cached to your device. Accessible anywhere, regardless of signal.' },
+    ],
+  },
+  {
+    label: 'Context',
+    features: [
+      { icon: PublicOutlinedIcon,        title: 'Know before you go',         body: 'Visa requirements, currency, time zones, electrical systems, language essentials, emergency numbers, local context. Surfaced without searching.' },
+      { icon: WbSunnyOutlinedIcon,       title: 'Weather, in perspective',    body: 'Forecasts when they matter, climate normals when you are planning further ahead. Always in relation to where you are starting from.' },
+      { icon: TuneOutlinedIcon,          title: 'Built around how you travel', body: 'Your home city, passport, unit preferences, and navigation app per transport mode inform every trip. Every "navigate" link opens exactly where you want it.' },
+    ],
+  },
 ];
 
 function useInView(threshold = 0.15) {
@@ -60,7 +75,9 @@ function useInView(threshold = 0.15) {
   return { ref, inView };
 }
 
-function FeatureRow({ feature, index }: { feature: typeof FEATURES[0]; index: number }) {
+type Feature = { icon: React.ElementType; title: string; body: string };
+
+function FeatureRow({ feature, index }: { feature: Feature; index: number }) {
   const { ref, inView } = useInView(0.1);
   const Icon = feature.icon;
   return (
@@ -404,11 +421,35 @@ export default function Home() {
               </Box>
             </Box>
 
-            {/* Scrolling feature list */}
+            {/* Scrolling feature list — grouped */}
             <Box sx={{ flex: 1, pl: { md: 6 }, py: { xs: 4, md: 6 } }}>
-              {FEATURES.map((f, i) => (
-                <FeatureRow key={f.title} feature={f} index={i} />
-              ))}
+              {(() => {
+                let globalIndex = 0;
+                return FEATURE_GROUPS.map((group) => (
+                  <Box key={group.label} sx={{ mb: 2 }}>
+                    {/* Group label */}
+                    <Typography
+                      sx={{
+                        fontFamily: D.body,
+                        fontSize: '0.63rem',
+                        fontWeight: 700,
+                        letterSpacing: '0.26em',
+                        textTransform: 'uppercase',
+                        color: D.terra,
+                        py: 1.5,
+                        borderBottom: `1px solid ${D.rule}`,
+                        mb: 0,
+                      }}
+                    >
+                      {group.label}
+                    </Typography>
+                    {group.features.map((f) => {
+                      const idx = globalIndex++;
+                      return <FeatureRow key={f.title} feature={f} index={idx} />;
+                    })}
+                  </Box>
+                ));
+              })()}
             </Box>
           </Box>
         </Container>
@@ -418,7 +459,7 @@ export default function Home() {
       <Box
         ref={ctaRef}
         sx={{
-          minHeight: '100vh',
+          py: { xs: 14, sm: 18 },
           backgroundColor: D.bg,
           borderTop: `1.5px solid ${D.rule}`,
           display: 'flex',
