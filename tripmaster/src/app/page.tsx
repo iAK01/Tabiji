@@ -200,6 +200,12 @@ export default function Home() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const [headlineReady, setHeadlineReady] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => setHeadlineReady(true), 350);
+    return () => clearTimeout(t);
+  }, []);
+
   const scrollTo = (ref: React.RefObject<HTMLDivElement | null>) =>
     ref.current?.scrollIntoView({ behavior: 'smooth' });
 
@@ -254,8 +260,43 @@ export default function Home() {
 
         <Box sx={{ width: 44, height: 3, backgroundColor: D.terra, borderRadius: 2, mb: 3.5 }} />
 
-        <Typography sx={{ fontFamily: D.display, fontSize: { xs: '2rem', sm: '2.8rem', md: '3.8rem' }, letterSpacing: '-0.03em', lineHeight: 1.1, color: D.navy, maxWidth: 700, mb: 2 }}>
-          A system for journeys,<br />not just plans.
+        <Typography
+          component="h1"
+          sx={{
+            fontFamily: D.display,
+            fontSize: { xs: '2rem', sm: '2.8rem', md: '3.8rem' },
+            letterSpacing: '-0.03em',
+            lineHeight: 1.1,
+            color: D.navy,
+            maxWidth: 700,
+            mb: 2,
+          }}
+        >
+          A system for{' '}
+          <Box
+            component="span"
+            sx={{
+              position: 'relative',
+              display: 'inline-block',
+              color: headlineReady ? D.terra : D.navy,
+              transition: 'color 0.6s ease',
+            }}
+          >
+            journeys
+            <Box
+              sx={{
+                position: 'absolute',
+                bottom: { xs: 1, md: 2 },
+                left: 0,
+                height: { xs: 2, md: 3 },
+                borderRadius: 2,
+                backgroundColor: D.terra,
+                width: headlineReady ? '100%' : '0%',
+                transition: 'width 0.7s cubic-bezier(0.4, 0, 0.2, 1) 0.15s',
+              }}
+            />
+          </Box>
+          ,<br />not just plans.
         </Typography>
 
         <Typography sx={{ fontFamily: D.body, fontSize: { xs: '0.88rem', sm: '0.98rem' }, lineHeight: 1.75, color: D.muted, maxWidth: 460, mb: 2 }}>
