@@ -12,7 +12,6 @@ import FolderOutlinedIcon from '@mui/icons-material/FolderOutlined';
 import PublicOutlinedIcon from '@mui/icons-material/PublicOutlined';
 import WbSunnyOutlinedIcon from '@mui/icons-material/WbSunnyOutlined';
 import TuneOutlinedIcon from '@mui/icons-material/TuneOutlined';
-import GroupOutlinedIcon from '@mui/icons-material/GroupOutlined';
 import NotificationsOutlinedIcon from '@mui/icons-material/NotificationsOutlined';
 import WifiOffIcon from '@mui/icons-material/WifiOff';
 
@@ -37,8 +36,7 @@ const FEATURE_GROUPS: { label: string; screen: string; features: Feature[] }[] =
     features: [
       { icon: RouteOutlinedIcon,        title: 'Plan from idea to arrival',      body: 'Build trips with multiple destinations, each with their own timing and purpose. Move through stages as plans develop.' },
       { icon: CalendarTodayOutlinedIcon, title: 'Your itinerary, your way',      body: 'Construct each day as it actually unfolds. Build manually or let AI draft a starting point. Add movement, pauses, and commitments. Adjust without breaking the structure.' },
-      { icon: LuggageOutlinedIcon,      title: 'Packing lists that think ahead', body: 'Generated from your trip length, transport, accommodation, and type. Items scale with time — three shirts, not just shirts. Flag what to do before you leave. Regenerate as plans change.' },
-      { icon: GroupOutlinedIcon,        title: 'Travel with others',             body: 'Trips can be shared. Roles are clear. Everyone works from the same version.' },
+      { icon: LuggageOutlinedIcon,      title: 'Packing lists that think ahead', body: 'Generated from your trip type, length, and transport. A three-day conference packs differently to a one-night client dinner — Tabiji knows the difference. Right adapter, right cables, right number of shirts. Flag what to sort before you leave.' },
     ],
   },
   {
@@ -56,7 +54,7 @@ const FEATURE_GROUPS: { label: string; screen: string; features: Feature[] }[] =
     screen: '/screens/tabs/weathertab.png',
     features: [
       { icon: PublicOutlinedIcon,  title: 'Know before you go',          body: 'Visa requirements, currency, time zones, electrical systems, language essentials, emergency numbers, local context. Surfaced without searching.' },
-      { icon: WbSunnyOutlinedIcon, title: 'Weather, in perspective',     body: 'Forecasts when they matter, climate normals when you are planning further ahead. Always in relation to where you are starting from.' },
+      { icon: WbSunnyOutlinedIcon, title: 'Weather, in perspective',     body: 'Forecast for the days ahead, climate context for trips planned further out. Useful when you\'re deciding whether to walk between venues or make the most of a free window in an unfamiliar city.' },
       { icon: TuneOutlinedIcon,    title: 'Built around how you travel', body: 'Set your home city, passport, and navigation preferences once. Every trip builds from that.' },
     ],
   },
@@ -266,9 +264,9 @@ export default function Home() {
             component="div"
             sx={{ fontFamily: D.display, fontSize: { xs: '2rem', sm: '2.8rem', md: '3.8rem' }, letterSpacing: '-0.03em', lineHeight: 1.15, color: D.navy }}
           >
-            A system for{' '}
+            Built for trips with{' '}
             <Box component="span" sx={{ position: 'relative', display: 'inline-block', color: headlineReady ? D.terra : D.navy, transition: 'color 0.6s ease' }}>
-              journeys,
+              purpose,
               <Box sx={{ position: 'absolute', bottom: { xs: 1, md: 3 }, left: 0, height: { xs: 2, md: 3 }, borderRadius: 2, backgroundColor: D.terra, width: headlineReady ? '100%' : '0%', transition: 'width 0.7s cubic-bezier(0.4, 0, 0.2, 1) 0.15s' }} />
             </Box>
           </Typography>
@@ -277,14 +275,15 @@ export default function Home() {
             component="div"
             sx={{ fontFamily: D.display, fontSize: { xs: '2rem', sm: '2.8rem', md: '3.8rem' }, letterSpacing: '-0.03em', lineHeight: 1.15, color: D.navy }}
           >
-            not just plans.
+            not just a plan.
           </Typography>
         </Box>
 
         <Typography sx={{ fontFamily: D.body, fontSize: { xs: '0.88rem', sm: '0.98rem' }, lineHeight: 1.75, color: D.muted, maxWidth: 460, mb: 2 }}>
-          Tabiji holds the entire shape of a trip — where you are going, how you
-          are moving, what you need, and everything that sits around it. Built
-          from the perspective of someone who travels with intent.
+          Flights, hotels, conference halls, client dinners. Tabiji maps the full
+          shape of a work trip — your fixed commitments and the gaps between them.
+          When an afternoon opens up in an unfamiliar city, you know what you have
+          next and what's around you.
         </Typography>
 
         <Typography sx={{ fontFamily: D.display, fontSize: { xs: '1.15rem', sm: '1.35rem' }, letterSpacing: '-0.02em', color: D.terra, mb: 3.5 }}>
@@ -380,10 +379,10 @@ export default function Home() {
                 What Tabiji does
               </Typography>
               <Typography sx={{ fontFamily: D.display, fontSize: { xs: '2.2rem', md: '2.8rem' }, letterSpacing: '-0.03em', lineHeight: 1.1, color: D.navy, mb: 2.5 }}>
-                Trips are not just destinations.
+                A work trip is a sequence of commitments.
               </Typography>
               <Typography sx={{ fontFamily: D.body, fontSize: '0.87rem', lineHeight: 1.75, color: D.muted, mb: 3.5 }}>
-                They are timelines, dependencies, and decisions. Tabiji holds all of it — from first idea to the journey home.
+                Airports, transfers, hotels, venues, meetings. Tabiji connects the schedule, the logistics, and everything around them — from the first brief to the flight home.
               </Typography>
 
               {/* Crossfading screenshots — desktop only */}
