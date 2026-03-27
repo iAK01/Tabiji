@@ -5,6 +5,7 @@ import { Box, Button, Typography } from '@mui/material';
 import { alpha } from '@mui/material/styles';
 import Image from 'next/image';
 import GoogleIcon from '@mui/icons-material/Google';
+import TabijiLogo from '@/components/ui/TabijiLogo';
 
 const D = {
   navy:    '#1D2642',
@@ -40,18 +41,7 @@ export default function SignInPage() {
         style={{ objectFit: 'contain', marginBottom: 20 }}
       />
 
-      <Typography
-        sx={{
-          fontFamily: D.display,
-          fontSize: { xs: '2.4rem', sm: '3rem' },
-          letterSpacing: '-0.04em',
-          lineHeight: 0.95,
-          color: D.navy,
-          mb: 1.5,
-        }}
-      >
-        Tabiji
-      </Typography>
+      <TabijiLogo sx={{ fontSize: { xs: '2.4rem', sm: '3rem' }, mb: 1.5 }} />
 
       <Typography
         sx={{

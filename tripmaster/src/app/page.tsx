@@ -14,6 +14,7 @@ import WbSunnyOutlinedIcon from '@mui/icons-material/WbSunnyOutlined';
 import TuneOutlinedIcon from '@mui/icons-material/TuneOutlined';
 import NotificationsOutlinedIcon from '@mui/icons-material/NotificationsOutlined';
 import WifiOffIcon from '@mui/icons-material/WifiOff';
+import TabijiLogo from '@/components/ui/TabijiLogo';
 
 const D = {
   navy:    '#1D2642',
@@ -248,9 +249,7 @@ export default function Home() {
           <Image src="/logomark.png" alt="Tabiji" width={46} height={46} style={{ objectFit: 'contain' }} />
         </Box>
 
-        <Typography sx={{ fontFamily: D.display, fontSize: { xs: '4rem', sm: '6rem', md: '9rem' }, letterSpacing: '-0.04em', lineHeight: 0.88, color: D.navy, mb: 1.5 }}>
-          Tabiji
-        </Typography>
+        <TabijiLogo sx={{ fontSize: { xs: '4rem', sm: '6rem', md: '9rem' }, mb: 1.5 }} />
 
         <Typography sx={{ fontFamily: D.body, fontSize: '0.72rem', letterSpacing: '0.3em', color: D.muted, textTransform: 'uppercase', mb: 3 }}>
           旅路
