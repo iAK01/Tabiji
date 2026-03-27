@@ -33,6 +33,7 @@ function Pin({
   return (
     <g
       style={{
+        transformOrigin: '0 0',
         opacity:    visible ? 1 : 0,
         transform:  visible
           ? `translate(${x0}px, ${y0}px) scale(${sx}, ${sy})`
@@ -117,13 +118,16 @@ export default function TabijiLogo({ sx, bgColor = BG }: TabijiLogoProps) {
     const jPinW = em * 0.28;
     const jPinH = jPinW * 1.4;
 
-    const tipY = i1.y;
+    // j.y is the top of the j glyph bounding rect, which includes the dot.
+    // The dot occupies roughly the top 10% of j.h.
+    // tipY is the bottom edge of the dot zone — pin tips point here.
+    const tipY = j.y + j.h * 0.10;
 
-    const eraseY = Math.min(j.y, -4);
-    const eraseH = tipY - eraseY + 2;
-
+    // Eraser covers from j.y to tipY with a small margin.
     const eraseX = j.x - 2;
+    const eraseY = j.y - 2;
     const eraseW = j.w + 4;
+    const eraseH = tipY - eraseY + 2;
 
     return (
       <svg
