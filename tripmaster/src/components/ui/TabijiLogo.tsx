@@ -9,7 +9,6 @@ const TERRA = '#C4714A';
 const FONT  = '"Archivo Black", sans-serif';
 
 // Teardrop location pin: circle body at top, tapered point at bottom
-// viewBox 0 0 10 14 — 10 units wide, 14 units tall
 const PIN_PATH = 'M5,14 C2.5,10.5 0,8.5 0,5 A5,5,0,1,1,10,5 C10,8.5 7.5,10.5 5,14Z';
 
 function Pin({
@@ -19,6 +18,7 @@ function Pin({
   visible,
   width,
   height,
+  top,
 }: {
   color: string;
   delay: number;
@@ -26,6 +26,7 @@ function Pin({
   visible: boolean;
   width: string;
   height: string;
+  top: string;
 }) {
   return (
     <Box
@@ -33,20 +34,22 @@ function Pin({
       aria-hidden="true"
       sx={{
         position: 'absolute',
-        // top: '-0.07em' places the pin so its body sits right at the tittle zone.
-        // Larger j pin (greater height) extends further down, covering the j dot.
-        top: '-0.07em',
-        left: '50%',
+        top,
+        // Slight rightward nudge — optical centre of Archivo Black
+        // narrow glyphs sits just right of the geometric span centre
+        left: '52%',
         width,
         height,
         display: 'inline-block',
         lineHeight: 1,
+        // Explicit stacking above the glyph content
+        zIndex: 2,
         transform: visible
           ? 'translateX(-50%) translateY(0)'
-          : 'translateX(-50%) translateY(-0.25em)',
+          : 'translateX(-50%) translateY(-0.30em)',
         opacity: visible ? 1 : 0,
         transition: `
-          opacity  180ms ease                                     ${delay}ms,
+          opacity   180ms ease                                      ${delay}ms,
           transform ${duration}ms cubic-bezier(0.34, 1.18, 0.64, 1) ${delay}ms
         `,
         pointerEvents: 'none',
@@ -58,7 +61,6 @@ function Pin({
         style={{ width: '100%', height: '100%', display: 'block' }}
       >
         <path d={PIN_PATH} fill={color} />
-        {/* subtle inner highlight */}
         <circle cx="5" cy="4.5" r="2" fill="rgba(255,255,255,0.30)" />
       </svg>
     </Box>
@@ -73,6 +75,7 @@ function PinnedChar({
   visible,
   pinWidth,
   pinHeight,
+  pinTop,
 }: {
   char: string;
   pinColor: string;
@@ -81,6 +84,7 @@ function PinnedChar({
   visible: boolean;
   pinWidth: string;
   pinHeight: string;
+  pinTop: string;
 }) {
   return (
     <Box component="span" sx={{ position: 'relative', display: 'inline-block' }}>
@@ -92,6 +96,7 @@ function PinnedChar({
         visible={visible}
         width={pinWidth}
         height={pinHeight}
+        top={pinTop}
       />
     </Box>
   );
@@ -124,40 +129,49 @@ export default function TabijiLogo({ sx }: TabijiLogoProps) {
         ...(Array.isArray(sx) ? sx : sx ? [sx] : []),
       ]}
     >
-      {/* "Tab" — plain, no pins */}
+      {/* "Tab" — plain */}
       Tab
 
-      {/* first i → dotless ı, navy, drops fastest */}
+      {/* First i — dotless ı, drops first */}
       <PinnedChar
         char="ı"
         pinColor={NAVY}
         delay={0}
         duration={460}
         visible={visible}
-        pinWidth="0.17em"
-        pinHeight="0.24em"
+        pinWidth="0.16em"
+        pinHeight="0.22em"
+        pinTop="-0.07em"
       />
 
-      {/* j → featured pin, terracotta, slightly larger, drops second */}
+      {/*
+        j — dotless ȷ (U+0237) eliminates the glyph dot entirely,
+        so the terracotta pin sits clean with no dot underneath.
+        Raised higher (pinTop: -0.22em) so the three pins form
+        a chevron / mountain peak outline.
+        Drops LAST — larger, featured colour, most impact.
+      */}
       <PinnedChar
-        char="j"
+        char="ȷ"
         pinColor={TERRA}
-        delay={200}
-        duration={580}
+        delay={460}
+        duration={720}
         visible={visible}
-        pinWidth="0.20em"
+        pinWidth="0.21em"
         pinHeight="0.29em"
+        pinTop="-0.22em"
       />
 
-      {/* final i → dotless ı, navy, drops slowest */}
+      {/* Final i — dotless ı, drops second */}
       <PinnedChar
         char="ı"
         pinColor={NAVY}
-        delay={420}
-        duration={720}
+        delay={220}
+        duration={580}
         visible={visible}
-        pinWidth="0.17em"
-        pinHeight="0.24em"
+        pinWidth="0.16em"
+        pinHeight="0.22em"
+        pinTop="-0.07em"
       />
     </Box>
   );
