@@ -15,11 +15,17 @@ const PIN_PATH = 'M5,14 C2.5,10.5 0,8.5 0,5 A5,5,0,1,1,10,5 C10,8.5 7.5,10.5 5,1
 function Pin({
   color,
   delay,
+  duration,
   visible,
+  width,
+  height,
 }: {
   color: string;
   delay: number;
+  duration: number;
   visible: boolean;
+  width: string;
+  height: string;
 }) {
   return (
     <Box
@@ -27,21 +33,21 @@ function Pin({
       aria-hidden="true"
       sx={{
         position: 'absolute',
-        // Sits just above the letter cap, where the tittle lives.
-        // pin height ~0.20em, positioned so its tip covers the dot zone.
+        // top: '-0.07em' places the pin so its body sits right at the tittle zone.
+        // Larger j pin (greater height) extends further down, covering the j dot.
         top: '-0.07em',
         left: '50%',
-        width: '0.14em',
-        height: '0.20em',
+        width,
+        height,
         display: 'inline-block',
         lineHeight: 1,
         transform: visible
           ? 'translateX(-50%) translateY(0)'
-          : 'translateX(-50%) translateY(-0.22em)',
+          : 'translateX(-50%) translateY(-0.25em)',
         opacity: visible ? 1 : 0,
         transition: `
-          opacity  200ms ease                                   ${delay}ms,
-          transform 520ms cubic-bezier(0.34, 1.22, 0.64, 1)   ${delay}ms
+          opacity  180ms ease                                     ${delay}ms,
+          transform ${duration}ms cubic-bezier(0.34, 1.18, 0.64, 1) ${delay}ms
         `,
         pointerEvents: 'none',
       }}
@@ -52,7 +58,7 @@ function Pin({
         style={{ width: '100%', height: '100%', display: 'block' }}
       >
         <path d={PIN_PATH} fill={color} />
-        {/* subtle inner highlight — gives the pin a little depth */}
+        {/* subtle inner highlight */}
         <circle cx="5" cy="4.5" r="2" fill="rgba(255,255,255,0.30)" />
       </svg>
     </Box>
@@ -63,17 +69,30 @@ function PinnedChar({
   char,
   pinColor,
   delay,
+  duration,
   visible,
+  pinWidth,
+  pinHeight,
 }: {
   char: string;
   pinColor: string;
   delay: number;
+  duration: number;
   visible: boolean;
+  pinWidth: string;
+  pinHeight: string;
 }) {
   return (
     <Box component="span" sx={{ position: 'relative', display: 'inline-block' }}>
       {char}
-      <Pin color={pinColor} delay={delay} visible={visible} />
+      <Pin
+        color={pinColor}
+        delay={delay}
+        duration={duration}
+        visible={visible}
+        width={pinWidth}
+        height={pinHeight}
+      />
     </Box>
   );
 }
@@ -102,21 +121,44 @@ export default function TabijiLogo({ sx }: TabijiLogoProps) {
           display: 'inline-block',
           userSelect: 'none',
         },
-        // Merge caller sx — supports both object and array forms
         ...(Array.isArray(sx) ? sx : sx ? [sx] : []),
       ]}
     >
       {/* "Tab" — plain, no pins */}
       Tab
 
-      {/* first  i → dotless ı, navy pin, drop first */}
-      <PinnedChar char="ı" pinColor={NAVY}  delay={0}   visible={visible} />
+      {/* first i → dotless ı, navy, drops fastest */}
+      <PinnedChar
+        char="ı"
+        pinColor={NAVY}
+        delay={0}
+        duration={460}
+        visible={visible}
+        pinWidth="0.17em"
+        pinHeight="0.24em"
+      />
 
-      {/* j → pin covers the dot; terracotta accent, drops second */}
-      <PinnedChar char="j" pinColor={TERRA} delay={180} visible={visible} />
+      {/* j → featured pin, terracotta, slightly larger, drops second */}
+      <PinnedChar
+        char="j"
+        pinColor={TERRA}
+        delay={200}
+        duration={580}
+        visible={visible}
+        pinWidth="0.20em"
+        pinHeight="0.29em"
+      />
 
-      {/* final  i → dotless ı, navy pin, drops last */}
-      <PinnedChar char="ı" pinColor={NAVY}  delay={360} visible={visible} />
+      {/* final i → dotless ı, navy, drops slowest */}
+      <PinnedChar
+        char="ı"
+        pinColor={NAVY}
+        delay={420}
+        duration={720}
+        visible={visible}
+        pinWidth="0.17em"
+        pinHeight="0.24em"
+      />
     </Box>
   );
 }
