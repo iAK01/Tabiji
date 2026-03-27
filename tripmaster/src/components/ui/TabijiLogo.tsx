@@ -103,8 +103,9 @@ export default function TabijiLogo({ sx, bgColor = BG }: TabijiLogoProps) {
     const j  = charPos(4, 5);
     const i2 = charPos(5, 6);
 
-    // em ≈ fontSize in px. Container height = fontSize × lineHeight (0.88).
-    const em = cRect.height / 0.88;
+    // Read the actual computed font-size directly — far more reliable than
+    // dividing the container height by the lineHeight assumption.
+    const em = parseFloat(window.getComputedStyle(textEl).fontSize);
 
     setLayout({ svgW: cRect.width, svgH: cRect.height, em, i1, j, i2 });
   }, []);
@@ -132,18 +133,27 @@ export default function TabijiLogo({ sx, bgColor = BG }: TabijiLogoProps) {
     const iPinW = em * 0.16;
     const iPinH = em * 0.22;
     const jPinW = em * 0.21;
-    const jPinH = em * 0.34;   // taller → circle sits higher → mountain peak
+    const jPinH = em * 0.40;   // taller → circle sits higher → mountain peak
 
-    // Dot zone: top 10% of em is approximately where the tittle lives
-    const dotZone = em * 0.10;
+    // ── Vertical anchor from the measured j glyph ───────────────────────
+    // j.y  = top of j bounding rect   = top of the j dot (can be negative:
+    //        the dot overhangs above the CSS line-box with lineHeight 0.88)
+    // j.h  = full glyph height        = dot-top to descender-bottom
+    //
+    // The j dot occupies roughly the top 10–12 % of j.h.
+    // We place the pin TIPS just at the bottom edge of that dot zone so the
+    // pin body rises cleanly above it.  All three tips share the same tipY
+    // so the mountain-peak shape comes entirely from the j pin being taller.
+    const tipY = j.y + j.h * 0.12;
 
-    // All three pin tips sit at the same y (dot zone top + a touch)
-    const tipY = i1.y + dotZone * 1.1;
-
-    // j dot eraser: covers the j glyph dot (navy) before terracotta pin appears
-    const jDotCx = j.x + j.w / 2;
-    const jDotCy = j.y + dotZone * 0.5;
-    const jDotR  = dotZone * 0.75;
+    // Eraser: a filled rect that blots out the j dot with the page background.
+    // Anchored directly to j's measured bounds — no em arithmetic needed.
+    // Always visible once the layout is measured (no opacity animation) so
+    // there is never a frame where the dot shows through.
+    const eraseX = j.x - 2;
+    const eraseY = j.y;
+    const eraseW = j.w + 4;
+    const eraseH = j.h * 0.14;   // covers the full dot area with a little margin
 
     return (
       <svg
@@ -154,18 +164,11 @@ export default function TabijiLogo({ sx, bgColor = BG }: TabijiLogoProps) {
         }}
         xmlns="http://www.w3.org/2000/svg"
       >
-        {/*
-          Erase the j dot. This circle uses the page background colour so
-          the navy j dot disappears. It fades in instantly at the same moment
-          the j pin starts to drop, so they animate as one unit.
-        */}
-        <circle
-          cx={jDotCx} cy={jDotCy} r={jDotR}
+        {/* j dot eraser — always on, positioned from measured glyph bounds */}
+        <rect
+          x={eraseX} y={eraseY}
+          width={eraseW} height={eraseH}
           fill={bgColor}
-          style={{
-            opacity:    visible ? 1 : 0,
-            transition: 'opacity 1ms ease 460ms',
-          }}
         />
 
         {/* First ı — navy, drops first */}
