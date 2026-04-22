@@ -269,9 +269,16 @@ export async function POST(req: Request) {
   // nowMs is UTC epoch milliseconds — timezone-agnostic reference point
   const nowMs = Date.now();
 
+  // Safety net: activate any confirmed trips whose window has arrived,
+  // in case the trip-status cron is misconfigured or delayed.
+  const activationThreshold = new Date(nowMs + 2 * 24 * 60 * 60 * 1000);
+  await Trip.updateMany(
+    { status: 'confirmed', deleted: false, startDate: { $lte: activationThreshold }, endDate: { $gte: new Date(nowMs) } },
+    { $set: { status: 'active' } }
+  );
+
   // =========================================================================
   // PASS 1: Active trips — full itinerary / logistics / doc / venue processing
-  // (unchanged from original — no todos in this pass)
   // =========================================================================
 
   const activeTrips = await Trip.find({ status: 'active', deleted: false });

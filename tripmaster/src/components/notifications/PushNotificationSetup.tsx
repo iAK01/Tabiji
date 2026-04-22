@@ -8,6 +8,7 @@ import NotificationsIcon        from '@mui/icons-material/Notifications';
 import NotificationsOffIcon     from '@mui/icons-material/NotificationsOff';
 import NotificationsActiveIcon  from '@mui/icons-material/NotificationsActive';
 import SendIcon                 from '@mui/icons-material/Send';
+import RefreshIcon              from '@mui/icons-material/Refresh';
 
 type PermissionState = 'unsupported' | 'prompt' | 'granted' | 'denied';
 
@@ -23,12 +24,13 @@ return Uint8Array.from([...raw].map(c => c.charCodeAt(0))).buffer as ArrayBuffer
 }
 
 export default function PushNotificationSetup() {
-  const [permission,   setPermission]   = useState<PermissionState>('prompt');
-  const [subscribed,   setSubscribed]   = useState(false);
-  const [enabling,     setEnabling]     = useState(false);
-  const [sending,      setSending]      = useState(false);
-  const [testResult,   setTestResult]   = useState<string | null>(null);
-  const [error,        setError]        = useState<string | null>(null);
+  const [permission,    setPermission]    = useState<PermissionState>('prompt');
+  const [subscribed,    setSubscribed]    = useState(false);
+  const [enabling,      setEnabling]      = useState(false);
+  const [sending,       setSending]       = useState(false);
+  const [resubscribing, setResubscribing] = useState(false);
+  const [testResult,    setTestResult]    = useState<string | null>(null);
+  const [error,         setError]         = useState<string | null>(null);
 
   // ── Check current state on mount ─────────────────────────────────────────
   useEffect(() => {
@@ -133,6 +135,51 @@ export default function PushNotificationSetup() {
     }
   };
 
+  // ── Re-subscribe this device ─────────────────────────────────────────────
+  // Unsubscribes the current service-worker registration and creates a fresh
+  // subscription for this origin. Use this after moving to a new domain.
+  const handleResubscribe = async () => {
+    setResubscribing(true);
+    setTestResult(null);
+    setError(null);
+
+    try {
+      const reg = await navigator.serviceWorker.ready;
+
+      // Remove existing subscription from push manager + server
+      const existing = await reg.pushManager.getSubscription();
+      if (existing) {
+        await fetch('/api/push/subscribe', {
+          method:  'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ endpoint: existing.endpoint }),
+        });
+        await existing.unsubscribe();
+      }
+
+      // Create a fresh subscription for the current origin
+      const sub = await reg.pushManager.subscribe({
+        userVisibleOnly:      true,
+        applicationServerKey: urlBase64ToUint8Array(process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY!),
+      });
+
+      const res = await fetch('/api/push/subscribe', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ subscription: sub.toJSON() }),
+      });
+
+      if (!res.ok) throw new Error('Failed to save subscription');
+
+      setSubscribed(true);
+      setTestResult('Re-subscribed — this device is now registered for notifications.');
+    } catch (err: any) {
+      setError(err?.message ?? 'Something went wrong');
+    } finally {
+      setResubscribing(false);
+    }
+  };
+
   // ── Unsupported ───────────────────────────────────────────────────────────
   if (permission === 'unsupported') {
     return (
@@ -206,6 +253,16 @@ export default function PushNotificationSetup() {
                 '&:hover': { borderColor: '#455f24', backgroundColor: alpha('#55702C', 0.05) } }}
             >
               {sending ? 'Sending…' : 'Send test notification'}
+            </Button>
+            <Button
+              variant="outlined"
+              onClick={handleResubscribe}
+              disabled={resubscribing}
+              startIcon={resubscribing ? <CircularProgress size={16} /> : <RefreshIcon />}
+              sx={{ fontWeight: 700, borderColor: 'divider', color: 'text.secondary',
+                '&:hover': { backgroundColor: alpha('#000', 0.04) } }}
+            >
+              {resubscribing ? 'Re-subscribing…' : 'Re-subscribe this device'}
             </Button>
             <Button
               variant="text"
