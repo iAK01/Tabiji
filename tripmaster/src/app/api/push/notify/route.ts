@@ -261,6 +261,7 @@ async function logAndSend(
 export async function POST(req: Request) {
   const secret = req.headers.get('x-cron-secret');
   if (secret !== process.env.CRON_SECRET) {
+    console.log('[notify] 403 — CRON_SECRET mismatch. Received:', secret?.slice(0, 8), 'Expected starts with:', process.env.CRON_SECRET?.slice(0, 8));
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 
@@ -282,6 +283,7 @@ export async function POST(req: Request) {
   // =========================================================================
 
   const activeTrips = await Trip.find({ status: 'active', deleted: false });
+  console.log(`[notify] Found ${activeTrips.length} active trip(s)`);
 
   let totalSent = 0;
 
@@ -297,7 +299,11 @@ export async function POST(req: Request) {
     const nowDt = DateTime.now().setZone(tz);
 
     const user = await User.findById(userId);
-    if (!user?.pushSubscriptions?.length) continue;
+    if (!user?.pushSubscriptions?.length) {
+      console.log(`[notify] Trip ${tripId}: user ${userId} has no push subscriptions — skipping`);
+      continue;
+    }
+    console.log(`[notify] Trip ${tripId}: user ${userId} has ${user.pushSubscriptions.length} subscription(s)`);
 
     const subs             = user.pushSubscriptions;
     const invalidEndpoints: string[] = [];
@@ -625,5 +631,6 @@ const windowEnd   = new Date(nowMs);
     }
   }
 
+  console.log(`[notify] Done — sent ${totalSent} notification(s)`);
   return NextResponse.json({ sent: totalSent, checkedAt: new Date().toISOString() });
 }
