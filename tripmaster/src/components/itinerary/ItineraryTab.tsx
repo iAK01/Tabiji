@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect }   from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   DndContext, DragEndEvent,
   PointerSensor, TouchSensor,
@@ -60,6 +60,28 @@ export default function ItineraryTab({ tripId, startDate, endDate, fabTrigger }:
     type:      string;
     editStop?: Stop;
   }>({ open: false, time: '09:00', type: 'activity' });
+
+  const nowLineRef = useRef<HTMLDivElement>(null);
+
+  // ── Auto-select today when days load ─────────────────────────────────────────
+  useEffect(() => {
+    if (days.length === 0) return;
+    const todayStr = new Date().toDateString();
+    const idx = days.findIndex(d => new Date(d.date).toDateString() === todayStr);
+    if (idx !== -1) setActiveDayIdx(idx);
+  }, [days]);
+
+  // ── Scroll to current time when viewing today ─────────────────────────────────
+  useEffect(() => {
+    if (!nowLineRef.current) return;
+    const activeDay = days[activeDayIdx];
+    if (!activeDay) return;
+    const todayStr = new Date().toDateString();
+    if (new Date(activeDay.date).toDateString() !== todayStr) return;
+    setTimeout(() => {
+      nowLineRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 100);
+  }, [activeDayIdx, days]);
 
   // ── DnD sensors ──────────────────────────────────────────────────────────────
   const sensors = useSensors(
@@ -637,6 +659,42 @@ export default function ItineraryTab({ tripId, startDate, endDate, fabTrigger }:
                 }}
               >
                 <GridLines pxPerMin={pxPerMin} />
+
+                {/* Current time indicator — only shown when viewing today */}
+                {(() => {
+                  const todayStr = new Date().toDateString();
+                  const isToday  = activeDay && new Date(activeDay.date).toDateString() === todayStr;
+                  if (!isToday) return null;
+                  const now     = new Date();
+                  const nowMins = now.getHours() * 60 + now.getMinutes() - DAY_START_HOUR * 60;
+                  if (nowMins < 0 || nowMins > TOTAL_MINS) return null;
+                  const top = nowMins * pxPerMin + 16;
+                  return (
+                    <Box
+                      ref={nowLineRef}
+                      sx={{
+                        position:  'absolute',
+                        top,
+                        left:      0,
+                        right:     0,
+                        height:    2,
+                        backgroundColor: '#e53935',
+                        zIndex:    10,
+                        pointerEvents: 'none',
+                        '&::before': {
+                          content: '""',
+                          position: 'absolute',
+                          left: -4,
+                          top: -4,
+                          width: 10,
+                          height: 10,
+                          borderRadius: '50%',
+                          backgroundColor: '#e53935',
+                        },
+                      }}
+                    />
+                  );
+                })()}
 
                 {freeSlots(activeDay.stops).map((slot, i) => (
                   <FreeGap

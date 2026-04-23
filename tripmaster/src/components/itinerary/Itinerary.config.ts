@@ -70,6 +70,7 @@ export interface Stop {
   completed?: boolean;
   source?: string;
   icon?: string;
+  notificationLeadMins?: number | null;
   travelToNext?: {
     duration:    number;
     mode:        string;

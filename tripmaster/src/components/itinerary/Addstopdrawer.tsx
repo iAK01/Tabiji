@@ -48,14 +48,25 @@ export function AddStopDrawer({
 }: Props) {
   const isEditing = !!editStop;
 
+  const NOTIFY_OPTIONS: { label: string; value: number | null }[] = [
+    { label: 'Off',  value: null },
+    { label: '5m',   value: 5    },
+    { label: '15m',  value: 15   },
+    { label: '30m',  value: 30   },
+    { label: '45m',  value: 45   },
+    { label: '1h',   value: 60   },
+    { label: '2h',   value: 120  },
+  ];
+
   const [form, setForm] = useState({
-    name:           '',
-    type:           defaultType,
-    scheduledStart: defaultTime,
-    duration:       60,
-    notes:          '',
-    address:        '',
-    coordinates:    undefined as { lat: number; lng: number } | undefined,
+    name:                  '',
+    type:                  defaultType,
+    scheduledStart:        defaultTime,
+    duration:              60,
+    notes:                 '',
+    address:               '',
+    coordinates:           undefined as { lat: number; lng: number } | undefined,
+    notificationLeadMins:  30 as number | null,
   });
   const [saving,       setSaving]       = useState(false);
   const [showExtras,   setShowExtras]   = useState(false);
@@ -68,25 +79,26 @@ export function AddStopDrawer({
           : editStop.scheduledStart
         : defaultTime;
       setForm({
-        name:           editStop.name ?? '',
-        type:           editStop.type ?? defaultType,
-        scheduledStart: timeStr,
-        duration:       stopDuration(editStop),
-        notes:          editStop.notes ?? '',
-        address:        editStop.address ?? '',
-        coordinates:    editStop.coordinates,
+        name:                 editStop.name ?? '',
+        type:                 editStop.type ?? defaultType,
+        scheduledStart:       timeStr,
+        duration:             stopDuration(editStop),
+        notes:                editStop.notes ?? '',
+        address:              editStop.address ?? '',
+        coordinates:          editStop.coordinates,
+        notificationLeadMins: editStop.notificationLeadMins ?? 30,
       });
-      // Show extras if editing and they have content
       setShowExtras(!!(editStop.notes || editStop.address));
     } else {
       setForm({
-        name:           '',
-        type:           defaultType,
-        scheduledStart: defaultTime,
-        duration:       DEFAULT_DURATIONS[defaultType] ?? 60,
-        notes:          '',
-        address:        '',
-        coordinates:    undefined,
+        name:                 '',
+        type:                 defaultType,
+        scheduledStart:       defaultTime,
+        duration:             DEFAULT_DURATIONS[defaultType] ?? 60,
+        notes:                '',
+        address:              '',
+        coordinates:          undefined,
+        notificationLeadMins: 30,
       });
       setShowExtras(false);
     }
@@ -283,6 +295,46 @@ export function AddStopDrawer({
           >
             <Typography sx={{ fontFamily: D.body, fontSize: '1.2rem', lineHeight: 1, fontWeight: 700 }}>+</Typography>
           </IconButton>
+        </Box>
+      </Box>
+
+      {/* ── Notify me ── */}
+      <Box sx={{ mb: 2.5 }}>
+        <Typography sx={{
+          fontFamily: D.body, fontSize: '0.62rem', fontWeight: 800,
+          letterSpacing: '0.08em', textTransform: 'uppercase',
+          color: D.muted, mb: 0.75,
+        }}>
+          Notify me before
+        </Typography>
+        <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
+          {NOTIFY_OPTIONS.map(opt => {
+            const isActive = form.notificationLeadMins === opt.value;
+            return (
+              <Box
+                key={String(opt.value)}
+                onClick={() => setForm(f => ({ ...f, notificationLeadMins: opt.value }))}
+                sx={{
+                  px: 1.25, py: 0.4,
+                  borderRadius: '20px',
+                  border: `1.5px solid ${isActive ? D.navy : alpha(D.navy, 0.15)}`,
+                  backgroundColor: isActive ? D.navy : 'transparent',
+                  cursor: 'pointer',
+                  transition: 'all 0.12s',
+                  '&:hover': { borderColor: alpha(D.navy, 0.4) },
+                  '&:active': { transform: 'scale(0.95)' },
+                }}
+              >
+                <Typography sx={{
+                  fontFamily: D.body, fontSize: '0.72rem', fontWeight: 700,
+                  color: isActive ? '#fff' : D.muted,
+                  lineHeight: 1.4,
+                }}>
+                  {opt.label}
+                </Typography>
+              </Box>
+            );
+          })}
         </Box>
       </Box>
 

@@ -440,19 +440,28 @@ export async function POST(req: Request) {
         const eventDt = stopToLuxon(day.date, stop, tz);
         if (!eventDt) continue;
 
-        const navLead = NAV_LEAD[stop.type] ?? 30 * 60 * 1000;
-        const docLead = DOC_LEAD[stop.type] ?? null;
+        const hasCustomLead = stop.notificationLeadMins != null;
+        const navLead = hasCustomLead
+          ? (stop.notificationLeadMins as number) * 60 * 1000
+          : NAV_LEAD[stop.type] ?? 30 * 60 * 1000;
+        const docLead = hasCustomLead ? null : (DOC_LEAD[stop.type] ?? null);
         const kind    = TYPE_EMOJI[stop.type] ?? 'Event';
         const timeStr = eventDt.toFormat('HH:mm');
         const key     = stop._id?.toString() ?? `${day.date}-${stop.name}`;
         const tripUrl = `/trips/${tripId}?tab=2`;
 
-        // ── NAV ─────────────────────────────────────────────────────────
-        if (navLead > 0 && isInWindow(eventDt, navLead, nowMs) && stop.address) {
-          const navUrl = buildNavUrl(stop.address, stop.coordinates, stop.type, drivingNavApp);
-          const sent = await logAndSend(userId, tripId, key, `${stop.type}_nav`, subs, {
+        // ── NAV / REMINDER ───────────────────────────────────────────────
+        if (navLead > 0 && isInWindow(eventDt, navLead, nowMs)) {
+          const notifType = hasCustomLead ? `${stop.type}_reminder` : `${stop.type}_nav`;
+          const navUrl = stop.address
+            ? buildNavUrl(stop.address, stop.coordinates, stop.type, drivingNavApp)
+            : null;
+          const body = stop.address
+            ? [`${stop.address} - ${timeStr}`, navUrl ? 'Tap for navigation' : ''].filter(Boolean).join('\n')
+            : `${timeStr}`;
+          const sent = await logAndSend(userId, tripId, key, notifType, subs, {
             title: `${kind}: ${stop.name} in ${leadLabel(navLead)}`,
-            body:  [`${stop.address} - ${timeStr}`, 'Tap for navigation'].join('\n'),
+            body,
             url:   navUrl ?? tripUrl,
             tag:   `stop-nav-${key}`,
           }, invalidEndpoints);

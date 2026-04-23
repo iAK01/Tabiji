@@ -118,7 +118,7 @@ export function StopBlock({ stop, onDelete, onClick, onResize, pxPerMin, isMobil
     >
       <Box
         ref={setNodeRef}
-        onClick={isDragging || isResizing ? undefined : onClick}
+        onClick={isDragging || isResizing ? undefined : (e) => { e.stopPropagation(); onClick?.(); }}
         {...listeners}
         {...attributes}
         style={{

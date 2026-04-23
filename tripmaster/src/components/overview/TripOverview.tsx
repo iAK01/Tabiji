@@ -406,9 +406,18 @@ export default function TripOverview({ trip, onNavigate }: Props) {
   const hasResources = contacts.length > 0 || keyLinks.length > 0 || docCount > 0 || notes.length > 0;
 
   // ── Countdown label ───────────────────────────────────────────────────────
-  const countdownNumber = isPast ? null : isToday ? 0 : daysUntil;
-  const countdownLabel  = isPast ? 'TRIP COMPLETE' : isToday ? 'DEPARTING TODAY' : 'DAYS TO GO';
-  const accentColor     = isToday ? '#2e7d32' : isPast ? D.muted : daysUntil <= 7 ? '#ed6c02' : D.navy;
+  const currentDayNum   = isActive ? Math.floor((today.getTime() - departure.getTime()) / 86400000) + 1 : null;
+  const tripTotalDays   = isActive ? Math.round((tripEnd.getTime()  - departure.getTime()) / 86400000) + 1 : null;
+
+  const countdownNumber = isPast ? null : isActive ? currentDayNum : daysUntil;
+  const countdownLabel  = isPast   ? 'TRIP COMPLETE'
+                        : isActive ? `DAY ${currentDayNum} OF ${tripTotalDays}`
+                        : isToday  ? 'DEPARTING TODAY'
+                        : 'DAYS TO GO';
+  const accentColor     = isActive ? '#2e7d32'
+                        : isPast   ? D.muted
+                        : daysUntil <= 7 ? '#ed6c02'
+                        : D.navy;
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: { xs: 1.5, sm: 2 } }}>
@@ -501,16 +510,14 @@ export default function TripOverview({ trip, onNavigate }: Props) {
                 <>
                   <Typography sx={{
                     fontFamily: D.display,
-                    fontSize: isToday ? '3rem' : '4.5rem',
+                    fontSize: '4.5rem',
                     color: accentColor,
                     lineHeight: 1,
                     letterSpacing: '-0.04em',
                   }}>
-                    {isToday ? 'TODAY' : countdownNumber}
+                    {countdownNumber}
                   </Typography>
-                  {!isToday && (
-                    <SectionTag color={alpha(accentColor, 0.7)}>{countdownLabel}</SectionTag>
-                  )}
+                  <SectionTag color={alpha(accentColor, 0.7)}>{countdownLabel}</SectionTag>
                 </>
               ) : (
                 <Typography sx={{ fontFamily: D.display, fontSize: '1.8rem', color: D.muted, lineHeight: 1, letterSpacing: '-0.02em' }}>
