@@ -42,6 +42,7 @@ const TripFileSchema = new Schema({
       'observation',
       'reminder',
       'recommendation',
+      'lead',
       // ── Todo types ──
       'task',
       'packing_advisory',

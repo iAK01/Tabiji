@@ -6,7 +6,7 @@ import User from '@/lib/mongodb/models/User';
 import TripFile from '@/lib/mongodb/models/TripFile';
 import { uploadFile } from '@/lib/utils/storage';
 
-const ATTACHMENT_MIME = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/heic']);
+const ATTACHMENT_MIME = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif']);
 
 async function processAttachments(
   formData: FormData, userId: string, tripId: string

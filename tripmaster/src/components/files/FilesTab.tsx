@@ -156,6 +156,7 @@ const NOTE_TYPES = [
   { value: 'general',        label: 'General',        Icon: NotesIcon },
   { value: 'observation',    label: 'Observation',    Icon: LightbulbIcon },
   { value: 'reminder',       label: 'Reminder',       Icon: AlarmIcon },
+  { value: 'lead',           label: 'Lead',           Icon: BoltIcon },
   { value: 'recommendation', label: 'Recommendation', Icon: StarIcon },
 ] as const;
 
@@ -186,6 +187,32 @@ const BLANK_NOTE_FORM    = { name: '', type: 'general' as NoteTypeValue,  body: 
 const BLANK_TODO_FORM    = { name: '', body: '', dueDate: '', dueTime: '', notificationEnabled: false };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function compressImage(file: File): Promise<File> {
+  return new Promise(resolve => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const MAX = 1920;
+      let w = img.naturalWidth, h = img.naturalHeight;
+      if (w > MAX || h > MAX) {
+        const r = Math.min(MAX / w, MAX / h);
+        w = Math.round(w * r); h = Math.round(h * r);
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = w; canvas.height = h;
+      canvas.getContext('2d')!.drawImage(img, 0, 0, w, h);
+      canvas.toBlob(blob => {
+        if (!blob) { resolve(file); return; }
+        const base = file.name.replace(/\.[^.]+$/, '');
+        resolve(new File([blob], `${base}.jpg`, { type: 'image/jpeg' }));
+      }, 'image/jpeg', 0.85);
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); resolve(file); };
+    img.src = url;
+  });
+}
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024)    return `${bytes} B`;
@@ -427,17 +454,37 @@ function AttachmentPicker({
 }
 
 function AttachmentThumbnails({ attachments }: { attachments?: TripFile['attachments'] }) {
+  const [lightbox, setLightbox] = useState<string | null>(null);
   if (!attachments?.length) return null;
   return (
-    <Box sx={{ display: 'flex', gap: 0.75, mt: 1, flexWrap: 'wrap' }}>
-      {attachments.map((att, i) => (
-        <Box key={i} component="a" href={att.gcsUrl} target="_blank" rel="noopener noreferrer"
-          sx={{ display: 'block', width: 52, height: 52, borderRadius: 1, overflow: 'hidden', flexShrink: 0 }}>
-          <Box component="img" src={att.gcsUrl}
-            sx={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
-        </Box>
-      ))}
-    </Box>
+    <>
+      <Box sx={{ display: 'flex', gap: 0.75, mt: 1, flexWrap: 'wrap' }}>
+        {attachments.map((att, i) => (
+          <Box key={i} onClick={() => setLightbox(att.gcsUrl)} sx={{
+            width: 52, height: 52, borderRadius: 1, overflow: 'hidden', flexShrink: 0,
+            cursor: 'pointer', '&:hover': { opacity: 0.82 },
+          }}>
+            <Box component="img" src={att.gcsUrl}
+              sx={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+          </Box>
+        ))}
+      </Box>
+
+      <Dialog open={!!lightbox} onClose={() => setLightbox(null)} maxWidth="md" fullWidth
+        slotProps={{ paper: { sx: { backgroundColor: '#000', m: { xs: 0.5, sm: 2 }, borderRadius: 2 } } }}>
+        <DialogContent sx={{ p: 0, position: 'relative', textAlign: 'center' }}>
+          <IconButton onClick={() => setLightbox(null)} sx={{
+            position: 'absolute', top: 8, right: 8, zIndex: 1,
+            backgroundColor: 'rgba(0,0,0,0.55)', color: 'white',
+            '&:hover': { backgroundColor: 'rgba(0,0,0,0.8)' },
+          }}>
+            <CloseIcon />
+          </IconButton>
+          <Box component="img" src={lightbox ?? ''}
+            sx={{ maxWidth: '100%', maxHeight: '88vh', objectFit: 'contain', display: 'block', mx: 'auto' }} />
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 
@@ -973,6 +1020,15 @@ export default function FilesTab({ tripId, fabTrigger }: FilesTabProps) {
   const dueDateRef = useRef<HTMLInputElement>(null);
   const dueTimeRef = useRef<HTMLInputElement>(null);
 
+  const addAttachments = useCallback((files: File[]) => {
+    Promise.all(files.map(compressImage)).then(compressed => {
+      setPendingAttachments(prev => [
+        ...prev,
+        ...compressed.map(f => ({ file: f, previewUrl: URL.createObjectURL(f) })),
+      ]);
+    });
+  }, []);
+
   useEffect(() => {
     Promise.all([
       fetch(`/api/trips/${tripId}/files`).then(r => r.json()),
@@ -1498,7 +1554,7 @@ export default function FilesTab({ tripId, fabTrigger }: FilesTabProps) {
                   existing={editingFile?.attachments}
                   pending={pendingAttachments}
                   removedPaths={removedAttachmentPaths}
-                  onAdd={files => setPendingAttachments(prev => [...prev, ...files.map(f => ({ file: f, previewUrl: URL.createObjectURL(f) }))])}
+                  onAdd={addAttachments}
                   onRemoveExisting={path => setRemovedAttachmentPaths(prev => [...prev, path])}
                   onRemovePending={i => setPendingAttachments(prev => prev.filter((_, idx) => idx !== i))}
                   disabled={uploading}
@@ -1532,7 +1588,7 @@ export default function FilesTab({ tripId, fabTrigger }: FilesTabProps) {
                   existing={editingFile?.attachments}
                   pending={pendingAttachments}
                   removedPaths={removedAttachmentPaths}
-                  onAdd={files => setPendingAttachments(prev => [...prev, ...files.map(f => ({ file: f, previewUrl: URL.createObjectURL(f) }))])}
+                  onAdd={addAttachments}
                   onRemoveExisting={path => setRemovedAttachmentPaths(prev => [...prev, path])}
                   onRemovePending={i => setPendingAttachments(prev => prev.filter((_, idx) => idx !== i))}
                   disabled={uploading}
@@ -1569,7 +1625,7 @@ export default function FilesTab({ tripId, fabTrigger }: FilesTabProps) {
                   existing={editingFile?.attachments}
                   pending={pendingAttachments}
                   removedPaths={removedAttachmentPaths}
-                  onAdd={files => setPendingAttachments(prev => [...prev, ...files.map(f => ({ file: f, previewUrl: URL.createObjectURL(f) }))])}
+                  onAdd={addAttachments}
                   onRemoveExisting={path => setRemovedAttachmentPaths(prev => [...prev, path])}
                   onRemovePending={i => setPendingAttachments(prev => prev.filter((_, idx) => idx !== i))}
                   disabled={uploading}
