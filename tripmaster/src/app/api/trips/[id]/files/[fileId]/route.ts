@@ -3,7 +3,26 @@ import { getServerSession } from 'next-auth';
 import connectDB from '@/lib/mongodb/connection';
 import User from '@/lib/mongodb/models/User';
 import TripFile from '@/lib/mongodb/models/TripFile';
-import { deleteFile } from '@/lib/utils/storage';
+import { uploadFile, deleteFile } from '@/lib/utils/storage';
+
+const ATTACHMENT_MIME = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/heic']);
+
+async function processAttachments(
+  formData: FormData, userId: string, tripId: string
+): Promise<Array<{ gcsPath: string; gcsUrl: string; mimeType: string; size: number; originalName: string }>> {
+  const results = [];
+  for (let i = 0; ; i++) {
+    const f = formData.get(`attachment_${i}`) as File | null;
+    if (!f || !f.size) break;
+    if (!ATTACHMENT_MIME.has(f.type) || f.size > 20 * 1024 * 1024) continue;
+    const safeName = f.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const gcsPath  = `${userId}/${tripId}/attachments/${Date.now()}-${i}-${safeName}`;
+    const buffer   = Buffer.from(await f.arrayBuffer());
+    const gcsUrl   = await uploadFile(buffer, gcsPath, f.type);
+    results.push({ gcsPath, gcsUrl, mimeType: f.type, size: f.size, originalName: f.name });
+  }
+  return results;
+}
 
 // ─── DELETE /api/trips/[id]/files/[fileId] ────────────────────────────────────
 export async function DELETE(
@@ -21,9 +40,12 @@ export async function DELETE(
   const doc = await TripFile.findOne({ _id: fileId, tripId: id, userId: user._id });
   if (!doc) return NextResponse.json({ error: 'File not found' }, { status: 404 });
 
-  // Only attempt GCS deletion for actual uploaded files — links, contacts, notes and todos have no GCS object
   if (doc.resourceType === 'file' && doc.gcsPath) {
     await deleteFile(doc.gcsPath);
+  }
+
+  for (const att of (doc.attachments ?? [])) {
+    if (att.gcsPath) await deleteFile(att.gcsPath);
   }
 
   await TripFile.findByIdAndDelete(fileId);
@@ -110,6 +132,20 @@ export async function PUT(
     try { updates.linkedTo = JSON.parse(linkedToRaw); } catch { }
   } else {
     updates.linkedTo = null; // user cleared the link
+  }
+
+  // ── Attachments — for note, contact, todo only ────────────────────────────
+  if (['note', 'contact', 'todo'].includes(doc.resourceType)) {
+    const removedPathsRaw = fd.get('removedAttachmentPaths') as string | null;
+    const removedPaths: string[] = removedPathsRaw ? JSON.parse(removedPathsRaw) : [];
+
+    for (const path of removedPaths) {
+      await deleteFile(path);
+    }
+
+    const newAttachments = await processAttachments(fd, user._id.toString(), id);
+    const kept = (doc.attachments ?? []).filter((a: any) => !removedPaths.includes(a.gcsPath));
+    updates.attachments = [...kept, ...newAttachments];
   }
 
   const file = await TripFile.findByIdAndUpdate(fileId, updates, { new: true });

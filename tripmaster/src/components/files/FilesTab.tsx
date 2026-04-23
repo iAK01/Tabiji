@@ -52,6 +52,8 @@ import NotificationsIcon      from '@mui/icons-material/Notifications';
 import NotificationsOffIcon   from '@mui/icons-material/NotificationsOff';
 import AssignmentIcon         from '@mui/icons-material/Assignment';
 import BoltIcon               from '@mui/icons-material/Bolt';
+import AddPhotoAlternateIcon  from '@mui/icons-material/AddPhotoAlternate';
+import CloseIcon              from '@mui/icons-material/Close';
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 
@@ -95,6 +97,7 @@ interface TripFile {
   source?: 'manual' | 'packing_advisory';
   packingItemRef?: string;
   notification?: { enabled: boolean };
+  attachments?: Array<{ gcsPath: string; gcsUrl: string; mimeType?: string; originalName?: string }>;
 }
 
 interface LinkableItem {
@@ -338,6 +341,106 @@ function DropZone({ onFile }: { onFile: (f: File) => void }) {
   );
 }
 
+// ─── Attachment picker ────────────────────────────────────────────────────────
+
+type PendingAttachment = { file: File; previewUrl: string };
+
+function AttachmentPicker({
+  existing, pending, removedPaths, onAdd, onRemoveExisting, onRemovePending, disabled,
+}: {
+  existing:          TripFile['attachments'];
+  pending:           PendingAttachment[];
+  removedPaths:      string[];
+  onAdd:             (files: File[]) => void;
+  onRemoveExisting:  (gcsPath: string) => void;
+  onRemovePending:   (index: number) => void;
+  disabled:          boolean;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const visible  = (existing ?? []).filter(a => !removedPaths.includes(a.gcsPath));
+  const canAdd   = visible.length + pending.length < 10;
+
+  return (
+    <Box>
+      <Typography sx={{ fontFamily: D.body, fontSize: '0.78rem', fontWeight: 600, color: 'text.secondary', mb: 1 }}>
+        Photos (optional)
+      </Typography>
+      <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+        {visible.map(att => (
+          <Box key={att.gcsPath} sx={{ position: 'relative', width: 72, height: 72, flexShrink: 0 }}>
+            <Box component="img" src={att.gcsUrl}
+              sx={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 1.5, display: 'block' }} />
+            {!disabled && (
+              <IconButton size="small" onClick={() => onRemoveExisting(att.gcsPath)} sx={{
+                position: 'absolute', top: -8, right: -8, width: 20, height: 20,
+                backgroundColor: 'white', boxShadow: 1,
+                '&:hover': { backgroundColor: '#fee2e2' },
+              }}>
+                <CloseIcon sx={{ fontSize: 11 }} />
+              </IconButton>
+            )}
+          </Box>
+        ))}
+        {pending.map(({ previewUrl }, i) => (
+          <Box key={i} sx={{ position: 'relative', width: 72, height: 72, flexShrink: 0 }}>
+            <Box component="img" src={previewUrl}
+              sx={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 1.5, display: 'block' }} />
+            {!disabled && (
+              <IconButton size="small" onClick={() => onRemovePending(i)} sx={{
+                position: 'absolute', top: -8, right: -8, width: 20, height: 20,
+                backgroundColor: 'white', boxShadow: 1,
+                '&:hover': { backgroundColor: '#fee2e2' },
+              }}>
+                <CloseIcon sx={{ fontSize: 11 }} />
+              </IconButton>
+            )}
+          </Box>
+        ))}
+        {canAdd && (
+          <Box onClick={() => !disabled && inputRef.current?.click()} sx={{
+            width: 72, height: 72, borderRadius: 1.5, flexShrink: 0,
+            border: '1.5px dashed',
+            borderColor: disabled ? 'rgba(0,0,0,0.1)' : 'rgba(44,62,80,0.2)',
+            display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 0.25,
+            cursor: disabled ? 'default' : 'pointer',
+            '&:hover': !disabled ? { borderColor: D.green, backgroundColor: alpha(D.green, 0.04) } : {},
+          }}>
+            <AddPhotoAlternateIcon sx={{ fontSize: 22, color: disabled ? 'text.disabled' : 'text.secondary' }} />
+            <Typography sx={{ fontFamily: D.body, fontSize: '0.6rem', color: 'text.disabled', lineHeight: 1.2, textAlign: 'center' }}>
+              Add photo
+            </Typography>
+          </Box>
+        )}
+        <input
+          ref={inputRef}
+          type="file"
+          accept="image/jpeg,image/png,image/webp,image/heic"
+          multiple
+          style={{ display: 'none' }}
+          onChange={e => {
+            if (e.target.files) { onAdd(Array.from(e.target.files)); e.target.value = ''; }
+          }}
+        />
+      </Box>
+    </Box>
+  );
+}
+
+function AttachmentThumbnails({ attachments }: { attachments?: TripFile['attachments'] }) {
+  if (!attachments?.length) return null;
+  return (
+    <Box sx={{ display: 'flex', gap: 0.75, mt: 1, flexWrap: 'wrap' }}>
+      {attachments.map((att, i) => (
+        <Box key={i} component="a" href={att.gcsUrl} target="_blank" rel="noopener noreferrer"
+          sx={{ display: 'block', width: 52, height: 52, borderRadius: 1, overflow: 'hidden', flexShrink: 0 }}>
+          <Box component="img" src={att.gcsUrl}
+            sx={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+        </Box>
+      ))}
+    </Box>
+  );
+}
+
 // ─── Link To selector ─────────────────────────────────────────────────────────
 
 function LinkToSelector({
@@ -528,6 +631,8 @@ function ToDoCard({
             </Typography>
           )}
 
+          <AttachmentThumbnails attachments={file.attachments} />
+
           {file.dueAt && (
             <Typography sx={{
               fontFamily: D.body,
@@ -616,6 +721,7 @@ function NoteCard({ file, onDelete, onEdit }: { file: TripFile; onDelete: (id: s
               {file.body}
             </Typography>
           )}
+          <AttachmentThumbnails attachments={file.attachments} />
           <Typography sx={{ fontFamily: D.body, fontSize: '0.7rem', color: 'text.disabled', display: 'block', mt: 0.5 }}>
             {new Date(file.createdAt).toLocaleString('en-IE', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
             {file.linkedTo?.label ? ` · ${file.linkedTo.label}` : ''}
@@ -710,6 +816,7 @@ function ContactCard({ file, onDelete, onEdit }: { file: TripFile; onDelete: (id
               {file.notes}
             </Typography>
           )}
+          <AttachmentThumbnails attachments={file.attachments} />
         </Box>
         <IconButton size="small" onClick={e => setMenuAnchor(e.currentTarget)} sx={{ flexShrink: 0, alignSelf: 'flex-start', mt: 0.25 }}>
           <MoreVertIcon fontSize="small" />
@@ -858,8 +965,10 @@ export default function FilesTab({ tripId, fabTrigger }: FilesTabProps) {
   const [noteForm,      setNoteForm]      = useState({ ...BLANK_NOTE_FORM });
   const [todoForm,      setTodoForm]      = useState({ ...BLANK_TODO_FORM });
   const [linkedTo,      setLinkedTo]      = useState<LinkableItem | null>(null);
-  const [error,         setError]         = useState<string | null>(null);
-  const [editingFile,   setEditingFile]   = useState<TripFile | null>(null);
+  const [error,                  setError]                  = useState<string | null>(null);
+  const [editingFile,            setEditingFile]            = useState<TripFile | null>(null);
+  const [pendingAttachments,     setPendingAttachments]     = useState<PendingAttachment[]>([]);
+  const [removedAttachmentPaths, setRemovedAttachmentPaths] = useState<string[]>([]);
 
   const dueDateRef = useRef<HTMLInputElement>(null);
   const dueTimeRef = useRef<HTMLInputElement>(null);
@@ -890,6 +999,8 @@ export default function FilesTab({ tripId, fabTrigger }: FilesTabProps) {
     setTodoForm({ ...BLANK_TODO_FORM });
     setLinkedTo(null);
     setEditingFile(null);
+    setPendingAttachments([]);
+    setRemovedAttachmentPaths([]);
     setError(null);
     setDialogOpen(true);
   };
@@ -902,6 +1013,8 @@ export default function FilesTab({ tripId, fabTrigger }: FilesTabProps) {
 
   const openEdit = (file: TripFile) => {
     setEditingFile(file);
+    setPendingAttachments([]);
+    setRemovedAttachmentPaths([]);
     setError(null);
 
     const existingLink = file.linkedTo?.label
@@ -973,19 +1086,22 @@ export default function FilesTab({ tripId, fabTrigger }: FilesTabProps) {
       const dueDate  = dueDateRef.current?.value ?? '';
       const dueTime  = dueTimeRef.current?.value ?? '';
       const dueAtIso = combineDueAt(dueDate, dueTime);
-      console.log('[todo submit] dueDate:', dueDate, 'dueTime:', dueTime, 'iso:', dueAtIso);
       fd.append('resourceType', 'todo');
       fd.append('name', todoForm.name.trim());
       if (todoForm.body.trim()) fd.append('body', todoForm.body.trim());
       if (dueAtIso) fd.append('dueAt', dueAtIso);
       fd.append('notification.enabled', todoForm.notificationEnabled && !!dueAtIso ? 'true' : 'false');
       fd.append('source', 'manual');
+      pendingAttachments.forEach(({ file: f }, i) => fd.append(`attachment_${i}`, f));
+      if (editingFile && removedAttachmentPaths.length) fd.append('removedAttachmentPaths', JSON.stringify(removedAttachmentPaths));
     } else if (mode === 'note') {
       if (!noteForm.body.trim()) { setError('Note content is required'); setUploading(false); return; }
       fd.append('resourceType', 'note');
       fd.append('name', noteForm.name.trim());
       fd.append('type', noteForm.type);
       fd.append('body', noteForm.body.trim());
+      pendingAttachments.forEach(({ file: f }, i) => fd.append(`attachment_${i}`, f));
+      if (editingFile && removedAttachmentPaths.length) fd.append('removedAttachmentPaths', JSON.stringify(removedAttachmentPaths));
     } else if (mode === 'contact') {
       if (!contactForm.name) { setError('Name is required'); setUploading(false); return; }
       if (!contactForm.phone && !contactForm.email) { setError('At least one of phone or email is required'); setUploading(false); return; }
@@ -995,6 +1111,8 @@ export default function FilesTab({ tripId, fabTrigger }: FilesTabProps) {
       fd.append('phone', contactForm.phone.trim());
       fd.append('email', contactForm.email.trim());
       fd.append('notes', contactForm.notes);
+      pendingAttachments.forEach(({ file: f }, i) => fd.append(`attachment_${i}`, f));
+      if (editingFile && removedAttachmentPaths.length) fd.append('removedAttachmentPaths', JSON.stringify(removedAttachmentPaths));
     } else if (mode === 'link') {
       if (!linkForm.url || !linkForm.name) { setError('Name and URL are required'); setUploading(false); return; }
       fd.append('resourceType', 'link');
@@ -1037,6 +1155,7 @@ export default function FilesTab({ tripId, fabTrigger }: FilesTabProps) {
       setTimeout(() => {
         setDialogOpen(false); setUploading(false); setUploadPct(0);
         setPendingFile(null); setEditingFile(null); setLinkedTo(null);
+        setPendingAttachments([]); setRemovedAttachmentPaths([]);
       }, 400);
     } catch {
       clearInterval(tick);
@@ -1375,6 +1494,15 @@ export default function FilesTab({ tripId, fabTrigger }: FilesTabProps) {
                     </Box>
                   }
                 />
+                <AttachmentPicker
+                  existing={editingFile?.attachments}
+                  pending={pendingAttachments}
+                  removedPaths={removedAttachmentPaths}
+                  onAdd={files => setPendingAttachments(prev => [...prev, ...files.map(f => ({ file: f, previewUrl: URL.createObjectURL(f) }))])}
+                  onRemoveExisting={path => setRemovedAttachmentPaths(prev => [...prev, path])}
+                  onRemovePending={i => setPendingAttachments(prev => prev.filter((_, idx) => idx !== i))}
+                  disabled={uploading}
+                />
               </>
             )}
 
@@ -1399,6 +1527,15 @@ export default function FilesTab({ tripId, fabTrigger }: FilesTabProps) {
                   onChange={e => setNoteForm(p => ({ ...p, body: e.target.value }))}
                   placeholder="What's on your mind?"
                   InputProps={{ sx: { fontFamily: D.body } }} InputLabelProps={{ sx: { fontFamily: D.body } }}
+                />
+                <AttachmentPicker
+                  existing={editingFile?.attachments}
+                  pending={pendingAttachments}
+                  removedPaths={removedAttachmentPaths}
+                  onAdd={files => setPendingAttachments(prev => [...prev, ...files.map(f => ({ file: f, previewUrl: URL.createObjectURL(f) }))])}
+                  onRemoveExisting={path => setRemovedAttachmentPaths(prev => [...prev, path])}
+                  onRemovePending={i => setPendingAttachments(prev => prev.filter((_, idx) => idx !== i))}
+                  disabled={uploading}
                 />
                 <LinkToSelector items={linkableItems} value={linkedTo} onChange={setLinkedTo} />
               </>
@@ -1428,6 +1565,15 @@ export default function FilesTab({ tripId, fabTrigger }: FilesTabProps) {
                 <TextField label="Notes (optional)" value={contactForm.notes} fullWidth disabled={uploading}
                   onChange={e => setContactForm(p => ({ ...p, notes: e.target.value }))}
                   InputProps={{ sx: { fontFamily: D.body } }} InputLabelProps={{ sx: { fontFamily: D.body } }} />
+                <AttachmentPicker
+                  existing={editingFile?.attachments}
+                  pending={pendingAttachments}
+                  removedPaths={removedAttachmentPaths}
+                  onAdd={files => setPendingAttachments(prev => [...prev, ...files.map(f => ({ file: f, previewUrl: URL.createObjectURL(f) }))])}
+                  onRemoveExisting={path => setRemovedAttachmentPaths(prev => [...prev, path])}
+                  onRemovePending={i => setPendingAttachments(prev => prev.filter((_, idx) => idx !== i))}
+                  disabled={uploading}
+                />
                 <LinkToSelector items={linkableItems} value={linkedTo} onChange={setLinkedTo} />
               </>
             )}

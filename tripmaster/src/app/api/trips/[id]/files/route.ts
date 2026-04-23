@@ -6,6 +6,25 @@ import User from '@/lib/mongodb/models/User';
 import TripFile from '@/lib/mongodb/models/TripFile';
 import { uploadFile } from '@/lib/utils/storage';
 
+const ATTACHMENT_MIME = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/heic']);
+
+async function processAttachments(
+  formData: FormData, userId: string, tripId: string
+): Promise<Array<{ gcsPath: string; gcsUrl: string; mimeType: string; size: number; originalName: string }>> {
+  const results = [];
+  for (let i = 0; ; i++) {
+    const f = formData.get(`attachment_${i}`) as File | null;
+    if (!f || !f.size) break;
+    if (!ATTACHMENT_MIME.has(f.type) || f.size > 20 * 1024 * 1024) continue;
+    const safeName = f.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const gcsPath  = `${userId}/${tripId}/attachments/${Date.now()}-${i}-${safeName}`;
+    const buffer   = Buffer.from(await f.arrayBuffer());
+    const gcsUrl   = await uploadFile(buffer, gcsPath, f.type);
+    results.push({ gcsPath, gcsUrl, mimeType: f.type, size: f.size, originalName: f.name });
+  }
+  return results;
+}
+
 // ─── GET /api/trips/[id]/files ────────────────────────────────────────────────
 export async function GET(
   _req: Request,
@@ -70,15 +89,14 @@ export async function POST(
     const source          = (formData.get('source') as string) || 'manual';
     const packingItemRef  = (formData.get('packingItemRef') as string | null) || undefined;
 
-    // Parse and validate dueAt — stored as UTC, user provides ISO string
     let dueAt: Date | undefined;
     if (dueAtRaw) {
       const parsed = new Date(dueAtRaw);
       if (!isNaN(parsed.getTime())) dueAt = parsed;
     }
 
-    // surfaceAt equals dueAt when notification is enabled — this is what the cron queries
-    const surfaceAt = notifEnabled && dueAt ? dueAt : undefined;
+    const surfaceAt  = notifEnabled && dueAt ? dueAt : undefined;
+    const attachments = await processAttachments(formData, user._id.toString(), id);
 
     const doc = await TripFile.create({
       tripId:   id,
@@ -94,8 +112,8 @@ export async function POST(
       packingItemRef: packingItemRef || undefined,
       notification: {
         enabled:    notifEnabled,
-        // minutesBefore intentionally unused for todos — dueAt is the trigger point
       },
+      attachments: attachments.length ? attachments : undefined,
     });
 
     return NextResponse.json({ file: doc }, { status: 201 });
@@ -106,6 +124,8 @@ export async function POST(
     const body = formData.get('body') as string | null;
     if (!body?.trim()) return NextResponse.json({ error: 'body is required for notes' }, { status: 400 });
 
+    const attachments = await processAttachments(formData, user._id.toString(), id);
+
     const doc = await TripFile.create({
       tripId: id, userId: user._id,
       resourceType: 'note',
@@ -113,6 +133,7 @@ export async function POST(
       type,
       body: body.trim(),
       linkedTo: linkedTo || undefined,
+      attachments: attachments.length ? attachments : undefined,
     });
     return NextResponse.json({ file: doc }, { status: 201 });
   }
@@ -127,6 +148,8 @@ export async function POST(
       return NextResponse.json({ error: 'At least one of phone or email is required' }, { status: 400 });
     }
 
+    const attachments = await processAttachments(formData, user._id.toString(), id);
+
     const doc = await TripFile.create({
       tripId: id, userId: user._id,
       resourceType: 'contact',
@@ -134,6 +157,7 @@ export async function POST(
       phone: phone || undefined,
       email: email || undefined,
       linkedTo: linkedTo || undefined,
+      attachments: attachments.length ? attachments : undefined,
     });
     return NextResponse.json({ file: doc }, { status: 201 });
   }

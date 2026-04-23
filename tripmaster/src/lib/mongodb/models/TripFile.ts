@@ -67,6 +67,15 @@ const TripFileSchema = new Schema({
   // ── Note-only ──────────────────────────────────────────
   body:     { type: String },   // the actual note content
 
+  // ── Attachments (photos) — notes, contacts, todos ──────
+  attachments: [{
+    gcsPath:      { type: String, required: true },
+    gcsUrl:       { type: String, required: true },
+    mimeType:     { type: String },
+    size:         { type: Number },
+    originalName: { type: String },
+  }],
+
   // ── Shared ─────────────────────────────────────────────
   notes: { type: String },      // annotation on files/links/contacts
 
