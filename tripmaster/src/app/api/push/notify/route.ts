@@ -230,19 +230,22 @@ function summariseFiles(linked: any[]): string | null {
 
 // ---- Push -------------------------------------------------------------------
 
-async function sendPush(subscriptions: any[], payload: object, invalidEndpoints: string[]) {
+async function sendPush(subscriptions: any[], payload: object, invalidEndpoints: string[]): Promise<number> {
   const str = JSON.stringify(payload);
-  await Promise.allSettled(
+  const results = await Promise.allSettled(
     subscriptions.map(async (sub) => {
       try {
         await webpush.sendNotification(sub, str);
+        return true;
       } catch (err: any) {
         if (err?.statusCode === 410 || err?.statusCode === 404) {
           invalidEndpoints.push(sub.endpoint);
         }
+        return false;
       }
     })
   );
+  return results.filter(r => r.status === 'fulfilled' && r.value === true).length;
 }
 
 async function logAndSend(
@@ -251,7 +254,11 @@ async function logAndSend(
 ): Promise<boolean> {
   const found = await PushNotificationLog.findOne({ userId, tripId, key, notificationType: type });
   if (found) return false;
-  await sendPush(subscriptions, payload, invalidEndpoints);
+  const sent = await sendPush(subscriptions, payload, invalidEndpoints);
+  // Only mark as sent if at least one subscription successfully received it.
+  // If all subscriptions were stale (410/404), don't log — let the next cron
+  // retry once the user has re-subscribed with a valid endpoint.
+  if (sent === 0) return false;
   await PushNotificationLog.create({ userId, tripId, key, notificationType: type });
   return true;
 }
