@@ -438,7 +438,10 @@ export async function POST(req: Request) {
         if (stop.source === 'logistics' && stop.type === 'transport') continue;
 
         const eventDt = stopToLuxon(day.date, stop, tz);
-        if (!eventDt) continue;
+        if (!eventDt) {
+          console.log(`[notify] stop SKIP (no time): "${stop.name}" type=${stop.type} scheduledStart=${stop.scheduledStart} date=${day.date}`);
+          continue;
+        }
 
         const hasCustomLead = stop.notificationLeadMins != null;
         const navLead = hasCustomLead
@@ -450,6 +453,10 @@ export async function POST(req: Request) {
         const key     = stop._id?.toString() ?? `${day.date}-${stop.name}`;
         const tripUrl = `/trips/${tripId}?tab=2`;
 
+        const triggerMs = eventDt.toMillis() - navLead;
+        const windowDiff = nowMs - triggerMs;
+        console.log(`[notify] stop "${stop.name}" type=${stop.type} eventUTC=${eventDt.toUTC().toISO()} navLead=${navLead/60000}m triggerMs=${triggerMs} nowMs=${nowMs} diff=${windowDiff}ms inWindow=${windowDiff >= 0 && windowDiff <= WINDOW_MS}`);
+
         // ── NAV / REMINDER ───────────────────────────────────────────────
         if (navLead > 0 && isInWindow(eventDt, navLead, nowMs)) {
           const notifType = hasCustomLead ? `${stop.type}_reminder` : `${stop.type}_nav`;
@@ -459,12 +466,17 @@ export async function POST(req: Request) {
           const body = stop.address
             ? [`${stop.address} - ${timeStr}`, navUrl ? 'Tap for navigation' : ''].filter(Boolean).join('\n')
             : `${timeStr}`;
+
+          const alreadyLogged = await PushNotificationLog.findOne({ userId, tripId, key, notificationType: notifType });
+          console.log(`[notify] stop "${stop.name}" IN WINDOW — alreadyLogged=${!!alreadyLogged} key=${key} type=${notifType}`);
+
           const sent = await logAndSend(userId, tripId, key, notifType, subs, {
             title: `${kind}: ${stop.name} in ${leadLabel(navLead)}`,
             body,
             url:   navUrl ?? tripUrl,
             tag:   `stop-nav-${key}`,
           }, invalidEndpoints);
+          console.log(`[notify] stop "${stop.name}" logAndSend result=${sent}`);
           if (sent) totalSent++;
         }
 
