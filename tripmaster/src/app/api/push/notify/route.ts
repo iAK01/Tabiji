@@ -288,9 +288,24 @@ export async function POST(req: Request) {
     const tripId = trip._id.toString();
     const userId = trip.userId.toString();
 
-    // Destination timezone — fall back to UTC if not set
-    // This is what makes Bucharest fire at the right time
-    const tz = trip.destination?.timezone ?? 'UTC';
+    // Destination timezone — prefer explicit field, then country code lookup, then UTC
+    const COUNTRY_TZ: Record<string, string> = {
+      DE: 'Europe/Berlin',   FR: 'Europe/Paris',    IT: 'Europe/Rome',
+      ES: 'Europe/Madrid',   PT: 'Europe/Lisbon',   NL: 'Europe/Amsterdam',
+      BE: 'Europe/Brussels', AT: 'Europe/Vienna',   CH: 'Europe/Zurich',
+      PL: 'Europe/Warsaw',   CZ: 'Europe/Prague',   HU: 'Europe/Budapest',
+      RO: 'Europe/Bucharest',GR: 'Europe/Athens',   SE: 'Europe/Stockholm',
+      NO: 'Europe/Oslo',     DK: 'Europe/Copenhagen',FI:'Europe/Helsinki',
+      IE: 'Europe/Dublin',   GB: 'Europe/London',   TR: 'Europe/Istanbul',
+      JP: 'Asia/Tokyo',      CN: 'Asia/Shanghai',   SG: 'Asia/Singapore',
+      TH: 'Asia/Bangkok',    IN: 'Asia/Kolkata',    AE: 'Asia/Dubai',
+      AU: 'Australia/Sydney',NZ: 'Pacific/Auckland', ZA: 'Africa/Johannesburg',
+      BR: 'America/Sao_Paulo',MX: 'America/Mexico_City',CA: 'America/Toronto',
+      US: 'America/New_York',
+    };
+    const tz = trip.destination?.timezone
+      ?? COUNTRY_TZ[trip.destination?.countryCode ?? '']
+      ?? 'UTC';
 
     // "Now" expressed in the destination timezone for date comparisons
     const nowDt = DateTime.now().setZone(tz);
@@ -300,7 +315,7 @@ export async function POST(req: Request) {
       console.log(`[notify] Trip ${tripId}: user ${userId} has no push subscriptions — skipping`);
       continue;
     }
-    console.log(`[notify] Trip ${tripId}: user ${userId} has ${user.pushSubscriptions.length} subscription(s)`);
+    console.log(`[notify] Trip ${tripId}: user ${userId} has ${user.pushSubscriptions.length} subscription(s), tz=${tz}, destination=${JSON.stringify(trip.destination)}`);
 
     const subs             = user.pushSubscriptions;
     const invalidEndpoints: string[] = [];
@@ -428,6 +443,7 @@ export async function POST(req: Request) {
         if (stop.source === 'logistics' && stop.type === 'transport') continue;
 
         const eventDt = stopToLuxon(day.date, stop, tz);
+        console.log(`[notify] stop RAW: "${stop.name}" scheduledStart=${JSON.stringify(stop.scheduledStart)} dayDate=${day.date}`);
         if (!eventDt) {
           console.log(`[notify] stop SKIP (no time): "${stop.name}" type=${stop.type} scheduledStart=${stop.scheduledStart} date=${day.date}`);
           continue;
