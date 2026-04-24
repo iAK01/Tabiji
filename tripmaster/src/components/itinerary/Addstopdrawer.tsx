@@ -24,6 +24,7 @@ interface Props {
   onClose:        () => void;
   onAdd:          (stop: Partial<Stop>) => Promise<void>;
   onUpdate:       (stop: Partial<Stop>) => Promise<void>;
+  onDelete?:      () => void;
   defaultTime:    string;
   defaultType:    string;
   editStop?:      Stop;
@@ -42,7 +43,7 @@ function fmtDuration(mins: number): string {
 }
 
 export function AddStopDrawer({
-  open, onClose, onAdd, onUpdate,
+  open, onClose, onAdd, onUpdate, onDelete,
   defaultTime, defaultType, editStop,
   isMobile, knownLocations,
 }: Props) {
@@ -430,7 +431,7 @@ export function AddStopDrawer({
       </Collapse>
 
       {/* ── CTA ── */}
-      <Box sx={{ mt: 'auto', pt: 1 }}>
+      <Box sx={{ mt: 'auto', pt: 1, display: 'flex', flexDirection: 'column', gap: 1 }}>
         <Button
           variant="contained"
           onClick={submit}
@@ -451,6 +452,24 @@ export function AddStopDrawer({
         >
           {saving ? '…' : isEditing ? 'Save changes' : 'Add to itinerary'}
         </Button>
+        {isEditing && onDelete && (
+          <Button
+            variant="text"
+            fullWidth
+            onClick={() => { onDelete(); onClose(); }}
+            sx={{
+              color:        'error.main',
+              fontFamily:   D.body,
+              fontWeight:   700,
+              fontSize:     '0.82rem',
+              py:           isMobile ? 1 : 0.75,
+              borderRadius: '10px',
+              '&:hover':    { backgroundColor: alpha('#ef4444', 0.06) },
+            }}
+          >
+            Delete stop
+          </Button>
+        )}
       </Box>
     </Box>
   );

@@ -769,6 +769,7 @@ export default function ItineraryTab({ tripId, startDate, endDate, fabTrigger }:
         onClose={() => setDrawer(d => ({ ...d, open: false, editStop: undefined }))}
         onAdd={addStop}
         onUpdate={updateStop}
+        onDelete={drawer.editStop?._id ? () => deleteStop(drawer.editStop!._id!) : undefined}
         defaultTime={drawer.time}
         defaultType={drawer.type}
         editStop={drawer.editStop}
