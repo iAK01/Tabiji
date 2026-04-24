@@ -23,9 +23,11 @@ interface Props {
   onResize?: (newStartMin: number, newDuration: number) => void;
   pxPerMin:  number;
   isMobile:  boolean;
+  colIndex?: number;
+  totalCols?: number;
 }
 
-export function StopBlock({ stop, onDelete, onClick, onResize, pxPerMin, isMobile }: Props) {
+export function StopBlock({ stop, onDelete, onClick, onResize, pxPerMin, isMobile, colIndex = 0, totalCols = 1 }: Props) {
   const startMin = stopStartMinutes(stop);
   if (startMin === null) return null;
 
@@ -128,8 +130,8 @@ export function StopBlock({ stop, onDelete, onClick, onResize, pxPerMin, isMobil
         }}
         sx={{
           position:   'absolute',
-          left:       0,
-          right:      isMobile ? 4 : 6,
+          left:       totalCols === 1 ? 0 : `calc(${(colIndex / totalCols) * 100}% + ${colIndex > 0 ? 2 : 0}px)`,
+          right:      totalCols === 1 ? (isMobile ? 4 : 6) : colIndex < totalCols - 1 ? `calc(${((totalCols - colIndex - 1) / totalCols) * 100}% + 2px)` : (isMobile ? 4 : 6),
           top:        liveTop,
           height:     liveHeight,
           zIndex:     isDragging || isResizing ? 100 : 2,

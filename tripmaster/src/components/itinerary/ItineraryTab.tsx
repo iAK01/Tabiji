@@ -27,7 +27,7 @@ import {
 import type { Day, Stop, KnownLocation } from './Itinerary.config';
 import {
   stopStartMinutes, stopDuration, formatTime,
-  freeSlots, totalFreeMinutes, freeLabelText,
+  freeSlots, totalFreeMinutes, freeLabelText, computeStopColumns,
 } from './Itinerary.helpers';
 import { HourRuler, GridLines, FreeGap, TravelConnector } from './Timelinechrome';
 import { StopBlock }      from './Stopblock';
@@ -706,24 +706,29 @@ export default function ItineraryTab({ tripId, startDate, endDate, fabTrigger }:
                   />
                 ))}
 
-                {activeDay.stops.map((stop, i) => (
-                  <Box key={stop._id ?? i}>
-                    <StopBlock
-                      stop={stop}
-                      onDelete={stop._id ? () => deleteStop(stop._id!) : undefined}
-                      onClick={() => {
-                        if (stop.source !== 'logistics' && stop._id) {
-                          const t = stopStartMinutes(stop);
-                          openDrawer(t ? formatTime(t) : '09:00', stop.type, stop);
-                        }
-                      }}
-                      onResize={(newStartMin, newDuration) => resizeStop(stop, newStartMin, newDuration)}
-                      pxPerMin={pxPerMin}
-                      isMobile={isMobile}
-                    />
-                    <TravelConnector stop={stop} pxPerMin={pxPerMin} />
-                  </Box>
-                ))}
+                {(() => {
+                  const cols = computeStopColumns(activeDay.stops);
+                  return activeDay.stops.map((stop, i) => (
+                    <Box key={stop._id ?? i}>
+                      <StopBlock
+                        stop={stop}
+                        onDelete={stop._id ? () => deleteStop(stop._id!) : undefined}
+                        onClick={() => {
+                          if (stop.source !== 'logistics' && stop._id) {
+                            const t = stopStartMinutes(stop);
+                            openDrawer(t ? formatTime(t) : '09:00', stop.type, stop);
+                          }
+                        }}
+                        onResize={(newStartMin, newDuration) => resizeStop(stop, newStartMin, newDuration)}
+                        pxPerMin={pxPerMin}
+                        isMobile={isMobile}
+                        colIndex={cols[i].col}
+                        totalCols={cols[i].totalCols}
+                      />
+                      <TravelConnector stop={stop} pxPerMin={pxPerMin} />
+                    </Box>
+                  ));
+                })()}
 
                 {/* Empty state */}
                 {activeDay.stops.length === 0 && (

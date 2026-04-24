@@ -77,6 +77,40 @@ export function freeLabelText(stops: Stop[]): string {
   return freeH > 0 ? `${freeH}h${freeM > 0 ? ` ${freeM}m` : ''} free` : `${freeM}m free`;
 }
 
+// Column layout for overlapping stops
+// Returns per-stop { col, totalCols } so the timeline can render them side-by-side.
+export function computeStopColumns(stops: Stop[]): Array<{ col: number; totalCols: number }> {
+  const n = stops.length;
+  const intervals = stops.map(stop => {
+    const start = stopStartMinutes(stop) ?? 0;
+    return { start, end: start + Math.max(stopDuration(stop), 1) };
+  });
+
+  // Greedy column assignment: each stop takes the first column whose last occupant has ended
+  const cols = new Array<number>(n).fill(0);
+  const colEnds: number[] = [];
+  const byStart = [...Array(n).keys()].sort((a, b) => intervals[a].start - intervals[b].start);
+
+  for (const i of byStart) {
+    const freeCol = colEnds.findIndex(end => end <= intervals[i].start);
+    const col     = freeCol >= 0 ? freeCol : colEnds.length;
+    cols[i] = col;
+    if (freeCol >= 0) colEnds[freeCol] = intervals[i].end;
+    else colEnds.push(intervals[i].end);
+  }
+
+  // totalCols for each stop = 1 + max column index among all stops that overlap with it
+  return intervals.map((iv, i) => {
+    let maxCol = 0;
+    for (let j = 0; j < n; j++) {
+      if (intervals[j].start < iv.end && intervals[j].end > iv.start) {
+        maxCol = Math.max(maxCol, cols[j]);
+      }
+    }
+    return { col: cols[i], totalCols: maxCol + 1 };
+  });
+}
+
 // Snapped drag preview position
 export function snappedPreviewMinutes(
   startMin: number,
