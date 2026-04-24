@@ -77,21 +77,11 @@ const TYPE_EMOJI: Record<string, string> = {
 // means 18:00 EET, not 18:00 UTC.
 function parseInZone(datetimeStr: string, tz: string): DateTime | null {
   if (!datetimeStr) return null;
-
-  // If the string already has a UTC offset or Z suffix, parse as-is
-  // then convert to destination zone for display — but treat the wall
-  // clock time as authoritative (the user typed 18:00 local time)
-  const hasOffset = /[Z+\-]\d{2}:?\d{2}$/.test(datetimeStr) || datetimeStr.endsWith('Z');
-
-  let dt: DateTime;
-  if (hasOffset) {
-    // Has explicit offset — respect it but re-interpret in destination zone
-    dt = DateTime.fromISO(datetimeStr, { zone: tz });
-  } else {
-    // No offset — treat as local destination time
-    dt = DateTime.fromISO(datetimeStr, { zone: tz });
-  }
-
+  // Strip any trailing Z or UTC offset so the wall-clock time is always
+  // interpreted as local destination time. Stops are entered in local time;
+  // the Z is just JavaScript/MongoDB's default serialisation, not intent.
+  const naive = datetimeStr.replace(/Z$/, '').replace(/[+-]\d{2}:?\d{2}$/, '');
+  const dt = DateTime.fromISO(naive, { zone: tz });
   return dt.isValid ? dt : null;
 }
 
