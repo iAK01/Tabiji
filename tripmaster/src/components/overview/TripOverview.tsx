@@ -33,6 +33,7 @@ import ConfirmationNumberIcon   from '@mui/icons-material/ConfirmationNumber';
 import VisibilityIcon           from '@mui/icons-material/Visibility';
 import NavigateButton           from '@/components/ui/NavigateButton';
 import DocumentViewer, { type ViewableFile } from '@/components/files/DocumentViewer';
+import { saveTripCache, getTripCache } from '@/lib/offline/db';
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 
@@ -324,18 +325,42 @@ export default function TripOverview({ trip, onNavigate }: Props) {
   };
 
   useEffect(() => {
-    Promise.all([
-      fetch(`/api/trips/${trip._id}/logistics`).then(r => r.json()),
-      fetch(`/api/trips/${trip._id}/packing`).then(r => r.json()),
-      fetch(`/api/trips/${trip._id}/itinerary`).then(r => r.json()),
-      fetch(`/api/trips/${trip._id}/files`).then(r => r.json()),
-    ]).then(([l, p, it, f]) => {
-      setLogistics(l.logistics);
-      setPacking(p.packing ?? p);
-      setItinerary(it);
-      setResources(f.files ?? []);
-      setLoading(false);
-    }).catch(() => setLoading(false));
+    async function load() {
+      try {
+        const [l, p, it, f] = await Promise.all([
+          fetch(`/api/trips/${trip._id}/logistics`).then(r => r.json()),
+          fetch(`/api/trips/${trip._id}/packing`).then(r => r.json()),
+          fetch(`/api/trips/${trip._id}/itinerary`).then(r => r.json()),
+          fetch(`/api/trips/${trip._id}/files`).then(r => r.json()),
+        ]);
+        const logistics  = l.logistics  ?? null;
+        const packing    = p.packing    ?? p;
+        const itinerary  = it;
+        const resources  = f.files      ?? [];
+        setLogistics(logistics);
+        setPacking(packing);
+        setItinerary(itinerary);
+        setResources(resources);
+        // Save for offline use
+        const existing = await getTripCache(trip._id);
+        await saveTripCache(trip._id, {
+          ...(existing ?? {}),
+          overviewData: { logistics, packing, itinerary, resources },
+        });
+      } catch {
+        // Network unavailable — try cache
+        const cached = await getTripCache(trip._id);
+        if (cached?.overviewData) {
+          setLogistics(cached.overviewData.logistics);
+          setPacking(cached.overviewData.packing);
+          setItinerary(cached.overviewData.itinerary);
+          setResources(cached.overviewData.resources ?? []);
+        }
+      } finally {
+        setLoading(false);
+      }
+    }
+    load();
   }, [trip._id]);
 
   // ── Date maths ────────────────────────────────────────────────────────────

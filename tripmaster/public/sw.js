@@ -1,4 +1,6 @@
 const CACHE_NAME = 'tabiji-shell-v1';
+const API_CACHE  = 'tabiji-api-v1';
+
 const SHELL_FILES = [
   '/',
   '/dashboard',
@@ -17,10 +19,11 @@ self.addEventListener('install', (event) => {
 
 // ── ACTIVATE ────────────────────────────────────
 self.addEventListener('activate', (event) => {
+  const KEEP = new Set([CACHE_NAME, API_CACHE]);
   event.waitUntil(
-    caches.keys().then((keys) =>
-      Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k)))
-    ).then(() => self.clients.claim())
+    caches.keys()
+      .then((keys) => Promise.all(keys.filter(k => !KEEP.has(k)).map(k => caches.delete(k))))
+      .then(() => self.clients.claim())
   );
 });
 
@@ -30,13 +33,29 @@ self.addEventListener('fetch', (event) => {
 
   const url = new URL(event.request.url);
 
-  // Never cache API routes — always go to network, fall back to nothing
+  // Trip API routes — network-first, cache on success, serve cache when offline.
+  // This makes itinerary, logistics, packing, files, and trip metadata available offline.
+  if (url.pathname.startsWith('/api/trips/')) {
+    event.respondWith(
+      fetch(event.request)
+        .then((response) => {
+          if (response.ok) {
+            caches.open(API_CACHE).then((cache) => cache.put(event.request, response.clone()));
+          }
+          return response;
+        })
+        .catch(() => caches.match(event.request))
+    );
+    return;
+  }
+
+  // All other API routes — network only, no caching (auth, push, etc.)
   if (url.pathname.startsWith('/api/')) {
     event.respondWith(fetch(event.request));
     return;
   }
 
-  // Shell files — network first, fall back to cache
+  // Shell / app files — network first, fall back to cache
   event.respondWith(
     fetch(event.request)
       .then((response) => {
@@ -96,7 +115,6 @@ async function processQueue() {
 }
 
 // ── PUSH ─────────────────────────────────────────
-// Receives push payloads from the server and shows a notification
 self.addEventListener('push', (event) => {
   if (!event.data) return;
 
@@ -113,7 +131,6 @@ self.addEventListener('push', (event) => {
     badge:   data.badge   ?? '/icons/badge-72.png',
     tag:     data.tag     ?? 'tabiji-default',
     data:    { url: data.url ?? '/dashboard' },
-    // Keep notification visible until user interacts
     requireInteraction: data.requireInteraction ?? false,
     actions: data.actions ?? [],
   };
@@ -124,7 +141,6 @@ self.addEventListener('push', (event) => {
 });
 
 // ── NOTIFICATION CLICK ───────────────────────────
-// Tapping a notification opens the PWA at the right URL
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
 
@@ -132,7 +148,6 @@ self.addEventListener('notificationclick', (event) => {
 
   event.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
-      // If the app is already open, focus it and navigate
       for (const client of clientList) {
         if ('focus' in client) {
           client.focus();
@@ -140,7 +155,6 @@ self.addEventListener('notificationclick', (event) => {
           return;
         }
       }
-      // Otherwise open a new window
       if (clients.openWindow) {
         return clients.openWindow(url);
       }

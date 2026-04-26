@@ -58,6 +58,7 @@ import VisibilityIcon         from '@mui/icons-material/Visibility';
 import WifiOffIcon            from '@mui/icons-material/WifiOff';
 import DocumentViewer, { type ViewableFile } from './DocumentViewer';
 import { isFileCached } from '@/lib/offline/fileCache';
+import { saveTripCache, getTripCache } from '@/lib/offline/db';
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 
@@ -1085,19 +1086,37 @@ export default function FilesTab({ tripId, fabTrigger }: FilesTabProps) {
   }, []);
 
   useEffect(() => {
-    Promise.all([
-      fetch(`/api/trips/${tripId}/files`).then(r => r.json()),
-      fetch(`/api/trips/${tripId}/logistics`).then(r => r.json()).catch(() => ({})),
-      fetch(`/api/trips/${tripId}/itinerary`).then(r => r.json()).catch(() => ({})),
-    ]).then(([filesData, logisticsData, itineraryData]) => {
-      setFiles(filesData.files ?? []);
-      const items = buildLinkableItems(
-        logisticsData.logistics ?? logisticsData,
-        itineraryData.itinerary ?? itineraryData
-      );
-      setLinkableItems(items);
-      setLoading(false);
-    }).catch(() => setLoading(false));
+    async function load() {
+      try {
+        const [filesData, logisticsData, itineraryData] = await Promise.all([
+          fetch(`/api/trips/${tripId}/files`).then(r => r.json()),
+          fetch(`/api/trips/${tripId}/logistics`).then(r => r.json()).catch(() => ({})),
+          fetch(`/api/trips/${tripId}/itinerary`).then(r => r.json()).catch(() => ({})),
+        ]);
+        const files = filesData.files ?? [];
+        setFiles(files);
+        setLinkableItems(buildLinkableItems(
+          logisticsData.logistics ?? logisticsData,
+          itineraryData.itinerary ?? itineraryData,
+        ));
+        // Save files list to cache for offline use
+        const existing = await getTripCache(tripId);
+        await saveTripCache(tripId, { ...(existing ?? {}), filesList: files });
+      } catch {
+        // Network unavailable — restore from cache
+        const cached = await getTripCache(tripId);
+        if (cached?.filesList) setFiles(cached.filesList);
+        if (cached?.overviewData) {
+          setLinkableItems(buildLinkableItems(
+            cached.overviewData.logistics,
+            cached.overviewData.itinerary,
+          ));
+        }
+      } finally {
+        setLoading(false);
+      }
+    }
+    load();
   }, [tripId]);
 
   const openDialog = (m: Mode) => {
