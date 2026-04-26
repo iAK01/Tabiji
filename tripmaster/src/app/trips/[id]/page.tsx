@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import {
   Box, Container, Typography, AppBar, Toolbar, IconButton,
@@ -182,6 +182,8 @@ export default function TripPage() {
 
   const [fabTrigger, setFabTrigger] = useState<FabTrigger | null>(null);
   const [fabOpen,    setFabOpen]    = useState(false);
+
+  const tabContentRef = useRef<HTMLDivElement>(null);
 
   const [deletePreviewOpen,  setDeletePreviewOpen]  = useState(false);
   const [deleteConfirmOpen,  setDeleteConfirmOpen]  = useState(false);
@@ -501,13 +503,9 @@ export default function TripPage() {
               onChange={(_, val) => {
             setActiveTab(val);
             if (trip.status === 'active') {
-              setTimeout(() => {
-                const el = document.getElementById('tab-content-anchor');
-                if (el) {
-                  const absoluteTop = el.getBoundingClientRect().top + window.scrollY;
-                  window.scrollTo({ top: absoluteTop - 62, behavior: 'smooth' });
-                }
-              }, 50);
+              requestAnimationFrame(() => requestAnimationFrame(() => {
+                tabContentRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+              }));
             }
           }}
               textColor="inherit"
@@ -598,22 +596,26 @@ export default function TripPage() {
         {/* ── Tab content ── */}
         <Container maxWidth="lg" sx={{ py: { xs: 3, sm: 4 }, px: { xs: 2, sm: 3 } }}>
           {trip.status === 'active' && <OnTripScreen tripId={trip._id} trip={trip} />}
-          {trip.status === 'active' && <Box id="tab-content-anchor" />}
-          {activeTab === 0 && <TripOverview trip={trip} onNavigate={setActiveTab} />}
-          {activeTab === 1 && <LogisticsTab tripId={trip._id} trip={trip} fabTrigger={fabTrigger} />}
-          {activeTab === 2 && <ItineraryTab tripId={trip._id} startDate={trip.startDate} endDate={trip.endDate} fabTrigger={fabTrigger} />}
-          {activeTab === 3 && <PackingTab tripId={trip._id} tripType={trip.tripType} nights={trip.nights} startDate={trip.startDate} fabTrigger={fabTrigger} />}
-          {activeTab === 4 && <IntelligenceTab tripId={trip._id} />}
-          {activeTab === 5 && (
-  <WeatherTab
-    tripId={trip._id}
-    destinationCity={trip.destination?.city}
-    startDate={trip.startDate}
-    endDate={trip.endDate}
-  />
-)}
-          {activeTab === 6 && <MapTab tripId={trip._id} trip={trip} />}
-          {activeTab === 7 && <FilesTab tripId={trip._id} fabTrigger={fabTrigger} />}
+          <Box
+            ref={trip.status === 'active' ? tabContentRef : undefined}
+            sx={{ scrollMarginTop: '66px' }}
+          >
+            {activeTab === 0 && <TripOverview trip={trip} onNavigate={setActiveTab} />}
+            {activeTab === 1 && <LogisticsTab tripId={trip._id} trip={trip} fabTrigger={fabTrigger} />}
+            {activeTab === 2 && <ItineraryTab tripId={trip._id} startDate={trip.startDate} endDate={trip.endDate} fabTrigger={fabTrigger} />}
+            {activeTab === 3 && <PackingTab tripId={trip._id} tripType={trip.tripType} nights={trip.nights} startDate={trip.startDate} fabTrigger={fabTrigger} />}
+            {activeTab === 4 && <IntelligenceTab tripId={trip._id} />}
+            {activeTab === 5 && (
+              <WeatherTab
+                tripId={trip._id}
+                destinationCity={trip.destination?.city}
+                startDate={trip.startDate}
+                endDate={trip.endDate}
+              />
+            )}
+            {activeTab === 6 && <MapTab tripId={trip._id} trip={trip} />}
+            {activeTab === 7 && <FilesTab tripId={trip._id} fabTrigger={fabTrigger} />}
+          </Box>
         </Container>
 
         {/* ── Context-aware FAB ── */}

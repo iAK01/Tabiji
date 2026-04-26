@@ -32,6 +32,8 @@ import FreeBreakfastIcon      from '@mui/icons-material/FreeBreakfast';
 import LocationOnIcon         from '@mui/icons-material/LocationOn';
 import { useRouter }          from 'next/navigation';
 import { useEffect, useState } from 'react';
+import DocumentViewer, { type ViewableFile } from '@/components/files/DocumentViewer';
+import AttachFileIcon from '@mui/icons-material/AttachFile';
 import TripCalendar from '@/components/calendar/TripCalendar';
 import { saveTripList, getTripList, getQueue, clearQueue } from '@/lib/offline/db';
 import TripReadinessPanel from '@/components/dashboard/TripReadinessPanel';
@@ -55,6 +57,7 @@ interface Stop {
   _id?: string;
   name: string;
   type: string;
+  reference?: string;
   address?: string;
   coordinates?: { lat: number; lng: number };
   scheduledStart?: string;
@@ -261,12 +264,14 @@ function MapButtons({ name, address, coordinates, stopPropagation }: {
 // ─── Active trip banner ───────────────────────────────────────────────────────
 
 function ActiveTripBanner({
-  trip, rightNow, rightNowLoading, onOpen,
+  trip, rightNow, rightNowLoading, onOpen, linkedFiles = [], onOpenFile,
 }: {
   trip: Trip;
   rightNow: RightNow | null;
   rightNowLoading: boolean;
   onOpen: () => void;
+  linkedFiles?: any[];
+  onOpenFile?: (f: any) => void;
 }) {
   const dayNum    = dayOfTrip(trip.startDate);
   const totalDays = trip.nights + 1;
@@ -406,6 +411,40 @@ function ActiveTripBanner({
                   </Typography>
                 </Box>
               )}
+              {rightNow.stop.reference && (
+                <Box sx={{
+                  display: 'inline-flex', alignItems: 'center',
+                  mt: 0.5, px: 1.25, py: 0.3,
+                  borderRadius: '6px',
+                  backgroundColor: 'rgba(3,105,161,0.10)',
+                  border: '1.5px solid rgba(3,105,161,0.3)',
+                }}>
+                  <Typography sx={{ fontFamily: D.body, fontSize: '0.88rem', fontWeight: 800, color: '#0369a1' }}>
+                    {rightNow.stop.reference}
+                  </Typography>
+                </Box>
+              )}
+              {linkedFiles.length > 0 && onOpenFile && (
+                <Box sx={{ display: 'flex', gap: 0.75, mt: 0.75, flexWrap: 'wrap' }}>
+                  {linkedFiles.map((f: any) => (
+                    <Button
+                      key={f._id}
+                      size="small"
+                      startIcon={<AttachFileIcon sx={{ fontSize: '0.8rem !important' }} />}
+                      onClick={(e) => { e.stopPropagation(); onOpenFile(f); }}
+                      sx={{
+                        fontFamily: D.body, fontSize: '0.72rem', fontWeight: 700,
+                        py: 0.3, px: 1, minHeight: 28,
+                        backgroundColor: 'rgba(8,145,178,0.08)', color: '#0891b2',
+                        border: '1px solid rgba(8,145,178,0.2)', borderRadius: '6px',
+                        '&:hover': { backgroundColor: 'rgba(8,145,178,0.14)' },
+                      }}
+                    >
+                      {f.name.length > 22 ? `${f.name.slice(0, 22)}…` : f.name}
+                    </Button>
+                  ))}
+                </Box>
+              )}
               {(rightNow.stop.address || rightNow.stop.coordinates) && !isPast && (
                 <MapButtons name={rightNow.stop.name} address={rightNow.stop.address}
                   coordinates={rightNow.stop.coordinates} stopPropagation />
@@ -436,6 +475,8 @@ export default function Dashboard() {
   const [tab,             setTab]             = useState<TabValue>('upcoming');
   const [rightNow,        setRightNow]        = useState<RightNow | null>(null);
   const [rightNowLoading, setRightNowLoading] = useState(false);
+  const [rightNowFiles,   setRightNowFiles]   = useState<any[]>([]);
+  const [viewerFile,      setViewerFile]      = useState<ViewableFile | null>(null);
 
   useEffect(() => {
     async function loadTrips() {
@@ -460,11 +501,23 @@ export default function Dashboard() {
     async function loadRightNow() {
       setRightNowLoading(true);
       try {
-        const res  = await fetch(`/api/trips/${activeTrip!._id}/itinerary`);
-        const data = await res.json();
-        setRightNow(deriveRightNow(data.days ?? []));
+        const [itin, files] = await Promise.all([
+          fetch(`/api/trips/${activeTrip!._id}/itinerary`).then(r => r.json()),
+          fetch(`/api/trips/${activeTrip!._id}/files`).then(r => r.json()),
+        ]);
+        const rn = deriveRightNow(itin.days ?? []);
+        setRightNow(rn);
+        if (rn?.stop._id) {
+          const linked = (files.files ?? []).filter(
+            (f: any) => f.resourceType === 'file' && f.linkedTo?.entryId === rn.stop._id
+          );
+          setRightNowFiles(linked);
+        } else {
+          setRightNowFiles([]);
+        }
       } catch {
         setRightNow(null);
+        setRightNowFiles([]);
       } finally {
         setRightNowLoading(false);
       }
@@ -583,6 +636,8 @@ export default function Dashboard() {
               rightNow={rightNow}
               rightNowLoading={rightNowLoading}
               onOpen={() => router.push(`/trips/${activeTrip._id}`)}
+              linkedFiles={rightNowFiles}
+              onOpenFile={f => setViewerFile({ _id: f._id, name: f.name, mimeType: f.mimeType, gcsUrl: f.gcsUrl })}
             />
           )}
 
@@ -963,6 +1018,8 @@ export default function Dashboard() {
 
         </Container>
       </Box>
+
+      <DocumentViewer file={viewerFile} onClose={() => setViewerFile(null)} />
     </>
   );
 }

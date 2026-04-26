@@ -31,6 +31,8 @@ import LogoutIcon               from '@mui/icons-material/Logout';
 import CloseIcon                from '@mui/icons-material/Close';
 import ExpandMoreIcon           from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon           from '@mui/icons-material/ExpandLess';
+import AttachFileIcon           from '@mui/icons-material/AttachFile';
+import DocumentViewer, { type ViewableFile } from '@/components/files/DocumentViewer';
 
 // ─── Design tokens ─────────────────────────────────────────────────────────────
 
@@ -298,8 +300,9 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
 
 // ─── Right Now card ───────────────────────────────────────────────────────────
 
-function RightNowCard({ stop, startMins, nowMins }: {
+function RightNowCard({ stop, startMins, nowMins, linkedFiles = [], onOpenFile }: {
   stop: Stop; startMins: number | null; nowMins: number;
+  linkedFiles?: any[]; onOpenFile?: (f: any) => void;
 }) {
   const cfg    = STOP_CONFIG[stop.type] ?? STOP_CONFIG.other;
   const Icon   = cfg.Icon;
@@ -393,6 +396,28 @@ function RightNowCard({ stop, startMins, nowMins }: {
             </Box>
           )}
 
+          {linkedFiles.length > 0 && onOpenFile && (
+            <Box sx={{ display: 'flex', gap: 0.75, mt: 0.75, flexWrap: 'wrap' }}>
+              {linkedFiles.map((f: any) => (
+                <Button
+                  key={f._id}
+                  size="small"
+                  startIcon={<AttachFileIcon sx={{ fontSize: '0.8rem !important' }} />}
+                  onClick={() => onOpenFile(f)}
+                  sx={{
+                    fontFamily: D.body, fontSize: '0.72rem', fontWeight: 700,
+                    py: 0.3, px: 1, minHeight: 28,
+                    backgroundColor: 'rgba(8,145,178,0.08)', color: '#0891b2',
+                    border: '1px solid rgba(8,145,178,0.2)', borderRadius: '6px',
+                    '&:hover': { backgroundColor: 'rgba(8,145,178,0.14)' },
+                  }}
+                >
+                  {f.name.length > 22 ? `${f.name.slice(0, 22)}…` : f.name}
+                </Button>
+              ))}
+            </Box>
+          )}
+
           {remaining !== null && (
             <Typography sx={{
               color: cfg.color,
@@ -455,7 +480,10 @@ function RightNowCard({ stop, startMins, nowMins }: {
 
 // ─── Timeline row ─────────────────────────────────────────────────────────────
 
-function TimelineRow({ item, past }: { item: TimelineItem; past: boolean }) {
+function TimelineRow({ item, past, linkedFiles = [], onOpenFile }: {
+  item: TimelineItem; past: boolean;
+  linkedFiles?: any[]; onOpenFile?: (f: any) => void;
+}) {
   if (item.kind === 'stop') {
     const { stop } = item;
     const cfg  = STOP_CONFIG[stop.type] ?? STOP_CONFIG.other;
@@ -534,6 +562,28 @@ function TimelineRow({ item, past }: { item: TimelineItem; past: boolean }) {
           )}
 
           {hasLoc && <MapButtons name={stop.name} address={stop.address} coordinates={stop.coordinates} />}
+
+          {linkedFiles.length > 0 && onOpenFile && (
+            <Box sx={{ display: 'flex', gap: 0.5, mt: 0.6, flexWrap: 'wrap' }}>
+              {linkedFiles.map((f: any) => (
+                <Button
+                  key={f._id}
+                  size="small"
+                  startIcon={<AttachFileIcon sx={{ fontSize: '0.75rem !important' }} />}
+                  onClick={() => onOpenFile(f)}
+                  sx={{
+                    fontFamily: D.body, fontSize: '0.68rem', fontWeight: 700,
+                    py: 0.2, px: 0.75, minHeight: 24,
+                    backgroundColor: 'rgba(8,145,178,0.08)', color: '#0891b2',
+                    border: '1px solid rgba(8,145,178,0.2)', borderRadius: '6px',
+                    '&:hover': { backgroundColor: 'rgba(8,145,178,0.14)' },
+                  }}
+                >
+                  {f.name.length > 20 ? `${f.name.slice(0, 20)}…` : f.name}
+                </Button>
+              ))}
+            </Box>
+          )}
         </Box>
       </Box>
     );
@@ -830,6 +880,8 @@ export default function OnTripScreen({ tripId, trip }: OnTripScreenProps) {
   const [now,            setNow]            = useState(new Date());
   const [dismissedIds,   setDismissedIds]   = useState<Set<string>>(new Set());
   const [todayOpen,      setTodayOpen]      = useState(false);
+  const [filesByStop,    setFilesByStop]    = useState<Map<string, any[]>>(new Map());
+  const [viewerFile,     setViewerFile]     = useState<ViewableFile | null>(null);
 
   useEffect(() => {
     const id = setInterval(() => setNow(new Date()), 60_000);
@@ -849,8 +901,10 @@ export default function OnTripScreen({ tripId, trip }: OnTripScreenProps) {
 
       const todayEnd = new Date();
       todayEnd.setHours(23, 59, 59, 999);
+      const allFiles = (files.files ?? []) as any[];
+
       setTodos(
-        ((files.files ?? []) as any[])
+        allFiles
           .filter(f =>
             f.resourceType === 'todo' &&
             !f.completed &&
@@ -859,6 +913,16 @@ export default function OnTripScreen({ tripId, trip }: OnTripScreenProps) {
           )
           .sort((a: any, b: any) => new Date(a.dueAt).getTime() - new Date(b.dueAt).getTime())
       );
+
+      const map = new Map<string, any[]>();
+      for (const f of allFiles) {
+        if (f.resourceType === 'file' && f.linkedTo?.entryId) {
+          const arr = map.get(f.linkedTo.entryId) ?? [];
+          arr.push(f);
+          map.set(f.linkedTo.entryId, arr);
+        }
+      }
+      setFilesByStop(map);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -1035,7 +1099,13 @@ export default function OnTripScreen({ tripId, trip }: OnTripScreenProps) {
               </IconButton>
             </Tooltip>
           </Box>
-          <RightNowCard stop={rightNow.stop} startMins={rightNow.startM} nowMins={nowMins} />
+          <RightNowCard
+            stop={rightNow.stop}
+            startMins={rightNow.startM}
+            nowMins={nowMins}
+            linkedFiles={filesByStop.get(rightNow.stop._id ?? '') ?? []}
+            onOpenFile={f => setViewerFile({ _id: f._id, name: f.name, mimeType: f.mimeType, gcsUrl: f.gcsUrl })}
+          />
         </Box>
       )}
 
@@ -1073,7 +1143,12 @@ export default function OnTripScreen({ tripId, trip }: OnTripScreenProps) {
                 return (
                   <Box key={i}>
                     {i > 0 && <Divider sx={{ borderColor: D.rule }} />}
-                    <TimelineRow item={item} past={past} />
+                    <TimelineRow
+                      item={item}
+                      past={past}
+                      linkedFiles={item.kind === 'stop' ? (filesByStop.get(item.stop._id ?? '') ?? []) : []}
+                      onOpenFile={f => setViewerFile({ _id: f._id, name: f.name, mimeType: f.mimeType, gcsUrl: f.gcsUrl })}
+                    />
                   </Box>
                 );
               })}
@@ -1124,6 +1199,8 @@ export default function OnTripScreen({ tripId, trip }: OnTripScreenProps) {
           </Paper>
         </Box>
       )}
+
+      <DocumentViewer file={viewerFile} onClose={() => setViewerFile(null)} />
     </Box>
   );
 }
