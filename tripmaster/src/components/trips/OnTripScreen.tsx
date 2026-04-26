@@ -66,6 +66,7 @@ interface Stop {
   _id?: string;
   name: string;
   type: string;
+  reference?: string;
   address?: string;
   coordinates?: { lat: number; lng: number };
   scheduledStart?: string;
@@ -375,6 +376,23 @@ function RightNowCard({ stop, startMins, nowMins }: {
                 : null}
           </Box>
 
+          {stop.reference && (
+            <Box sx={{
+              display: 'inline-flex', alignItems: 'center',
+              mt: 0.6, px: 1.25, py: 0.35,
+              borderRadius: '6px',
+              backgroundColor: 'rgba(3,105,161,0.10)',
+              border: '1.5px solid rgba(3,105,161,0.3)',
+            }}>
+              <Typography sx={{
+                fontFamily: D.body, fontSize: '0.95rem', fontWeight: 800,
+                color: '#0369a1', letterSpacing: '0.03em', lineHeight: 1.3,
+              }}>
+                {stop.reference}
+              </Typography>
+            </Box>
+          )}
+
           {remaining !== null && (
             <Typography sx={{
               color: cfg.color,
@@ -493,6 +511,15 @@ function TimelineRow({ item, past }: { item: TimelineItem; past: boolean }) {
               </Typography>
             )}
           </Box>
+
+          {stop.reference && (
+            <Typography sx={{
+              fontSize: '0.74rem', fontWeight: 800, color: '#0369a1',
+              display: 'block', mt: 0.2, fontFamily: D.body,
+            }}>
+              {stop.reference}
+            </Typography>
+          )}
 
           {stop.address && (
             <Typography sx={{

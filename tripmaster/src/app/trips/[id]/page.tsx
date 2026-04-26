@@ -504,10 +504,10 @@ export default function TripPage() {
               setTimeout(() => {
                 const el = document.getElementById('tab-content-anchor');
                 if (el) {
-                  const rect = el.getBoundingClientRect();
-                  window.scrollBy({ top: rect.top - 62, behavior: 'smooth' });
+                  const absoluteTop = el.getBoundingClientRect().top + window.scrollY;
+                  window.scrollTo({ top: absoluteTop - 62, behavior: 'smooth' });
                 }
-              }, 0);
+              }, 50);
             }
           }}
               textColor="inherit"
