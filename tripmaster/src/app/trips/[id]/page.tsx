@@ -498,7 +498,18 @@ export default function TripPage() {
           <Container maxWidth="lg" disableGutters>
             <Tabs
               value={activeTab}
-              onChange={(_, val) => setActiveTab(val)}
+              onChange={(_, val) => {
+            setActiveTab(val);
+            if (trip.status === 'active') {
+              setTimeout(() => {
+                const el = document.getElementById('tab-content-anchor');
+                if (el) {
+                  const rect = el.getBoundingClientRect();
+                  window.scrollBy({ top: rect.top - 62, behavior: 'smooth' });
+                }
+              }, 0);
+            }
+          }}
               textColor="inherit"
               variant={isMobile ? 'scrollable' : 'fullWidth'}
               scrollButtons={false}
@@ -587,6 +598,7 @@ export default function TripPage() {
         {/* ── Tab content ── */}
         <Container maxWidth="lg" sx={{ py: { xs: 3, sm: 4 }, px: { xs: 2, sm: 3 } }}>
           {trip.status === 'active' && <OnTripScreen tripId={trip._id} trip={trip} />}
+          {trip.status === 'active' && <Box id="tab-content-anchor" />}
           {activeTab === 0 && <TripOverview trip={trip} onNavigate={setActiveTab} />}
           {activeTab === 1 && <LogisticsTab tripId={trip._id} trip={trip} fabTrigger={fabTrigger} />}
           {activeTab === 2 && <ItineraryTab tripId={trip._id} startDate={trip.startDate} endDate={trip.endDate} fabTrigger={fabTrigger} />}

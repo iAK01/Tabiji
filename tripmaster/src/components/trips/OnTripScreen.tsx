@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import {
   Box, Typography, Paper, Chip, CircularProgress,
-  IconButton, Divider, alpha, Tooltip, Button,
+  IconButton, Divider, alpha, Tooltip, Button, Collapse,
 } from '@mui/material';
 import FlightIcon               from '@mui/icons-material/Flight';
 import TrainIcon                from '@mui/icons-material/Train';
@@ -28,6 +28,9 @@ import AssignmentIcon           from '@mui/icons-material/Assignment';
 import BoltIcon                 from '@mui/icons-material/Bolt';
 import LoginIcon                from '@mui/icons-material/Login';
 import LogoutIcon               from '@mui/icons-material/Logout';
+import CloseIcon                from '@mui/icons-material/Close';
+import ExpandMoreIcon           from '@mui/icons-material/ExpandMore';
+import ExpandLessIcon           from '@mui/icons-material/ExpandLess';
 
 // ─── Design tokens ─────────────────────────────────────────────────────────────
 
@@ -795,9 +798,11 @@ export default function OnTripScreen({ tripId, trip }: OnTripScreenProps) {
   const [itinerary,  setItinerary]  = useState<ItineraryDay[]>([]);
   const [logistics,  setLogistics]  = useState<{ transportation: Transport[]; accommodation: Accommodation[] } | null>(null);
   const [todos,      setTodos]      = useState<Todo[]>([]);
-  const [loading,    setLoading]    = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [now,        setNow]        = useState(new Date());
+  const [loading,        setLoading]        = useState(true);
+  const [refreshing,     setRefreshing]     = useState(false);
+  const [now,            setNow]            = useState(new Date());
+  const [dismissedIds,   setDismissedIds]   = useState<Set<string>>(new Set());
+  const [todayOpen,      setTodayOpen]      = useState(false);
 
   useEffect(() => {
     const id = setInterval(() => setNow(new Date()), 60_000);
@@ -868,8 +873,14 @@ export default function OnTripScreen({ tripId, trip }: OnTripScreenProps) {
     const endM = x.startM! + x.stop.duration;
     return nowMins >= x.startM! && nowMins < endM;
   });
-  const nextUp = !inProgress ? timedStops.find(x => x.startM! > nowMins) : null;
-  const rightNow = inProgress ?? nextUp ?? null;
+
+  const candidates = [
+    ...(inProgress ? [inProgress] : []),
+    ...timedStops.filter(x => x.startM! > nowMins),
+  ].filter(x => !dismissedIds.has(x.stop._id ?? ''));
+
+  const rightNow = candidates[0] ?? null;
+  const isRightNowInProgress = rightNow === inProgress;
 
   const timelineItems: TimelineItem[] = [];
 
@@ -980,52 +991,85 @@ export default function OnTripScreen({ tripId, trip }: OnTripScreenProps) {
       {/* ── 1. RIGHT NOW / UP NEXT ── */}
       {rightNow && (
         <Box>
-          <SectionLabel>
-            {inProgress ? 'Right now' : 'Up next'}
-          </SectionLabel>
+          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1.25 }}>
+            <Typography sx={{
+              fontSize: '1.2rem', fontWeight: 800, letterSpacing: '0.1em',
+              textTransform: 'uppercase', color: D.muted, fontFamily: D.body,
+            }}>
+              {isRightNowInProgress ? 'Right now' : 'Up next'}
+            </Typography>
+            <Tooltip title="Dismiss">
+              <IconButton
+                size="small"
+                onClick={() => setDismissedIds(prev => new Set([...prev, rightNow.stop._id ?? '']))}
+                sx={{ p: 0.5, color: D.muted, '&:hover': { color: D.navy } }}
+              >
+                <CloseIcon sx={{ fontSize: '1rem' }} />
+              </IconButton>
+            </Tooltip>
+          </Box>
           <RightNowCard stop={rightNow.stop} startMins={rightNow.startM} nowMins={nowMins} />
         </Box>
       )}
 
       {/* ── 2. TODAY TIMELINE ── */}
       <Box>
-        <SectionLabel>Today</SectionLabel>
+        <Box
+          onClick={() => setTodayOpen(o => !o)}
+          sx={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            cursor: 'pointer', mb: 1.25, userSelect: 'none',
+          }}
+        >
+          <Typography sx={{
+            fontSize: '1.2rem', fontWeight: 800, letterSpacing: '0.1em',
+            textTransform: 'uppercase', color: D.muted, fontFamily: D.body,
+          }}>
+            Today
+          </Typography>
+          {todayOpen
+            ? <ExpandLessIcon sx={{ fontSize: '1.1rem', color: D.muted }} />
+            : <ExpandMoreIcon sx={{ fontSize: '1.1rem', color: D.muted }} />
+          }
+        </Box>
 
-        {dedupedTimeline.length > 0 ? (
-          <Paper elevation={0} sx={{
-            border: `1.5px solid ${D.rule}`,
-            borderRadius: '12px',
-            overflow: 'hidden',
-            backgroundColor: D.paper,
-          }}>
-            {dedupedTimeline.map((item, i) => {
-              const past = item.sortMins >= 0 && item.sortMins < nowMins;
-              return (
-                <Box key={i}>
-                  {i > 0 && <Divider sx={{ borderColor: D.rule }} />}
-                  <TimelineRow item={item} past={past} />
-                </Box>
-              );
-            })}
-          </Paper>
-        ) : (
-          <Paper elevation={0} sx={{
-            p: 3,
-            textAlign: 'center',
-            border: `1.5px solid ${D.rule}`,
-            borderRadius: '12px',
-            backgroundColor: D.paper,
-          }}>
-            <Typography sx={{
-              fontSize: '0.95rem',
-              fontWeight: 700,
-              color: D.muted,
-              fontFamily: D.body,
+        <Collapse in={todayOpen}>
+          {dedupedTimeline.length > 0 ? (
+            <Paper elevation={0} sx={{
+              border: `1.5px solid ${D.rule}`,
+              borderRadius: '12px',
+              overflow: 'hidden',
+              backgroundColor: D.paper,
             }}>
-              Nothing scheduled for today
-            </Typography>
-          </Paper>
-        )}
+              {dedupedTimeline.map((item, i) => {
+                const past = item.sortMins >= 0 && item.sortMins < nowMins;
+                return (
+                  <Box key={i}>
+                    {i > 0 && <Divider sx={{ borderColor: D.rule }} />}
+                    <TimelineRow item={item} past={past} />
+                  </Box>
+                );
+              })}
+            </Paper>
+          ) : (
+            <Paper elevation={0} sx={{
+              p: 3,
+              textAlign: 'center',
+              border: `1.5px solid ${D.rule}`,
+              borderRadius: '12px',
+              backgroundColor: D.paper,
+            }}>
+              <Typography sx={{
+                fontSize: '0.95rem',
+                fontWeight: 700,
+                color: D.muted,
+                fontFamily: D.body,
+              }}>
+                Nothing scheduled for today
+              </Typography>
+            </Paper>
+          )}
+        </Collapse>
       </Box>
 
       {/* ── 3. ACTION NEEDED (todos due today / overdue) ── */}
