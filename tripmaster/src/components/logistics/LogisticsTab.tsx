@@ -64,6 +64,9 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
     coordinates: { lat: number; lng: number } | null;
   } | null>(null);
 
+  const [fallbackOriginIata, setFallbackOriginIata] = useState<string | undefined>(undefined);
+  const [fallbackOriginCity, setFallbackOriginCity] = useState<string | undefined>(undefined);
+
   const [transportOpen, setTransportOpen] = useState(false);
   const [transport,     setTransport]     = useState({ ...BLANK_TRANSPORT, details: { ...BLANK_TRANSPORT.details } });
 
@@ -117,18 +120,24 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
     loadLogistics();
   }, [tripId]);
 
-  // ── Load home location for car departure pre-fill ───────────────────────────
+  // ── Load home location + fallback airport from user profile ────────────────
   useEffect(() => {
     fetch('/api/user/profile')
       .then(r => r.json())
       .then(data => {
         const h = data.user?.homeLocation;
-        if (!h) return;
-        const parts = [h.addressLine1, h.addressLine2, h.city, h.postcode, h.country]
-          .filter(Boolean)
-          .join(', ');
-        const coords = h.coordinates?.lat ? h.coordinates : null;
-        setHomeLocation({ address: parts, coordinates: coords });
+        if (h) {
+          const parts = [h.addressLine1, h.addressLine2, h.city, h.postcode, h.country]
+            .filter(Boolean)
+            .join(', ');
+          const coords = h.coordinates?.lat ? h.coordinates : null;
+          setHomeLocation({ address: parts, coordinates: coords });
+        }
+        const fb = data.user?.fallbackAirport;
+        if (fb?.iata) {
+          setFallbackOriginIata(fb.iata);
+          setFallbackOriginCity(fb.city ?? '');
+        }
       })
       .catch(() => {});
   }, []);
@@ -698,6 +707,8 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
             destCity={trip.destination?.city ?? ''}
             startDate={trip.startDate}
             endDate={trip.endDate}
+            fallbackOriginIata={fallbackOriginIata}
+            fallbackOriginCity={fallbackOriginCity}
           />
           {(logistics?.transportation ?? []).map((t: any, i: number) => (
             <TransportCard

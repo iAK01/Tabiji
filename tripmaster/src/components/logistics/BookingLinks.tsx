@@ -17,12 +17,14 @@ import LoungeIcon       from '@mui/icons-material/AirlineSeatReclineExtra';
 import DirectionsBusIcon from '@mui/icons-material/DirectionsBus';
 
 interface BookingLinksProps {
-  originIata:  string | undefined;
-  destIata:    string | undefined;
-  originCity:  string;
-  destCity:    string;
-  startDate:   string;  // ISO date string
-  endDate:     string;  // ISO date string
+  originIata:         string | undefined;
+  destIata:           string | undefined;
+  originCity:         string;
+  destCity:           string;
+  startDate:          string;  // ISO date string
+  endDate:            string;  // ISO date string
+  fallbackOriginIata?: string;
+  fallbackOriginCity?: string;
 }
 
 
@@ -155,6 +157,7 @@ function LinkChip({
 // ─── Component ────────────────────────────────────────────────────────────────
 export default function BookingLinks({
   originIata, destIata, originCity, destCity, startDate, endDate,
+  fallbackOriginIata, fallbackOriginCity,
 }: BookingLinksProps) {
   const [open, setOpen] = useState(false);
 
@@ -168,8 +171,9 @@ export default function BookingLinks({
     }
   }, []);
 
-  const hasIata    = !!(originIata && destIata);
-  const routeLabel = `${originIata ?? originCity} → ${destIata ?? destCity}`;
+  const hasIata      = !!(originIata && destIata);
+  const hasFallback  = !!(fallbackOriginIata && destIata && fallbackOriginIata !== originIata);
+  const routeLabel   = `${originIata ?? originCity} → ${destIata ?? destCity}`;
 
   return (
     <Paper
@@ -223,7 +227,14 @@ export default function BookingLinks({
               <Typography sx={{ fontSize: '0.78rem', fontFamily: D.body, color: D.muted, display: 'block', mb: 1.5 }}>
                 Opens with your route and dates pre-filled.
               </Typography>
-              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+
+              {/* Primary origin row */}
+              {hasFallback && (
+                <Typography sx={{ fontSize: '0.72rem', fontFamily: D.body, fontWeight: 700, color: D.navy, mb: 0.75, opacity: 0.6 }}>
+                  {originIata} → {destIata}
+                </Typography>
+              )}
+              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: hasFallback ? 2 : 0 }}>
                 {BOOKING_LINKS.map(link => (
                   <LinkChip
                     key={link.name}
@@ -234,6 +245,26 @@ export default function BookingLinks({
                   />
                 ))}
               </Box>
+
+              {/* Fallback origin row */}
+              {hasFallback && (
+                <>
+                  <Typography sx={{ fontSize: '0.72rem', fontFamily: D.body, fontWeight: 700, color: D.navy, mb: 0.75, opacity: 0.6 }}>
+                    {fallbackOriginIata} → {destIata}
+                  </Typography>
+                  <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                    {BOOKING_LINKS.map(link => (
+                      <LinkChip
+                        key={link.name}
+                        name={link.name}
+                        colour={link.colour}
+                        url={link.buildUrl(fallbackOriginIata!, destIata!, startDate, endDate)}
+                        icon={<OpenInNewIcon />}
+                      />
+                    ))}
+                  </Box>
+                </>
+              )}
             </>
           )}
 

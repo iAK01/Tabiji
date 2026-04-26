@@ -28,6 +28,7 @@ export async function PUT(req: Request) {
         name: body.name,
         homeLocation: body.homeLocation,       // coordinates included from client-side geocoding
         preferredAirport: body.preferredAirport ?? null,
+        fallbackAirport:  body.fallbackAirport  ?? null,
         passport: body.passport,
         travelInsurance: body.travelInsurance,
         preferences: body.preferences,

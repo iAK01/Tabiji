@@ -59,6 +59,7 @@ interface UserProfile {
   name: string; email: string;
   homeLocation: HomeLocation;
   preferredAirport: { iata: string; name: string; city: string; country: string } | null;
+  fallbackAirport:  { iata: string; name: string; city: string; country: string } | null;
   passport: { country: string; countryCode: string; expiry: string; number: string };
   travelInsurance: { provider: string; policyNumber: string; emergencyPhone: string; expiry: string };
   preferences: { units: 'metric' | 'imperial'; defaultTripType: 'work' | 'leisure' | 'mixed' };
@@ -72,6 +73,7 @@ const emptyProfile: UserProfile = {
     timezone: '', currency: '', currencySymbol: '', electricalPlug: '', language: '', emergency: '',
   },
   preferredAirport: null,
+  fallbackAirport:  null,
   passport: { country: '', countryCode: '', expiry: '', number: '' },
   travelInsurance: { provider: '', policyNumber: '', emergencyPhone: '', expiry: '' },
   preferences: { units: 'metric', defaultTripType: 'leisure' },
@@ -388,23 +390,46 @@ export default function ProfilePage() {
             </SectionCard>
 
             <SectionCard icon={FlightIcon} title="Preferred Airport" ghost={FlightIcon}>
-              {profile.preferredAirport?.iata ? (
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                  <Typography sx={{ fontFamily: D.display, fontSize: '2rem', color: D.green, letterSpacing: '-0.02em', lineHeight: 1 }}>
-                    {profile.preferredAirport.iata}
-                  </Typography>
-                  <Box>
-                    <Typography sx={{ fontFamily: D.body, fontSize: '0.92rem', fontWeight: 600, color: D.navy }}>
-                      {profile.preferredAirport.name}
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 3, flexWrap: 'wrap' }}>
+                {/* Primary */}
+                {profile.preferredAirport?.iata ? (
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                    <Typography sx={{ fontFamily: D.display, fontSize: '2rem', color: D.green, letterSpacing: '-0.02em', lineHeight: 1 }}>
+                      {profile.preferredAirport.iata}
                     </Typography>
-                    <Typography sx={{ fontSize: '0.82rem', color: D.muted, fontFamily: D.body }}>
-                      {profile.preferredAirport.city}, {profile.preferredAirport.country}
-                    </Typography>
+                    <Box>
+                      <Typography sx={{ fontFamily: D.body, fontSize: '0.92rem', fontWeight: 600, color: D.navy }}>
+                        {profile.preferredAirport.name}
+                      </Typography>
+                      <Typography sx={{ fontSize: '0.82rem', color: D.muted, fontFamily: D.body }}>
+                        {profile.preferredAirport.city}, {profile.preferredAirport.country}
+                      </Typography>
+                    </Box>
                   </Box>
-                </Box>
-              ) : (
-                <Typography sx={{ fontSize: '0.88rem', color: D.muted, fontFamily: D.body }}>Not set</Typography>
-              )}
+                ) : (
+                  <Typography sx={{ fontSize: '0.88rem', color: D.muted, fontFamily: D.body }}>Not set</Typography>
+                )}
+
+                {/* Fallback */}
+                {profile.fallbackAirport?.iata && (
+                  <>
+                    <Typography sx={{ color: D.muted, fontSize: '1.1rem', lineHeight: 1 }}>·</Typography>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                      <Typography sx={{ fontFamily: D.display, fontSize: '2rem', color: D.muted, letterSpacing: '-0.02em', lineHeight: 1 }}>
+                        {profile.fallbackAirport.iata}
+                      </Typography>
+                      <Box>
+                        <Typography sx={{ fontFamily: D.body, fontSize: '0.92rem', fontWeight: 600, color: D.navy }}>
+                          {profile.fallbackAirport.name}
+                        </Typography>
+                        <Typography sx={{ fontSize: '0.82rem', color: D.muted, fontFamily: D.body }}>
+                          {profile.fallbackAirport.city}, {profile.fallbackAirport.country} — fallback
+                        </Typography>
+                      </Box>
+                    </Box>
+                  </>
+                )}
+              </Box>
             </SectionCard>
 
             <SectionCard icon={BadgeIcon} title="Passport" ghost={BadgeIcon}>
@@ -576,6 +601,20 @@ export default function ProfilePage() {
                   {form.preferredAirport.name}
                 </Typography>
               )}
+              <Box sx={{ mt: 2 }}>
+                <AirportSearch
+                  label="Fallback departure airport"
+                  value={form.fallbackAirport ? `${form.fallbackAirport.iata} — ${form.fallbackAirport.city}` : ''}
+                  onChange={(airport: Airport) => setForm(p => ({
+                    ...p, fallbackAirport: { iata: airport.iata, name: airport.name, city: airport.city, country: airport.country },
+                  }))}
+                />
+                {form.fallbackAirport && (
+                  <Typography sx={{ fontSize: '0.78rem', color: D.muted, mt: 0.75, fontFamily: D.body }}>
+                    {form.fallbackAirport.name} — shown as a second flight-search row in quick links
+                  </Typography>
+                )}
+              </Box>
             </SectionCard>
 
             {/* Passport */}

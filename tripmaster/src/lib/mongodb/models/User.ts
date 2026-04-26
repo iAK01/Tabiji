@@ -19,6 +19,20 @@ const UserSchema = new Schema({
     emergency: String,
   },
 
+  preferredAirport: {
+    iata:    String,
+    name:    String,
+    city:    String,
+    country: String,
+  },
+
+  fallbackAirport: {
+    iata:    String,
+    name:    String,
+    city:    String,
+    country: String,
+  },
+
   passport: {
     country: String,
     countryCode: String,
