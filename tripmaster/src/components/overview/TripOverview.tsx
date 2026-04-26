@@ -26,7 +26,13 @@ import SmsIcon                  from '@mui/icons-material/Sms';
 import RadioButtonUncheckedIcon from '@mui/icons-material/RadioButtonUnchecked';
 import BlockIcon                from '@mui/icons-material/Block';
 import UndoIcon                 from '@mui/icons-material/Undo';
+import TrainIcon                from '@mui/icons-material/Train';
+import BadgeIcon                from '@mui/icons-material/Badge';
+import HealthAndSafetyIcon      from '@mui/icons-material/HealthAndSafety';
+import ConfirmationNumberIcon   from '@mui/icons-material/ConfirmationNumber';
+import VisibilityIcon           from '@mui/icons-material/Visibility';
 import NavigateButton           from '@/components/ui/NavigateButton';
+import DocumentViewer, { type ViewableFile } from '@/components/files/DocumentViewer';
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 
@@ -280,6 +286,22 @@ function StatusRow({ icon, label, value, level, onDismiss }: {
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
+const TICKET_TYPES = new Set([
+  'boarding_pass', 'train_ticket', 'hotel_confirmation', 'car_hire',
+  'visa', 'insurance', 'passport', 'event_brief',
+]);
+
+const TICKET_ICONS: Record<string, React.ElementType> = {
+  boarding_pass:      FlightIcon,
+  train_ticket:       TrainIcon,
+  hotel_confirmation: HotelIcon,
+  car_hire:           DirectionsCarIcon,
+  visa:               BadgeIcon,
+  insurance:          HealthAndSafetyIcon,
+  passport:           BadgeIcon,
+  event_brief:        ConfirmationNumberIcon,
+};
+
 export default function TripOverview({ trip, onNavigate }: Props) {
   const [logistics,  setLogistics]  = useState<any>(null);
   const [packing,    setPacking]    = useState<any>(null);
@@ -287,6 +309,7 @@ export default function TripOverview({ trip, onNavigate }: Props) {
   const [resources,  setResources]  = useState<any[]>([]);
   const [loading,    setLoading]    = useState(true);
   const [dismissed,  setDismissed]  = useState<string[]>(trip.dismissedChecks ?? []);
+  const [viewerFile, setViewerFile] = useState<ViewableFile | null>(null);
 
   const toggleDismiss = async (key: string) => {
     const next = dismissed.includes(key)
@@ -402,7 +425,8 @@ export default function TripOverview({ trip, onNavigate }: Props) {
   const notes      = resources.filter(r => r.resourceType === 'note');
   const keyLinks   = resources.filter(r => r.resourceType === 'link' &&
     ['event_website', 'booking_reference', 'venue', 'artist_lineup'].includes(r.type));
-  const docCount   = resources.filter(r => r.resourceType === 'file').length;
+  const docCount    = resources.filter(r => r.resourceType === 'file').length;
+  const ticketFiles = resources.filter(r => r.resourceType === 'file' && TICKET_TYPES.has(r.type) && r.gcsUrl);
   const hasResources = contacts.length > 0 || keyLinks.length > 0 || docCount > 0 || notes.length > 0;
 
   // ── Countdown label ───────────────────────────────────────────────────────
@@ -452,6 +476,22 @@ export default function TripOverview({ trip, onNavigate }: Props) {
               }}>
                 {nextStop.name}
               </Typography>
+              {nextStop.reference && (
+                <Box sx={{
+                  display: 'inline-flex', alignItems: 'center',
+                  mt: 0.75, px: 1.25, py: 0.4,
+                  borderRadius: '6px',
+                  backgroundColor: 'rgba(3,105,161,0.10)',
+                  border: '1.5px solid rgba(3,105,161,0.3)',
+                }}>
+                  <Typography sx={{
+                    fontFamily: D.body, fontSize: '0.9rem', fontWeight: 800,
+                    color: '#0369a1', letterSpacing: '0.03em', lineHeight: 1.3,
+                  }}>
+                    {nextStop.reference}
+                  </Typography>
+                </Box>
+              )}
               {nextStop.address && (
                 <Typography sx={{ fontFamily: D.body, fontSize: '0.78rem', color: D.muted, mt: 0.5 }}>
                   {nextStop.address}
@@ -888,10 +928,45 @@ export default function TripOverview({ trip, onNavigate }: Props) {
                   </Box>
                 )}
 
+                {/* ── Ticket / document quick-access cards ── */}
+                {ticketFiles.length > 0 && (
+                  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.75 }}>
+                    {ticketFiles.map((f: any) => {
+                      const TicketIcon = TICKET_ICONS[f.type] ?? FlightIcon;
+                      return (
+                        <Box
+                          key={f._id}
+                          onClick={() => setViewerFile({ _id: f._id, name: f.name, mimeType: f.mimeType, gcsUrl: f.gcsUrl })}
+                          sx={{
+                            display: 'flex', alignItems: 'center', gap: 1.25,
+                            px: 1.5, py: 1,
+                            borderRadius: '8px',
+                            border: '1px solid rgba(8,145,178,0.2)',
+                            backgroundColor: 'rgba(8,145,178,0.04)',
+                            cursor: 'pointer',
+                            transition: 'background-color 0.15s',
+                            '&:hover': { backgroundColor: 'rgba(8,145,178,0.09)' },
+                          }}
+                        >
+                          <TicketIcon sx={{ fontSize: 16, color: '#0891b2', flexShrink: 0 }} />
+                          <Typography sx={{
+                            fontFamily: D.body, fontWeight: 700, fontSize: '0.82rem',
+                            color: D.navy, flex: 1,
+                            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                          }}>
+                            {f.name}
+                          </Typography>
+                          <VisibilityIcon sx={{ fontSize: 14, color: '#0891b2', flexShrink: 0 }} />
+                        </Box>
+                      );
+                    })}
+                  </Box>
+                )}
+
                 <Box sx={{ display: 'flex', gap: 1.5, flexWrap: 'wrap' }}>
-                  {docCount > 0 && (
+                  {docCount > ticketFiles.length && (
                     <Typography sx={{ fontFamily: D.body, fontSize: '0.78rem', color: D.muted }}>
-                      {docCount} document{docCount !== 1 ? 's' : ''}
+                      {docCount - ticketFiles.length} other document{docCount - ticketFiles.length !== 1 ? 's' : ''}
                     </Typography>
                   )}
                   {notes.length > 0 && (
@@ -1038,6 +1113,8 @@ export default function TripOverview({ trip, onNavigate }: Props) {
           </Paper>
         </>
       )}
+
+      <DocumentViewer file={viewerFile} onClose={() => setViewerFile(null)} />
     </Box>
   );
 }

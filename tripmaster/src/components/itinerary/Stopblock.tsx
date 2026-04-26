@@ -6,7 +6,9 @@ import { Box, Typography, IconButton, Tooltip } from '@mui/material';
 import { alpha }          from '@mui/material/styles';
 import DeleteIcon         from '@mui/icons-material/Delete';
 import LockIcon           from '@mui/icons-material/Lock';
+import AttachFileIcon     from '@mui/icons-material/AttachFile';
 import NavigateButton     from '@/components/ui/NavigateButton';
+import DocumentViewer, { type ViewableFile } from '@/components/files/DocumentViewer';
 import {
   DAY_START_HOUR, DAY_END_HOUR, SNAP_MINS, STOP_CONFIG, D,
 } from './Itinerary.config';
@@ -16,18 +18,26 @@ import {
   formatTime, snappedPreviewMinutes,
 } from './Itinerary.helpers';
 
-interface Props {
-  stop:      Stop;
-  onDelete?: () => void;
-  onClick?:  () => void;
-  onResize?: (newStartMin: number, newDuration: number) => void;
-  pxPerMin:  number;
-  isMobile:  boolean;
-  colIndex?: number;
-  totalCols?: number;
+interface LinkedFile {
+  _id:      string;
+  name:     string;
+  mimeType?: string;
+  gcsUrl?:  string;
 }
 
-export function StopBlock({ stop, onDelete, onClick, onResize, pxPerMin, isMobile, colIndex = 0, totalCols = 1 }: Props) {
+interface Props {
+  stop:         Stop;
+  onDelete?:    () => void;
+  onClick?:     () => void;
+  onResize?:    (newStartMin: number, newDuration: number) => void;
+  pxPerMin:     number;
+  isMobile:     boolean;
+  colIndex?:    number;
+  totalCols?:   number;
+  linkedFiles?: LinkedFile[];
+}
+
+export function StopBlock({ stop, onDelete, onClick, onResize, pxPerMin, isMobile, colIndex = 0, totalCols = 1, linkedFiles = [] }: Props) {
   const startMin = stopStartMinutes(stop);
   if (startMin === null) return null;
 
@@ -37,6 +47,9 @@ export function StopBlock({ stop, onDelete, onClick, onResize, pxPerMin, isMobil
   const cfg         = STOP_CONFIG[stop.type] ?? STOP_CONFIG.other;
   const hasLocation = !!(stop.address || stop.coordinates);
   const displayName = stop.name?.trim() || 'Unnamed stop';
+  const hasFiles    = linkedFiles.length > 0;
+
+  const [viewerFile, setViewerFile] = useState<ViewableFile | null>(null);
 
   // ── Resize ────────────────────────────────────────────────────────────────────
   const [resize, setResize] = useState<{ edge: 'top' | 'bottom'; deltaY: number } | null>(null);
@@ -111,6 +124,7 @@ export function StopBlock({ stop, onDelete, onClick, onResize, pxPerMin, isMobil
     : formatTime(liveStartMin);
 
   return (
+    <>
     <Tooltip
       title={tooltipTitle}
       placement="right"
@@ -177,6 +191,7 @@ export function StopBlock({ stop, onDelete, onClick, onResize, pxPerMin, isMobil
           justifyContent:  'center',
           backgroundColor: alpha(cfg.color, 0.10),
           transition:      'width 0.1s',
+          position:        'relative',
         }}>
           <cfg.Icon sx={{
             fontSize: liveHeight > 80
@@ -187,6 +202,16 @@ export function StopBlock({ stop, onDelete, onClick, onResize, pxPerMin, isMobil
             color:      cfg.color,
             transition: 'font-size 0.1s',
           }} />
+          {/* File attachment dot indicator */}
+          {hasFiles && (
+            <Box sx={{
+              position: 'absolute', bottom: 5, right: 4,
+              width: 6, height: 6, borderRadius: '50%',
+              backgroundColor: '#4ade80',
+              border: '1px solid white',
+              zIndex: 3,
+            }} />
+          )}
         </Box>
 
         {/* ── Content ── */}
@@ -216,6 +241,19 @@ export function StopBlock({ stop, onDelete, onClick, onResize, pxPerMin, isMobil
               }}>
                 {displayName}
               </Typography>
+              {stop.reference && (
+                <Typography sx={{
+                  fontFamily:  D.body,
+                  fontSize:    isMobile ? '0.68rem' : '0.62rem',
+                  fontWeight:  800,
+                  color:       '#0369a1',
+                  whiteSpace:  'nowrap',
+                  flexShrink:  0,
+                  lineHeight:  1,
+                }}>
+                  {stop.reference}
+                </Typography>
+              )}
               <Typography sx={{
                 fontFamily:         D.display,
                 fontSize:           isMobile ? '0.75rem' : '0.68rem',
@@ -262,6 +300,36 @@ export function StopBlock({ stop, onDelete, onClick, onResize, pxPerMin, isMobil
                 )}
               </Box>
 
+              {/* Reference — platform, seat, booking code — shown on any non-short block */}
+              {stop.reference && (
+                <Box sx={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  alignSelf: 'flex-start',
+                  px: isMobile ? 0.75 : 0.6,
+                  py: 0.2,
+                  borderRadius: '4px',
+                  backgroundColor: 'rgba(3,105,161,0.10)',
+                  border: '1px solid rgba(3,105,161,0.25)',
+                  maxWidth: '100%',
+                  overflow: 'hidden',
+                }}>
+                  <Typography sx={{
+                    fontFamily:   D.body,
+                    fontSize:     isMobile ? '0.72rem' : '0.65rem',
+                    fontWeight:   800,
+                    color:        '#0369a1',
+                    lineHeight:   1.3,
+                    whiteSpace:   'nowrap',
+                    overflow:     'hidden',
+                    textOverflow: 'ellipsis',
+                    letterSpacing: '0.02em',
+                  }}>
+                    {stop.reference}
+                  </Typography>
+                </Box>
+              )}
+
               {/* Duration — tall blocks only */}
               {isTall && !isDragging && !isResizing && (
                 <Typography sx={{
@@ -296,6 +364,20 @@ export function StopBlock({ stop, onDelete, onClick, onResize, pxPerMin, isMobil
                 size="small"
                 sx={{ p: isMobile ? 0.75 : 0.25, minWidth: isMobile ? 32 : 22, minHeight: isMobile ? 32 : 22 }}
               />
+            )}
+            {hasFiles && (
+              <IconButton
+                size="small"
+                onClick={e => { e.stopPropagation(); setViewerFile(linkedFiles[0]); }}
+                sx={{
+                  p: isMobile ? 0.75 : 0.25, flexShrink: 0,
+                  color: '#4ade80',
+                  '&:hover': { color: '#22c55e', backgroundColor: alpha('#4ade80', 0.08) },
+                  ...(isMobile && { minWidth: 32, minHeight: 32 }),
+                }}
+              >
+                <AttachFileIcon sx={{ fontSize: isMobile ? 14 : 12 }} />
+              </IconButton>
             )}
             {!isLocked && onDelete && (
               <IconButton
@@ -338,5 +420,7 @@ export function StopBlock({ stop, onDelete, onClick, onResize, pxPerMin, isMobil
         </Box>
       </Box>
     </Tooltip>
+    <DocumentViewer file={viewerFile} onClose={() => setViewerFile(null)} />
+    </>
   );
 }

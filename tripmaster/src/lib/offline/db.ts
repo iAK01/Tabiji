@@ -1,7 +1,7 @@
 import { openDB } from 'idb';
 
 const DB_NAME = 'tabiji-offline';
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 
 export async function getDB() {
   return openDB(DB_NAME, DB_VERSION, {
@@ -14,6 +14,10 @@ export async function getDB() {
 
       if (oldVersion < 3) {
         db.createObjectStore('tripCache', { keyPath: 'tripId' });
+      }
+
+      if (oldVersion < 4) {
+        db.createObjectStore('pinnedFiles', { keyPath: 'id' });
       }
     },
   });
@@ -61,4 +65,37 @@ export async function clearQueue() {
   const tx = db.transaction('queue', 'readwrite');
   await tx.store.clear();
   await tx.done;
+}
+
+/* -------- Pinned Files -------- */
+
+export interface PinnedFile {
+  id:        string;
+  tripId:    string;
+  name:      string;
+  type:      string;
+  mimeType:  string;
+  blob:      Blob;
+  cachedAt:  number;
+}
+
+export async function putPinnedFile(entry: PinnedFile) {
+  const db = await getDB();
+  await db.put('pinnedFiles', entry);
+}
+
+export async function getPinnedFile(id: string): Promise<PinnedFile | undefined> {
+  const db = await getDB();
+  return db.get('pinnedFiles', id);
+}
+
+export async function deletePinnedFile(id: string) {
+  const db = await getDB();
+  await db.delete('pinnedFiles', id);
+}
+
+export async function getPinnedFileIdsByTrip(tripId: string): Promise<Set<string>> {
+  const db  = await getDB();
+  const all = await db.getAll('pinnedFiles');
+  return new Set(all.filter(f => f.tripId === tripId).map(f => f.id));
 }

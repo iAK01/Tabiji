@@ -50,6 +50,7 @@ export default function ItineraryTab({ tripId, startDate, endDate, fabTrigger }:
   // ── State ────────────────────────────────────────────────────────────────────
   const [days,           setDays]           = useState<Day[]>([]);
   const [loading,        setLoading]        = useState(true);
+  const [filesByStop,    setFilesByStop]    = useState<Map<string, Array<{ _id: string; name: string; mimeType?: string; gcsUrl?: string }>>>(new Map());
   const [activeDayIdx,   setActiveDayIdx]   = useState(0);
   const [calculating,    setCalculating]    = useState(false);
   const [showAllChips,   setShowAllChips]   = useState(false);
@@ -106,6 +107,25 @@ export default function ItineraryTab({ tripId, startDate, endDate, fabTrigger }:
       }
     }
     loadItinerary();
+  }, [tripId]);
+
+  // ── Load files linked to itinerary stops ─────────────────────────────────────
+  useEffect(() => {
+    fetch(`/api/trips/${tripId}/files`)
+      .then(r => r.json())
+      .then(data => {
+        const files: any[] = data.files ?? [];
+        const map = new Map<string, Array<{ _id: string; name: string; mimeType?: string; gcsUrl?: string }>>();
+        for (const f of files) {
+          if (f.resourceType === 'file' && f.linkedTo?.entryId && f.gcsUrl) {
+            const key = f.linkedTo.entryId;
+            if (!map.has(key)) map.set(key, []);
+            map.get(key)!.push({ _id: f._id, name: f.name, mimeType: f.mimeType, gcsUrl: f.gcsUrl });
+          }
+        }
+        setFilesByStop(map);
+      })
+      .catch(() => {});
   }, [tripId]);
 
   // ── Load known locations from logistics ──────────────────────────────────────
@@ -724,6 +744,7 @@ export default function ItineraryTab({ tripId, startDate, endDate, fabTrigger }:
                         isMobile={isMobile}
                         colIndex={cols[i].col}
                         totalCols={cols[i].totalCols}
+                        linkedFiles={stop._id ? (filesByStop.get(stop._id) ?? []) : []}
                       />
                       <TravelConnector stop={stop} pxPerMin={pxPerMin} />
                     </Box>

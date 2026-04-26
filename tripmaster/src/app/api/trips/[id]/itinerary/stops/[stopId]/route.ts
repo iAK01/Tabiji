@@ -32,7 +32,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   await connectDB();
 
   const body = await req.json();
-  const { scheduledStart, duration, name, type, notes, address, coordinates, notificationLeadMins } = body;
+  const { scheduledStart, duration, name, type, notes, address, coordinates, notificationLeadMins, reference } = body;
   if (!scheduledStart) return NextResponse.json({ error: 'scheduledStart required' }, { status: 400 });
 
   const itinerary = await TripItinerary.findOne({ tripId: id });
@@ -50,6 +50,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       if (address              !== undefined) stop.address              = address;
       if (coordinates          !== undefined) stop.coordinates          = coordinates;
       if (notificationLeadMins !== undefined) stop.notificationLeadMins = notificationLeadMins;
+      if (reference            !== undefined) stop.reference            = reference;
       found = true;
       break;
     }

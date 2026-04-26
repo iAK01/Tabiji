@@ -42,6 +42,18 @@ function fmtDuration(mins: number): string {
   return `${mins}m`;
 }
 
+// Adaptive placeholder for the reference field based on stop name
+function referencePlaceholder(name: string): string {
+  const n = name.toLowerCase();
+  if (/train|rail|intercit|tgv|eurostar|ice |db |sncf|thalys|avlo|renfe|trenitalia/.test(n)) return 'Platform · Carriage · Seat';
+  if (/uber|taxi|bolt|lyft|free\s*now|cab|chauffeur|grab/.test(n)) return 'Booking code · Driver name';
+  if (/bus|coach|flixbus|megabus|greyhound|national express/.test(n)) return 'Bay · Platform · Seat';
+  if (/ferry|boat|vessel|cruise|stena|irish ferries/.test(n)) return 'Berth · Cabin · Deck';
+  if (/tram|metro|tube|subway|luas|dart|mrt|brt|s-bahn|u-bahn/.test(n)) return 'Direction · Platform';
+  if (/car hire|rental|hertz|avis|europcar|sixt|enterprise|budget/.test(n)) return 'Pickup point · Booking ref';
+  return 'Platform · Seat · Ref';
+}
+
 export function AddStopDrawer({
   open, onClose, onAdd, onUpdate, onDelete,
   defaultTime, defaultType, editStop,
@@ -64,6 +76,7 @@ export function AddStopDrawer({
     type:                  defaultType,
     scheduledStart:        defaultTime,
     duration:              60,
+    reference:             '',
     notes:                 '',
     address:               '',
     coordinates:           undefined as { lat: number; lng: number } | undefined,
@@ -84,6 +97,7 @@ export function AddStopDrawer({
         type:                 editStop.type ?? defaultType,
         scheduledStart:       timeStr,
         duration:             stopDuration(editStop),
+        reference:            editStop.reference ?? '',
         notes:                editStop.notes ?? '',
         address:              editStop.address ?? '',
         coordinates:          editStop.coordinates,
@@ -96,6 +110,7 @@ export function AddStopDrawer({
         type:                 defaultType,
         scheduledStart:       defaultTime,
         duration:             DEFAULT_DURATIONS[defaultType] ?? 60,
+        reference:            '',
         notes:                '',
         address:              '',
         coordinates:          undefined,
@@ -234,6 +249,36 @@ export function AddStopDrawer({
           );
         })}
       </Box>
+
+      {/* ── Transport reference (platform, seat, booking code, etc.) ── */}
+      {form.type === 'transport' && (
+        <TextField
+          value={form.reference}
+          onChange={e => setForm(f => ({ ...f, reference: e.target.value }))}
+          placeholder={referencePlaceholder(form.name)}
+          label="Platform / Seat / Ref"
+          variant="outlined"
+          size="small"
+          fullWidth
+          sx={{
+            mb: 2.5,
+            '& .MuiOutlinedInput-root': {
+              fontFamily: D.body,
+              fontSize: '0.95rem',
+              '& fieldset': { borderColor: '#0369a1' },
+              '&:hover fieldset': { borderColor: '#0369a1' },
+              '&.Mui-focused fieldset': { borderColor: '#0369a1' },
+            },
+            '& .MuiInputLabel-root': { color: '#0369a1', fontFamily: D.body, fontSize: '0.85rem' },
+            '& .MuiInputLabel-root.Mui-focused': { color: '#0369a1' },
+          }}
+          InputProps={{
+            sx: {
+              backgroundColor: 'rgba(3,105,161,0.04)',
+            },
+          }}
+        />
+      )}
 
       {/* ── Time + Duration row ── */}
       <Box sx={{ display: 'flex', gap: 1.5, mb: 2.5, alignItems: 'flex-end' }}>

@@ -44,6 +44,7 @@ import ReceiptIcon         from '@mui/icons-material/Receipt';
 
 import dynamic             from 'next/dynamic';
 import { saveTripCache, getTripCache, queueAction } from '@/lib/offline/db';
+import { autoCacheTripFiles } from '@/lib/offline/fileCache';
 
 const MapTab = dynamic(() => import('@/components/map/MapTab'), { ssr: false });
 
@@ -209,6 +210,15 @@ export default function TripPage() {
       }
     }
     loadTrip();
+  }, [id]);
+
+  // ── Pre-cache all uploaded files for offline access ───────────────────────
+  useEffect(() => {
+    if (!id) return;
+    fetch(`/api/trips/${id}/files`)
+      .then(r => r.json())
+      .then(data => autoCacheTripFiles(String(id), data.files ?? []))
+      .catch(() => {});
   }, [id]);
 
   const openEdit = () => {

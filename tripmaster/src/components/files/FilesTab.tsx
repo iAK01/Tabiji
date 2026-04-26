@@ -54,6 +54,10 @@ import AssignmentIcon         from '@mui/icons-material/Assignment';
 import BoltIcon               from '@mui/icons-material/Bolt';
 import AddPhotoAlternateIcon  from '@mui/icons-material/AddPhotoAlternate';
 import CloseIcon              from '@mui/icons-material/Close';
+import VisibilityIcon         from '@mui/icons-material/Visibility';
+import WifiOffIcon            from '@mui/icons-material/WifiOff';
+import DocumentViewer, { type ViewableFile } from './DocumentViewer';
+import { isFileCached } from '@/lib/offline/fileCache';
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 
@@ -903,31 +907,53 @@ function ContactCard({ file, onDelete, onEdit }: { file: TripFile; onDelete: (id
 // ─── File / link card ─────────────────────────────────────────────────────────
 
 function ResourceCard({ file, onDelete, onEdit }: { file: TripFile; onDelete: (id: string) => void; onEdit: (file: TripFile) => void }) {
-  const [menuAnchor,  setMenuAnchor]  = useState<null | HTMLElement>(null);
-  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [menuAnchor,   setMenuAnchor]   = useState<null | HTMLElement>(null);
+  const [confirmOpen,  setConfirmOpen]  = useState(false);
+  const [viewerFile,   setViewerFile]   = useState<ViewableFile | null>(null);
+  const [cached,       setCached]       = useState(false);
   const color     = TYPE_COLOUR[file.type] ?? '#6b7280';
   const isLink    = file.resourceType === 'link';
   const actionUrl = isLink ? file.linkUrl : file.gcsUrl;
+  const canPreview = !isLink && !!file.gcsUrl;
+
+  useEffect(() => {
+    if (!canPreview) return;
+    isFileCached(file._id).then(setCached);
+  }, [file._id, canPreview]);
 
   return (
     <>
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, px: { xs: 2, sm: 2.5 }, py: { xs: 1.5, sm: 1.75 } }}>
         <Box sx={{ width: 3, alignSelf: 'stretch', borderRadius: 2, backgroundColor: color, flexShrink: 0 }} />
-        <Box sx={{ flexShrink: 0 }}>
+
+        {/* Mime icon with optional offline dot */}
+        <Box sx={{ flexShrink: 0, position: 'relative' }}>
           {isLink ? <LinkIcon sx={{ fontSize: 20, color }} /> : <MimeIcon mimeType={file.mimeType} size={20} />}
+          {cached && (
+            <Box sx={{
+              position: 'absolute', bottom: -2, right: -3,
+              width: 8, height: 8, borderRadius: '50%',
+              backgroundColor: '#4ade80',
+              border: '1.5px solid white',
+            }} />
+          )}
         </Box>
+
         <Box sx={{ flexGrow: 1, minWidth: 0 }}>
-          <Typography sx={{
-            fontFamily: D.body,
-            fontWeight: 700,
-            fontSize: '0.88rem',
-            color: D.navy,
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-          }}>
-            {file.name}
-          </Typography>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+            <Typography sx={{
+              fontFamily: D.body,
+              fontWeight: 700,
+              fontSize: '0.88rem',
+              color: D.navy,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+              flex: 1,
+            }}>
+              {file.name}
+            </Typography>
+          </Box>
           {file.notes && (
             <Typography sx={{ fontFamily: D.body, fontSize: '0.75rem', color: 'text.secondary', display: 'block' }}>
               {file.notes}
@@ -944,12 +970,30 @@ function ResourceCard({ file, onDelete, onEdit }: { file: TripFile; onDelete: (i
             </Typography>
           )}
         </Box>
-        {actionUrl && (
-          <IconButton size="small" component="a" href={actionUrl} target="_blank" rel="noopener noreferrer"
-            aria-label={isLink ? 'Open link' : 'Download file'}>
-            {isLink ? <OpenInNewIcon fontSize="small" /> : <DownloadIcon fontSize="small" />}
+
+        {/* View button — primary action for files */}
+        {canPreview && (
+          <IconButton
+            size="small"
+            onClick={() => setViewerFile({ _id: file._id, name: file.name, mimeType: file.mimeType, gcsUrl: file.gcsUrl })}
+            aria-label="View file"
+            sx={{ color: cached ? '#4ade80' : 'text.secondary', '&:hover': { color: D.green } }}
+          >
+            {cached
+              ? <WifiOffIcon fontSize="small" />
+              : <VisibilityIcon fontSize="small" />
+            }
           </IconButton>
         )}
+
+        {/* Open link button */}
+        {isLink && actionUrl && (
+          <IconButton size="small" component="a" href={actionUrl} target="_blank" rel="noopener noreferrer"
+            aria-label="Open link">
+            <OpenInNewIcon fontSize="small" />
+          </IconButton>
+        )}
+
         <IconButton size="small" onClick={e => setMenuAnchor(e.currentTarget)} sx={{ flexShrink: 0 }}>
           <MoreVertIcon fontSize="small" />
         </IconButton>
@@ -957,10 +1001,19 @@ function ResourceCard({ file, onDelete, onEdit }: { file: TripFile; onDelete: (i
 
       <Menu anchorEl={menuAnchor} open={Boolean(menuAnchor)} onClose={() => setMenuAnchor(null)}
         transformOrigin={{ horizontal: 'right', vertical: 'top' }} anchorOrigin={{ horizontal: 'right', vertical: 'bottom' }}>
-        {actionUrl && (
+        {canPreview && (
+          <MenuItem onClick={() => { setMenuAnchor(null); setViewerFile({ _id: file._id, name: file.name, mimeType: file.mimeType, gcsUrl: file.gcsUrl }); }} sx={{ gap: 1.5, fontSize: '0.875rem', fontFamily: D.body }}>
+            <VisibilityIcon fontSize="small" /> View
+          </MenuItem>
+        )}
+        {actionUrl && !isLink && (
           <MenuItem component="a" href={actionUrl} target="_blank" rel="noopener noreferrer" onClick={() => setMenuAnchor(null)} sx={{ gap: 1.5, fontSize: '0.875rem', fontFamily: D.body }}>
-            {isLink ? <OpenInNewIcon fontSize="small" /> : <DownloadIcon fontSize="small" />}
-            {isLink ? 'Open link' : 'Download'}
+            <DownloadIcon fontSize="small" /> Download
+          </MenuItem>
+        )}
+        {isLink && actionUrl && (
+          <MenuItem component="a" href={actionUrl} target="_blank" rel="noopener noreferrer" onClick={() => setMenuAnchor(null)} sx={{ gap: 1.5, fontSize: '0.875rem', fontFamily: D.body }}>
+            <OpenInNewIcon fontSize="small" /> Open link
           </MenuItem>
         )}
         <MenuItem onClick={() => { setMenuAnchor(null); onEdit(file); }} sx={{ gap: 1.5, fontSize: '0.875rem', fontFamily: D.body }}>
@@ -988,6 +1041,8 @@ function ResourceCard({ file, onDelete, onEdit }: { file: TripFile; onDelete: (i
             sx={{ fontFamily: D.body, fontWeight: 700 }}>{isLink ? 'Remove' : 'Delete'}</Button>
         </DialogActions>
       </Dialog>
+
+      <DocumentViewer file={viewerFile} onClose={() => setViewerFile(null)} />
     </>
   );
 }

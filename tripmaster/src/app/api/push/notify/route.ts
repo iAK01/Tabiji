@@ -469,15 +469,26 @@ export async function POST(req: Request) {
           const navUrl = stop.address
             ? buildNavUrl(stop.address, stop.coordinates, stop.type, drivingNavApp)
             : null;
-          const body = stop.address
-            ? [`${stop.address} - ${timeStr}`, navUrl ? 'Tap for navigation' : ''].filter(Boolean).join('\n')
-            : `${timeStr}`;
+
+          // Reference (platform, seat, booking code) leads the body when present
+          const refLine  = stop.reference ? stop.reference : null;
+          const bodyLines: string[] = [];
+          if (stop.address) bodyLines.push(`${stop.address} - ${timeStr}`);
+          else              bodyLines.push(timeStr);
+          if (navUrl)       bodyLines.push('Tap for navigation');
+          const body = bodyLines.join('\n');
+
+          // For transport with a reference, surface it in the title so it's
+          // the first thing visible in the lock-screen / banner notification.
+          const title = refLine && stop.type === 'transport'
+            ? `${refLine} · ${stop.name} in ${leadLabel(navLead)}`
+            : `${kind}: ${stop.name} in ${leadLabel(navLead)}`;
 
           const alreadyLogged = await PushNotificationLog.findOne({ userId, tripId, key, notificationType: notifType });
           console.log(`[notify] stop "${stop.name}" IN WINDOW — alreadyLogged=${!!alreadyLogged} key=${key} type=${notifType}`);
 
           const sent = await logAndSend(userId, tripId, key, notifType, subs, {
-            title: `${kind}: ${stop.name} in ${leadLabel(navLead)}`,
+            title,
             body,
             url:   navUrl ?? tripUrl,
             tag:   `stop-nav-${key}`,
@@ -491,12 +502,13 @@ export async function POST(req: Request) {
           const linked      = findLinkedFiles(allFiles, [stop.name, stop.address]);
           const fileSummary = summariseFiles(linked);
           const docUrl      = linked[0]?.gcsUrl ?? linked[0]?.linkUrl ?? tripUrl;
+          const refLine     = stop.reference ? `${stop.reference} · ` : '';
 
           const sent = await logAndSend(userId, tripId, key, `${stop.type}_doc`, subs, {
             title: `${kind}: ${stop.name} - Your documents`,
             body:  fileSummary
-              ? `${fileSummary} - tap to open\n${timeStr}`
-              : `Check your Resources for this trip\n${timeStr}`,
+              ? `${refLine}${fileSummary} - tap to open\n${timeStr}`
+              : `${refLine}Check your Resources for this trip\n${timeStr}`,
             url:   fileSummary ? docUrl : `/trips/${tripId}?tab=7`,
             tag:   `stop-doc-${key}`,
           }, invalidEndpoints);

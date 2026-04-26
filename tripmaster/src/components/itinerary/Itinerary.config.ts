@@ -60,6 +60,7 @@ export interface Stop {
   _id?: string;
   name: string;
   type: string;
+  reference?: string;
   address?: string;
   coordinates?: { lat: number; lng: number };
   scheduledStart?: string;
