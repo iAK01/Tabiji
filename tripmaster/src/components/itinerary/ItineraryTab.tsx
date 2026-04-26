@@ -118,9 +118,16 @@ export default function ItineraryTab({ tripId, startDate, endDate, fabTrigger }:
         const map = new Map<string, Array<{ _id: string; name: string; mimeType?: string; gcsUrl?: string }>>();
         for (const f of files) {
           if (f.resourceType === 'file' && f.linkedTo?.entryId && f.gcsUrl) {
-            const key = f.linkedTo.entryId;
-            if (!map.has(key)) map.set(key, []);
-            map.get(key)!.push({ _id: f._id, name: f.name, mimeType: f.mimeType, gcsUrl: f.gcsUrl });
+            const entry = { _id: f._id, name: f.name, mimeType: f.mimeType, gcsUrl: f.gcsUrl };
+            // Index by entryId (itinerary stop _id)
+            if (!map.has(f.linkedTo.entryId)) map.set(f.linkedTo.entryId, []);
+            map.get(f.linkedTo.entryId)!.push(entry);
+            // Also index by collection:entryId for logistics-sourced stops
+            if (f.linkedTo.collection) {
+              const logKey = `${f.linkedTo.collection}:${f.linkedTo.entryId}`;
+              if (!map.has(logKey)) map.set(logKey, []);
+              map.get(logKey)!.push(entry);
+            }
           }
         }
         setFilesByStop(map);
@@ -744,7 +751,13 @@ export default function ItineraryTab({ tripId, startDate, endDate, fabTrigger }:
                         isMobile={isMobile}
                         colIndex={cols[i].col}
                         totalCols={cols[i].totalCols}
-                        linkedFiles={stop._id ? (filesByStop.get(stop._id) ?? []) : []}
+                        linkedFiles={
+                          (stop._id && filesByStop.get(stop._id)?.length)
+                            ? filesByStop.get(stop._id)!
+                            : (stop as any).logisticsRef
+                            ? filesByStop.get(`${(stop as any).logisticsRef.collection}:${String((stop as any).logisticsRef.index)}`) ?? []
+                            : []
+                        }
                       />
                       <TravelConnector stop={stop} pxPerMin={pxPerMin} />
                     </Box>

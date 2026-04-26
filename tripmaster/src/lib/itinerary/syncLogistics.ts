@@ -139,7 +139,7 @@ export async function syncLogisticsToItinerary(tripId: string, logistics?: any) 
     const newStops: any[] = [];
 
     // ── Transport ─────────────────────────────────────────────────────────────
-    for (const t of log.transportation ?? []) {
+    for (const [tIdx, t] of (log.transportation ?? []).entries()) {
       const depTime = t.departureTime;
       const arrTime = t.arrivalTime;
       const name    = transportStopName(t);
@@ -177,6 +177,7 @@ export async function syncLogisticsToItinerary(tripId: string, logistics?: any) 
             address:        t.departureLocation ?? undefined,
             coordinates:    t.departureCoordinates ?? undefined,
             metadata:       { transportType: 'flight', phase: 'airport_checkin' },
+            logisticsRef:   { collection: 'transport', index: tIdx },
           });
         }
 
@@ -205,7 +206,8 @@ export async function syncLogisticsToItinerary(tripId: string, logistics?: any) 
           coordinates: ['car','taxi','private_transfer','bicycle'].includes(t.type)
             ? (t.arrivalCoordinates ?? undefined)
             : (t.departureCoordinates ?? undefined),
-          metadata: { transportType: t.type, phase: 'departure' },
+          metadata:     { transportType: t.type, phase: 'departure' },
+          logisticsRef: { collection: 'transport', index: tIdx },
         });
       }
 
@@ -228,14 +230,15 @@ export async function syncLogisticsToItinerary(tripId: string, logistics?: any) 
             source:         'logistics',
             address:     t.arrivalAddress ?? t.arrivalLocation ?? undefined,
             coordinates: t.arrivalCoordinates ?? undefined,
-            metadata: { transportType: t.type, phase: 'arrival' },
+            metadata:     { transportType: t.type, phase: 'arrival' },
+            logisticsRef: { collection: 'transport', index: tIdx },
           });
         }
       }
     }
 
     // ── Accommodation ─────────────────────────────────────────────────────────
-    for (const a of log.accommodation ?? []) {
+    for (const [aIdx, a] of (log.accommodation ?? []).entries()) {
       const accomNotes = [
         a.confirmationNumber ? `Ref: ${a.confirmationNumber}` : null,
         (a.status === 'confirmed' || a.status === 'booked') ? '✅ Confirmed' : '⏳ Not confirmed',
@@ -257,7 +260,8 @@ export async function syncLogisticsToItinerary(tripId: string, logistics?: any) 
           notes:          accomNotes,
           address:        a.address ?? undefined,
           coordinates:    a.coordinates ?? undefined,
-          metadata: { accommodationType: a.type, phase: 'checkin' },
+          metadata:       { accommodationType: a.type, phase: 'checkin' },
+          logisticsRef:   { collection: 'accommodation', index: aIdx },
         });
       }
 
@@ -277,7 +281,8 @@ export async function syncLogisticsToItinerary(tripId: string, logistics?: any) 
           notes:          accomNotes,
           address:        a.address ?? undefined,
           coordinates:    a.coordinates ?? undefined,
-          metadata: { accommodationType: a.type, phase: 'checkout' },
+          metadata:       { accommodationType: a.type, phase: 'checkout' },
+          logisticsRef:   { collection: 'accommodation', index: aIdx },
         });
       }
 
@@ -302,6 +307,7 @@ export async function syncLogisticsToItinerary(tripId: string, logistics?: any) 
             address:        a.address ?? undefined,
             coordinates:    a.coordinates ?? undefined,
             metadata:       { accommodationType: a.type, phase: 'breakfast' },
+            logisticsRef:   { collection: 'accommodation', index: aIdx },
           });
           cur.setDate(cur.getDate() + 1);
         }
@@ -314,7 +320,7 @@ export async function syncLogisticsToItinerary(tripId: string, logistics?: any) 
       sports: '🏟️', attraction: '🏛️', business: '💼', other: '📍',
     };
 
-    for (const v of log.venues ?? []) {
+    for (const [vIdx, v] of (log.venues ?? []).entries()) {
       if (!v.name || !v.date) continue;
 
       const time = v.time ?? '20:00';
@@ -347,7 +353,8 @@ export async function syncLogisticsToItinerary(tripId: string, logistics?: any) 
           v.website            ? `🔗 ${v.website}`              : null,
           (v.status === 'confirmed' || v.status === 'booked') ? '✅ Confirmed' : '⏳ Not booked',
         ].filter(Boolean).join(' · '),
-        metadata: { venueType: v.type },
+        metadata:     { venueType: v.type },
+        logisticsRef: { collection: 'venue', index: vIdx },
       });
     }
 

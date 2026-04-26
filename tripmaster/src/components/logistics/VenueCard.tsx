@@ -1,7 +1,8 @@
 'use client';
 // VenueCard.tsx → src/components/logistics/VenueCard.tsx
 
-import { Box, Chip, IconButton, Paper, Typography } from '@mui/material';
+import { Box, Button, Chip, IconButton, Paper, Typography } from '@mui/material';
+import AttachFileIcon from '@mui/icons-material/AttachFile';
 import LaunchIcon     from '@mui/icons-material/Launch';
 import MoreVertIcon   from '@mui/icons-material/MoreVert';
 import NavigateButton from '@/components/ui/NavigateButton';
@@ -9,10 +10,12 @@ import DestinationMap from '@/components/ui/DestinationMap';
 import { D, DOT_COLOUR, VENUE_TYPES, venueIcon, type MenuKind } from './logistics.helpers';
 
 interface VenueCardProps {
-  v:       any;
-  i:       number;
-  onMenu:  (e: React.MouseEvent<HTMLElement>, kind: MenuKind, index: number) => void;
-  fmtDate: (d: string) => string;
+  v:            any;
+  i:            number;
+  onMenu:       (e: React.MouseEvent<HTMLElement>, kind: MenuKind, index: number) => void;
+  fmtDate:      (d: string) => string;
+  linkedFiles?: any[];
+  onOpenFile?:  (f: any) => void;
 }
 
 // ── Formatters ────────────────────────────────────────────────────────────────
@@ -59,7 +62,7 @@ const DashedRule = () => (
 
 // ── Main export ───────────────────────────────────────────────────────────────
 
-export default function VenueCard({ v, i, onMenu }: VenueCardProps) {
+export default function VenueCard({ v, i, onMenu, linkedFiles, onOpenFile }: VenueCardProps) {
   const venueTypeLabel = VENUE_TYPES.find(vt => vt.value === v.type)?.label ?? 'Venue';
 
   return (
@@ -179,6 +182,31 @@ export default function VenueCard({ v, i, onMenu }: VenueCardProps) {
                 €{v.cost}
               </Typography>
             )}
+          </Box>
+        )}
+
+        {linkedFiles && linkedFiles.length > 0 && (
+          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.75, px: 2.5, pb: 2, pt: 0.25 }}>
+            {linkedFiles.map((f: any) => (
+              <Button
+                key={f._id}
+                size="small"
+                startIcon={<AttachFileIcon sx={{ fontSize: '0.75rem !important' }} />}
+                onClick={() => onOpenFile?.(f)}
+                sx={{
+                  fontFamily: D.body, fontSize: '0.7rem',
+                  py: 0.3, px: 1, borderRadius: 99,
+                  textTransform: 'none',
+                  bgcolor: 'rgba(30,144,255,0.08)',
+                  color: '#1E90FF',
+                  border: '1px solid rgba(30,144,255,0.25)',
+                  minWidth: 0,
+                  '&:hover': { bgcolor: 'rgba(30,144,255,0.15)' },
+                }}
+              >
+                {f.name}
+              </Button>
+            ))}
           </Box>
         )}
       </Paper>

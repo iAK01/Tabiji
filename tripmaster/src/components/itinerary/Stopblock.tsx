@@ -6,7 +6,6 @@ import { Box, Typography, IconButton, Tooltip } from '@mui/material';
 import { alpha }          from '@mui/material/styles';
 import DeleteIcon         from '@mui/icons-material/Delete';
 import LockIcon           from '@mui/icons-material/Lock';
-import AttachFileIcon     from '@mui/icons-material/AttachFile';
 import NavigateButton     from '@/components/ui/NavigateButton';
 import DocumentViewer, { type ViewableFile } from '@/components/files/DocumentViewer';
 import {
@@ -182,17 +181,22 @@ export function StopBlock({ stop, onDelete, onClick, onResize, pxPerMin, isMobil
           }}
         />
 
-        {/* ── Icon column — full height, scales with block ── */}
-        <Box sx={{
-          flexShrink:      0,
-          width:           liveHeight > 60 ? (isMobile ? 44 : 38) : (isMobile ? 34 : 28),
-          display:         'flex',
-          alignItems:      'center',
-          justifyContent:  'center',
-          backgroundColor: alpha(cfg.color, 0.10),
-          transition:      'width 0.1s',
-          position:        'relative',
-        }}>
+        {/* ── Icon column — full height, tappable when files attached ── */}
+        <Box
+          onClick={hasFiles ? (e) => { e.stopPropagation(); setViewerFile(linkedFiles[0]); } : undefined}
+          sx={{
+            flexShrink:      0,
+            width:           liveHeight > 60 ? (isMobile ? 44 : 38) : (isMobile ? 34 : 28),
+            display:         'flex',
+            alignItems:      'center',
+            justifyContent:  'center',
+            backgroundColor: hasFiles ? alpha(cfg.color, 0.18) : alpha(cfg.color, 0.10),
+            transition:      'width 0.1s, background-color 0.15s',
+            position:        'relative',
+            cursor:          hasFiles ? 'pointer' : 'inherit',
+            '&:hover':       hasFiles ? { backgroundColor: alpha(cfg.color, 0.28) } : {},
+          }}
+        >
           <cfg.Icon sx={{
             fontSize: liveHeight > 80
               ? (isMobile ? 22 : 20)
@@ -202,13 +206,27 @@ export function StopBlock({ stop, onDelete, onClick, onResize, pxPerMin, isMobil
             color:      cfg.color,
             transition: 'font-size 0.1s',
           }} />
-          {/* File attachment dot indicator */}
-          {hasFiles && (
+          {/* File count badge */}
+          {hasFiles && linkedFiles.length > 1 && (
+            <Box sx={{
+              position: 'absolute', bottom: 4, right: 3,
+              minWidth: 14, height: 14, borderRadius: 7,
+              backgroundColor: '#4ade80',
+              border: '1.5px solid white',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              zIndex: 3,
+            }}>
+              <Typography sx={{ fontSize: '0.5rem', fontWeight: 700, color: '#fff', lineHeight: 1 }}>
+                {linkedFiles.length}
+              </Typography>
+            </Box>
+          )}
+          {hasFiles && linkedFiles.length === 1 && (
             <Box sx={{
               position: 'absolute', bottom: 5, right: 4,
               width: 6, height: 6, borderRadius: '50%',
               backgroundColor: '#4ade80',
-              border: '1px solid white',
+              border: '1.5px solid white',
               zIndex: 3,
             }} />
           )}
@@ -364,20 +382,6 @@ export function StopBlock({ stop, onDelete, onClick, onResize, pxPerMin, isMobil
                 size="small"
                 sx={{ p: isMobile ? 0.75 : 0.25, minWidth: isMobile ? 32 : 22, minHeight: isMobile ? 32 : 22 }}
               />
-            )}
-            {hasFiles && (
-              <IconButton
-                size="small"
-                onClick={e => { e.stopPropagation(); setViewerFile(linkedFiles[0]); }}
-                sx={{
-                  p: isMobile ? 0.75 : 0.25, flexShrink: 0,
-                  color: '#4ade80',
-                  '&:hover': { color: '#22c55e', backgroundColor: alpha('#4ade80', 0.08) },
-                  ...(isMobile && { minWidth: 32, minHeight: 32 }),
-                }}
-              >
-                <AttachFileIcon sx={{ fontSize: isMobile ? 14 : 12 }} />
-              </IconButton>
             )}
             {!isLocked && onDelete && (
               <IconButton

@@ -1,7 +1,8 @@
 'use client';
 // TransportCard.tsx → src/components/logistics/TransportCard.tsx
 
-import { Box, IconButton, Paper, Typography } from '@mui/material';
+import { Box, Button, IconButton, Paper, Typography } from '@mui/material';
+import AttachFileIcon from '@mui/icons-material/AttachFile';
 import MoreVertIcon   from '@mui/icons-material/MoreVert';
 import NavigateButton from '@/components/ui/NavigateButton';
 import DestinationMap from '@/components/ui/DestinationMap';
@@ -12,10 +13,12 @@ import {
 } from './logistics.helpers';
 
 interface TransportCardProps {
-  t:           any;
-  i:           number;
-  onMenu:      (e: React.MouseEvent<HTMLElement>, kind: MenuKind, index: number) => void;
-  fmtDateTime: (dt: string) => string;
+  t:            any;
+  i:            number;
+  onMenu:       (e: React.MouseEvent<HTMLElement>, kind: MenuKind, index: number) => void;
+  fmtDateTime:  (dt: string) => string;
+  linkedFiles?: any[];
+  onOpenFile?:  (f: any) => void;
 }
 
 // ── Formatters ────────────────────────────────────────────────────────────────
@@ -358,7 +361,7 @@ function getMapTarget(t: any) {
 
 // ── Main export ───────────────────────────────────────────────────────────────
 
-export default function TransportCard({ t, i, onMenu }: TransportCardProps) {
+export default function TransportCard({ t, i, onMenu, linkedFiles, onOpenFile }: TransportCardProps) {
   const mapTarget = getMapTarget(t);
   const navDest   = mapTarget ? { name: mapTarget.address, address: mapTarget.address, coordinates: mapTarget.coordinates } : null;
 
@@ -409,6 +412,31 @@ export default function TransportCard({ t, i, onMenu }: TransportCardProps) {
 
         {/* Time + ref strip */}
         <TimeRefStrip t={t} type={t.type} />
+
+        {linkedFiles && linkedFiles.length > 0 && (
+          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.75, px: 2.5, pb: 2, pt: 0.25 }}>
+            {linkedFiles.map((f: any) => (
+              <Button
+                key={f._id}
+                size="small"
+                startIcon={<AttachFileIcon sx={{ fontSize: '0.75rem !important' }} />}
+                onClick={() => onOpenFile?.(f)}
+                sx={{
+                  fontFamily: D.body, fontSize: '0.7rem',
+                  py: 0.3, px: 1, borderRadius: 99,
+                  textTransform: 'none',
+                  bgcolor: 'rgba(30,144,255,0.08)',
+                  color: '#1E90FF',
+                  border: '1px solid rgba(30,144,255,0.25)',
+                  minWidth: 0,
+                  '&:hover': { bgcolor: 'rgba(30,144,255,0.15)' },
+                }}
+              >
+                {f.name}
+              </Button>
+            ))}
+          </Box>
+        )}
       </Paper>
 
       {mapTarget && (

@@ -128,8 +128,8 @@ interface Todo {
 // Unified timeline item
 type TimelineItem =
   | { kind: 'stop';      sortMins: number; stop: Stop }
-  | { kind: 'transport'; sortMins: number; transport: Transport; event: 'departure' | 'arrival' }
-  | { kind: 'accom';     sortMins: number; accom: Accommodation; event: 'checkin' | 'checkout' };
+  | { kind: 'transport'; sortMins: number; transport: Transport; event: 'departure' | 'arrival'; logisticsIndex: number }
+  | { kind: 'accom';     sortMins: number; accom: Accommodation; event: 'checkin' | 'checkout'; logisticsIndex: number };
 
 interface OnTripScreenProps {
   tripId: string;
@@ -963,9 +963,13 @@ export default function OnTripScreen({ tripId, trip }: OnTripScreenProps) {
       const map = new Map<string, any[]>();
       for (const f of allFiles) {
         if (f.resourceType === 'file' && f.linkedTo?.entryId) {
-          const arr = map.get(f.linkedTo.entryId) ?? [];
-          arr.push(f);
-          map.set(f.linkedTo.entryId, arr);
+          const entry = f;
+          const k1 = f.linkedTo.entryId;
+          const arr1 = map.get(k1) ?? []; arr1.push(entry); map.set(k1, arr1);
+          if (f.linkedTo.collection) {
+            const k2 = `${f.linkedTo.collection}:${f.linkedTo.entryId}`;
+            const arr2 = map.get(k2) ?? []; arr2.push(entry); map.set(k2, arr2);
+          }
         }
       }
       setFilesByStop(map);
@@ -1026,29 +1030,29 @@ export default function OnTripScreen({ tripId, trip }: OnTripScreenProps) {
     timelineItems.push({ kind: 'stop', sortMins: startM, stop });
   }
 
-  for (const t of logistics?.transportation ?? []) {
+  for (const [tIdx, t] of (logistics?.transportation ?? []).entries()) {
     if (t.departureTime) {
       const depDate = t.departureTime.split('T')[0];
       if (depDate === today) {
-        timelineItems.push({ kind: 'transport', sortMins: isoToMins(t.departureTime), transport: t, event: 'departure' });
+        timelineItems.push({ kind: 'transport', sortMins: isoToMins(t.departureTime), transport: t, event: 'departure', logisticsIndex: tIdx });
       }
     }
     if (t.arrivalTime) {
       const arrDate = t.arrivalTime.split('T')[0];
       if (arrDate === today) {
-        timelineItems.push({ kind: 'transport', sortMins: isoToMins(t.arrivalTime), transport: t, event: 'arrival' });
+        timelineItems.push({ kind: 'transport', sortMins: isoToMins(t.arrivalTime), transport: t, event: 'arrival', logisticsIndex: tIdx });
       }
     }
   }
 
-  for (const a of logistics?.accommodation ?? []) {
+  for (const [aIdx, a] of (logistics?.accommodation ?? []).entries()) {
     if (a.checkIn?.split('T')[0] === today) {
       const mins = a.checkIn.includes('T') ? isoToMins(a.checkIn) : 14 * 60;
-      timelineItems.push({ kind: 'accom', sortMins: mins, accom: a, event: 'checkin' });
+      timelineItems.push({ kind: 'accom', sortMins: mins, accom: a, event: 'checkin', logisticsIndex: aIdx });
     }
     if (a.checkOut?.split('T')[0] === today) {
       const mins = a.checkOut.includes('T') ? isoToMins(a.checkOut) : 11 * 60;
-      timelineItems.push({ kind: 'accom', sortMins: mins, accom: a, event: 'checkout' });
+      timelineItems.push({ kind: 'accom', sortMins: mins, accom: a, event: 'checkout', logisticsIndex: aIdx });
     }
   }
 
@@ -1149,7 +1153,13 @@ export default function OnTripScreen({ tripId, trip }: OnTripScreenProps) {
             stop={rightNow.stop}
             startMins={rightNow.startM}
             nowMins={nowMins}
-            linkedFiles={filesByStop.get(rightNow.stop._id ?? '') ?? []}
+            linkedFiles={(() => {
+              const byId  = filesByStop.get(rightNow.stop._id ?? '') ?? [];
+              const ref   = (rightNow.stop as any).logisticsRef;
+              const byRef = ref ? (filesByStop.get(`${ref.collection}:${String(ref.index)}`) ?? []) : [];
+              const seen  = new Set<string>();
+              return [...byId, ...byRef].filter(f => { if (seen.has(f._id)) return false; seen.add(f._id); return true; });
+            })()}
             onOpenFile={f => setViewerFile({ _id: f._id, name: f.name, mimeType: f.mimeType, gcsUrl: f.gcsUrl })}
           />
         </Box>
@@ -1194,8 +1204,8 @@ export default function OnTripScreen({ tripId, trip }: OnTripScreenProps) {
                       past={past}
                       linkedFiles={
                       item.kind === 'stop'      ? (filesByStop.get(item.stop._id ?? '') ?? []) :
-                      item.kind === 'transport' ? (filesByStop.get(item.transport._id ?? '') ?? []) :
-                                                  (filesByStop.get(item.accom._id ?? '') ?? [])
+                      item.kind === 'transport' ? (filesByStop.get(`transport:${String((item as any).logisticsIndex)}`) ?? []) :
+                                                  (filesByStop.get(`accommodation:${String((item as any).logisticsIndex)}`) ?? [])
                     }
                       onOpenFile={f => setViewerFile({ _id: f._id, name: f.name, mimeType: f.mimeType, gcsUrl: f.gcsUrl })}
                     />

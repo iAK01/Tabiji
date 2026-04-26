@@ -1,7 +1,8 @@
 'use client';
 // AccomCard.tsx → src/components/logistics/AccomCard.tsx
 
-import { Box, IconButton, Paper, Typography } from '@mui/material';
+import { Box, Button, IconButton, Paper, Typography } from '@mui/material';
+import AttachFileIcon from '@mui/icons-material/AttachFile';
 import MoreVertIcon   from '@mui/icons-material/MoreVert';
 import HotelIcon      from '@mui/icons-material/Hotel';
 import NavigateButton from '@/components/ui/NavigateButton';
@@ -9,10 +10,12 @@ import DestinationMap from '@/components/ui/DestinationMap';
 import { D, DOT_COLOUR, type MenuKind } from './logistics.helpers';
 
 interface AccomCardProps {
-  a:       any;
-  i:       number;
-  onMenu:  (e: React.MouseEvent<HTMLElement>, kind: MenuKind, index: number) => void;
-  fmtDate: (d: string) => string;
+  a:            any;
+  i:            number;
+  onMenu:       (e: React.MouseEvent<HTMLElement>, kind: MenuKind, index: number) => void;
+  fmtDate:      (d: string) => string;
+  linkedFiles?: any[];
+  onOpenFile?:  (f: any) => void;
 }
 
 // ── Formatters ────────────────────────────────────────────────────────────────
@@ -68,7 +71,7 @@ const DashedRule = () => (
 
 // ── Main export ───────────────────────────────────────────────────────────────
 
-export default function AccomCard({ a, i, onMenu }: AccomCardProps) {
+export default function AccomCard({ a, i, onMenu, linkedFiles, onOpenFile }: AccomCardProps) {
   const nights = nightCount(a.checkIn, a.checkOut);
 
   return (
@@ -173,6 +176,31 @@ export default function AccomCard({ a, i, onMenu }: AccomCardProps) {
                 €{a.cost}
               </Typography>
             )}
+          </Box>
+        )}
+
+        {linkedFiles && linkedFiles.length > 0 && (
+          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.75, px: 2.5, pb: 2, pt: 0.25 }}>
+            {linkedFiles.map((f: any) => (
+              <Button
+                key={f._id}
+                size="small"
+                startIcon={<AttachFileIcon sx={{ fontSize: '0.75rem !important' }} />}
+                onClick={() => onOpenFile?.(f)}
+                sx={{
+                  fontFamily: D.body, fontSize: '0.7rem',
+                  py: 0.3, px: 1, borderRadius: 99,
+                  textTransform: 'none',
+                  bgcolor: 'rgba(30,144,255,0.08)',
+                  color: '#1E90FF',
+                  border: '1px solid rgba(30,144,255,0.25)',
+                  minWidth: 0,
+                  '&:hover': { bgcolor: 'rgba(30,144,255,0.15)' },
+                }}
+              >
+                {f.name}
+              </Button>
+            ))}
           </Box>
         )}
       </Paper>

@@ -508,10 +508,16 @@ export default function Dashboard() {
         const rn = deriveRightNow(itin.days ?? []);
         setRightNow(rn);
         if (rn?.stop._id) {
-          const linked = (files.files ?? []).filter(
-            (f: any) => f.resourceType === 'file' && f.linkedTo?.entryId === rn.stop._id
+          const stopId = rn.stop._id;
+          const logRef = (rn.stop as any).logisticsRef;
+          const linked = (files.files ?? []).filter((f: any) =>
+            f.resourceType === 'file' && f.gcsUrl && (
+              f.linkedTo?.entryId === stopId ||
+              (logRef && f.linkedTo?.collection === logRef.collection && f.linkedTo?.entryId === String(logRef.index))
+            )
           );
-          setRightNowFiles(linked);
+          const seen = new Set<string>();
+          setRightNowFiles(linked.filter((f: any) => { if (seen.has(f._id)) return false; seen.add(f._id); return true; }));
         } else {
           setRightNowFiles([]);
         }

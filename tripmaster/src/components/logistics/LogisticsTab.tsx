@@ -29,6 +29,8 @@ import AddressSearch     from '@/components/ui/AddressSearch';
 import BookingLinks      from '@/components/logistics/BookingLinks';
 import type { ResolvedAddress } from '@/components/ui/AddressSearch';
 import { saveTripCache, getTripCache, queueAction } from '@/lib/offline/db';
+import DocumentViewer from '@/components/files/DocumentViewer';
+import type { ViewableFile } from '@/components/files/DocumentViewer';
 
 // ── Sub-components (defined outside — no remount bug) ─────────────────────────
 import TransportCard      from './TransportCard';
@@ -81,15 +83,32 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
   // Gap detection prompts — fires after saving a flight when ground transport is missing
   const [gapPrompts, setGapPrompts] = useState<GapPromptItem[]>([]);
 
-  // ── Load logistics ──────────────────────────────────────────────────────────
+  const [filesById,  setFilesById]  = useState<Map<string, any[]>>(new Map());
+  const [viewerFile, setViewerFile] = useState<ViewableFile | null>(null);
+
+  // ── Load logistics + files ──────────────────────────────────────────────────
   useEffect(() => {
     async function loadLogistics() {
       try {
-        const res  = await fetch(`/api/trips/${tripId}/logistics`);
-        const data = await res.json();
+        const [logRes, fileRes] = await Promise.all([
+          fetch(`/api/trips/${tripId}/logistics`),
+          fetch(`/api/trips/${tripId}/files`),
+        ]);
+        const data  = await logRes.json();
+        const fData = await fileRes.json();
         setLogistics(data.logistics);
         const cached = await getTripCache(tripId);
         await saveTripCache(tripId, { ...(cached ?? {}), logistics: data.logistics });
+
+        const map = new Map<string, any[]>();
+        for (const f of (fData.files ?? [])) {
+          if (f.resourceType === 'file' && f.linkedTo?.entryId) {
+            const arr = map.get(f.linkedTo.entryId) ?? [];
+            arr.push(f);
+            map.set(f.linkedTo.entryId, arr);
+          }
+        }
+        setFilesById(map);
       } catch {
         const cached = await getTripCache(tripId);
         if (cached?.logistics) setLogistics(cached.logistics);
@@ -681,7 +700,11 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
             endDate={trip.endDate}
           />
           {(logistics?.transportation ?? []).map((t: any, i: number) => (
-            <TransportCard key={i} t={t} i={i} onMenu={openMenu} fmtDateTime={fmtDateTime} />
+            <TransportCard
+              key={i} t={t} i={i} onMenu={openMenu} fmtDateTime={fmtDateTime}
+              linkedFiles={filesById.get(String(i)) ?? []}
+              onOpenFile={f => setViewerFile({ _id: f._id, name: f.name, mimeType: f.mimeType, gcsUrl: f.gcsUrl })}
+            />
           ))}
           {(!logistics?.transportation || logistics.transportation.length === 0) && (
             <Alert severity="info" sx={{ mb: 2, fontFamily: D.body }}>No transport added yet.</Alert>
@@ -701,7 +724,11 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
       {section === 1 && (
         <Box>
           {(logistics?.accommodation ?? []).map((a: any, i: number) => (
-            <AccomCard key={i} a={a} i={i} onMenu={openMenu} fmtDate={fmtDate} />
+            <AccomCard
+              key={i} a={a} i={i} onMenu={openMenu} fmtDate={fmtDate}
+              linkedFiles={filesById.get(String(i)) ?? []}
+              onOpenFile={f => setViewerFile({ _id: f._id, name: f.name, mimeType: f.mimeType, gcsUrl: f.gcsUrl })}
+            />
           ))}
           {(!logistics?.accommodation || logistics.accommodation.length === 0) && (
             <Alert severity="info" sx={{ mb: 2, fontFamily: D.body }}>No accommodation added yet.</Alert>
@@ -721,7 +748,11 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
       {section === 2 && (
         <Box>
           {(logistics?.venues ?? []).map((v: any, i: number) => (
-            <VenueCard key={i} v={v} i={i} onMenu={openMenu} fmtDate={fmtDate} />
+            <VenueCard
+              key={i} v={v} i={i} onMenu={openMenu} fmtDate={fmtDate}
+              linkedFiles={filesById.get(String(i)) ?? []}
+              onOpenFile={f => setViewerFile({ _id: f._id, name: f.name, mimeType: f.mimeType, gcsUrl: f.gcsUrl })}
+            />
           ))}
           {(!logistics?.venues || logistics.venues.length === 0) && (
             <Alert severity="info" sx={{ mb: 2, fontFamily: D.body }}>No venues added yet.</Alert>
@@ -1154,6 +1185,7 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
         </DialogActions>
       </Dialog>
 
+      <DocumentViewer file={viewerFile} onClose={() => setViewerFile(null)} />
     </Box>
   );
 }

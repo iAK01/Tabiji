@@ -4,7 +4,9 @@
       "Read(//Users/kennethkilleen/tripmaster/**)",
       "Bash(git add *)",
       "Bash(git commit -m ' *)",
-      "Bash(git push *)"
+      "Bash(git push *)",
+      "Bash(xargs ls *)",
+      "Bash(xargs cat *)"
     ]
   }
 }
