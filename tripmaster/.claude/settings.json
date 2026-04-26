@@ -7,7 +7,7 @@
       "Bash(git push *)",
       "Bash(xargs ls *)",
       "Bash(xargs cat *)",
-      "Bash(mongosh 'mongodb+srv://kennethkilleen:REDACTED@trip-planner-cluster.jpszjg3.mongodb.net/tripmaster?retryWrites=true&w=majority&appName=trip-planner-cluster' --eval ' *)"
+      "WebSearch"
     ]
   }
 }
