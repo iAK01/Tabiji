@@ -86,6 +86,7 @@ interface ItineraryDay {
 }
 
 interface Transport {
+  _id?: string;
   type: string;
   status: string;
   departureLocation: string;
@@ -103,6 +104,7 @@ interface Transport {
 }
 
 interface Accommodation {
+  _id?: string;
   type: string;
   status: string;
   name: string;
@@ -685,6 +687,28 @@ function TimelineRow({ item, past, linkedFiles = [], onOpenFile }: {
               color: STATUS_COLOR[t.status] ?? '#6b7280',
             }}
           />
+
+          {linkedFiles.length > 0 && onOpenFile && (
+            <Box sx={{ display: 'flex', gap: 0.5, mt: 0.6, flexWrap: 'wrap' }}>
+              {linkedFiles.map((f: any) => (
+                <Button
+                  key={f._id}
+                  size="small"
+                  startIcon={<AttachFileIcon sx={{ fontSize: '0.75rem !important' }} />}
+                  onClick={() => onOpenFile(f)}
+                  sx={{
+                    fontFamily: D.body, fontSize: '0.68rem', fontWeight: 700,
+                    py: 0.2, px: 0.75, minHeight: 24,
+                    backgroundColor: 'rgba(8,145,178,0.08)', color: '#0891b2',
+                    border: '1px solid rgba(8,145,178,0.2)', borderRadius: '6px',
+                    '&:hover': { backgroundColor: 'rgba(8,145,178,0.14)' },
+                  }}
+                >
+                  {f.name.length > 20 ? `${f.name.slice(0, 20)}…` : f.name}
+                </Button>
+              ))}
+            </Box>
+          )}
         </Box>
       </Box>
     );
@@ -756,6 +780,28 @@ function TimelineRow({ item, past, linkedFiles = [], onOpenFile }: {
         )}
 
         {a.address && <MapButtons name={a.name} address={a.address} />}
+
+        {linkedFiles.length > 0 && onOpenFile && (
+          <Box sx={{ display: 'flex', gap: 0.5, mt: 0.6, flexWrap: 'wrap' }}>
+            {linkedFiles.map((f: any) => (
+              <Button
+                key={f._id}
+                size="small"
+                startIcon={<AttachFileIcon sx={{ fontSize: '0.75rem !important' }} />}
+                onClick={() => onOpenFile(f)}
+                sx={{
+                  fontFamily: D.body, fontSize: '0.68rem', fontWeight: 700,
+                  py: 0.2, px: 0.75, minHeight: 24,
+                  backgroundColor: 'rgba(8,145,178,0.08)', color: '#0891b2',
+                  border: '1px solid rgba(8,145,178,0.2)', borderRadius: '6px',
+                  '&:hover': { backgroundColor: 'rgba(8,145,178,0.14)' },
+                }}
+              >
+                {f.name.length > 20 ? `${f.name.slice(0, 20)}…` : f.name}
+              </Button>
+            ))}
+          </Box>
+        )}
       </Box>
     </Box>
   );
@@ -1146,7 +1192,11 @@ export default function OnTripScreen({ tripId, trip }: OnTripScreenProps) {
                     <TimelineRow
                       item={item}
                       past={past}
-                      linkedFiles={item.kind === 'stop' ? (filesByStop.get(item.stop._id ?? '') ?? []) : []}
+                      linkedFiles={
+                      item.kind === 'stop'      ? (filesByStop.get(item.stop._id ?? '') ?? []) :
+                      item.kind === 'transport' ? (filesByStop.get(item.transport._id ?? '') ?? []) :
+                                                  (filesByStop.get(item.accom._id ?? '') ?? [])
+                    }
                       onOpenFile={f => setViewerFile({ _id: f._id, name: f.name, mimeType: f.mimeType, gcsUrl: f.gcsUrl })}
                     />
                   </Box>
