@@ -456,7 +456,7 @@ export default function TripOverview({ trip, onNavigate }: Props) {
 
   // ── Countdown label ───────────────────────────────────────────────────────
   const currentDayNum   = isActive ? Math.floor((today.getTime() - departure.getTime()) / 86400000) + 1 : null;
-  const tripTotalDays   = isActive ? Math.round((tripEnd.getTime()  - departure.getTime()) / 86400000) + 1 : null;
+  const tripTotalDays   = isActive ? Math.floor((tripEnd.getTime()  - departure.getTime()) / 86400000) + 1 : null;
 
   const countdownNumber = isPast ? null : isActive ? currentDayNum : daysUntil;
   const countdownLabel  = isPast   ? 'TRIP COMPLETE'
