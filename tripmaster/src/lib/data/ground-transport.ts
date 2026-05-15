@@ -5,11 +5,20 @@
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface TransportService {
-  id:       string;
-  name:     string;
-  webUrl:   string;
-  category: 'ride' | 'transit' | 'rail';
-  note?:    string;
+  id:           string;
+  name:         string;
+  webUrl:       string;
+  category:     'ride' | 'transit' | 'rail' | 'navigation' | 'airline' | 'accommodation' | 'trip_management';
+  note?:        string;
+  deepLink?:    string;
+  iosStore?:    string;
+  androidStore?: string;
+}
+
+export interface AppCatalogGroup {
+  category: string;
+  label:    string;
+  ids:      string[];
 }
 
 export interface PreDownloadEntry {
@@ -31,11 +40,17 @@ export const TRANSPORT_SERVICES: Record<string, TransportService> = {
   // ── Rides ──────────────────────────────────────────────────────────────────
   uber: {
     id: 'uber', name: 'Uber', category: 'ride',
-    webUrl: 'https://m.uber.com',
+    webUrl:      'https://m.uber.com',
+    deepLink:    'uber://',
+    iosStore:    'https://apps.apple.com/app/uber-request-a-ride/id368677368',
+    androidStore:'https://play.google.com/store/apps/details?id=com.ubercabs.requestubs',
   },
   bolt: {
     id: 'bolt', name: 'Bolt', category: 'ride',
-    webUrl: 'https://bolt.eu',
+    webUrl:      'https://bolt.eu',
+    deepLink:    'bolt://',
+    iosStore:    'https://apps.apple.com/app/bolt-fast-affordable-rides/id675033630',
+    androidStore:'https://play.google.com/store/apps/details?id=ee.mtakso.client',
   },
   freenow: {
     id: 'freenow', name: 'FreeNow', category: 'ride',
@@ -69,14 +84,89 @@ export const TRANSPORT_SERVICES: Record<string, TransportService> = {
     id: 'norgestaksi', name: 'NorgesTaxi', category: 'ride',
     webUrl: 'https://www.norgestaksi.no',
   },
+  // ── Navigation ─────────────────────────────────────────────────────────────
+  apple_maps: {
+    id: 'apple_maps', name: 'Apple Maps', category: 'navigation',
+    webUrl:   'https://maps.apple.com',
+    deepLink: 'http://maps.apple.com/',
+    // iOS-only: no androidStore intentionally
+    iosStore: 'https://apps.apple.com/app/apple-maps/id915056765',
+  },
+  waze: {
+    id: 'waze', name: 'Waze', category: 'navigation',
+    // Waze deprecated custom schemes; official recommendation is the https universal link
+    webUrl:      'https://waze.com/ul',
+    iosStore:    'https://apps.apple.com/app/waze-navigation-live-traffic/id323229106',
+    androidStore:'https://play.google.com/store/apps/details?id=com.waze',
+  },
+  // ── Accommodation ──────────────────────────────────────────────────────────
+  airbnb: {
+    id: 'airbnb', name: 'Airbnb', category: 'accommodation',
+    webUrl:      'https://www.airbnb.com',
+    deepLink:    'airbnb://',
+    iosStore:    'https://apps.apple.com/app/airbnb/id401626263',
+    androidStore:'https://play.google.com/store/apps/details?id=com.airbnb.android',
+  },
+  booking_com: {
+    id: 'booking_com', name: 'Booking.com', category: 'accommodation',
+    webUrl: 'https://www.booking.com',
+    // No confirmed stable custom scheme — universal link via web handles app handoff
+    iosStore:    'https://apps.apple.com/app/booking-com-hotels-travel/id367003839',
+    androidStore:'https://play.google.com/store/apps/details?id=com.booking',
+  },
+  // ── Airlines ───────────────────────────────────────────────────────────────
+  aer_lingus: {
+    id: 'aer_lingus', name: 'Aer Lingus', category: 'airline',
+    webUrl:      'https://www.aerlingus.com',
+    iosStore:    'https://apps.apple.com/app/aer-lingus/id395590684',
+    androidStore:'https://play.google.com/store/apps/details?id=com.aerlingus.mobile',
+  },
+  ryanair: {
+    id: 'ryanair', name: 'Ryanair', category: 'airline',
+    webUrl:      'https://www.ryanair.com',
+    iosStore:    'https://apps.apple.com/app/ryanair-cheapest-flights/id504270602',
+    androidStore:'https://play.google.com/store/apps/details?id=com.ryanair.cheap.flights',
+  },
+  lufthansa: {
+    id: 'lufthansa', name: 'Lufthansa', category: 'airline',
+    webUrl:      'https://www.lufthansa.com',
+    iosStore:    'https://apps.apple.com/app/lufthansa/id412616098',
+    androidStore:'https://play.google.com/store/apps/details?id=de.lufthansa.android',
+  },
+  sas: {
+    id: 'sas', name: 'SAS', category: 'airline',
+    webUrl:      'https://www.sas.se',
+    iosStore:    'https://apps.apple.com/app/sas-scandinavian-airlines/id514033564',
+    androidStore:'https://play.google.com/store/apps/details?id=com.sas.mobiledroid',
+  },
+  // ── Rail (personal apps) ───────────────────────────────────────────────────
+  trainline: {
+    id: 'trainline', name: 'Trainline', category: 'rail',
+    webUrl:      'https://www.thetrainline.com',
+    iosStore:    'https://apps.apple.com/app/trainline-train-bus-tickets/id459971139',
+    androidStore:'https://play.google.com/store/apps/details?id=com.thetrainline.android',
+  },
+  // ── Trip management ────────────────────────────────────────────────────────
+  tripit: {
+    id: 'tripit', name: 'TripIt', category: 'trip_management',
+    webUrl:      'https://www.tripit.com',
+    iosStore:    'https://apps.apple.com/app/tripit-travel-planner/id311035142',
+    androidStore:'https://play.google.com/store/apps/details?id=com.tripit',
+  },
   // ── Transit (city public transport) ────────────────────────────────────────
   google_maps: {
-    id: 'google_maps', name: 'Google Maps', category: 'transit',
-    webUrl: 'https://maps.google.com',
+    id: 'google_maps', name: 'Google Maps', category: 'navigation',
+    webUrl:      'https://maps.google.com',
+    deepLink:    'comgooglemaps://',
+    iosStore:    'https://apps.apple.com/app/google-maps-transit-food/id585027354',
+    androidStore:'https://play.google.com/store/apps/details?id=com.google.android.apps.maps',
   },
   citymapper: {
-    id: 'citymapper', name: 'Citymapper', category: 'transit',
-    webUrl: 'https://citymapper.com',
+    id: 'citymapper', name: 'Citymapper', category: 'navigation',
+    webUrl:      'https://citymapper.com',
+    deepLink:    'citymapper://',
+    iosStore:    'https://apps.apple.com/app/citymapper/id469463298',
+    androidStore:'https://play.google.com/store/apps/details?id=com.citymapper.app.release',
     note: '430+ cities globally — covers most major EU cities',
   },
   moovit: {
@@ -470,6 +560,19 @@ export const COUNTRY_TRANSPORT: Record<string, CountryTransport> = {
     ],
   },
 };
+
+// ─── My Apps catalogue ────────────────────────────────────────────────────────
+// Grouped app picker shown in the user's profile settings.
+// IDs must exist in TRANSPORT_SERVICES above.
+
+export const MY_APPS_CATALOG: AppCatalogGroup[] = [
+  { category: 'airline',         label: 'Airlines',         ids: ['aer_lingus', 'ryanair', 'lufthansa', 'sas'] },
+  { category: 'accommodation',   label: 'Accommodation',    ids: ['airbnb', 'booking_com'] },
+  { category: 'navigation',      label: 'Navigation',       ids: ['google_maps', 'apple_maps', 'citymapper', 'waze'] },
+  { category: 'ride',            label: 'Rides',            ids: ['uber', 'freenow', 'bolt'] },
+  { category: 'rail',            label: 'Rail',             ids: ['trainline'] },
+  { category: 'trip_management', label: 'Trip Management',  ids: ['tripit'] },
+];
 
 // ─── Lookup helpers ───────────────────────────────────────────────────────────
 

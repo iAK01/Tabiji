@@ -67,6 +67,9 @@ const UserSchema = new Schema({
       // Set to true once user has explicitly configured their preferences
       setupComplete: { type: Boolean, default: false },
     },
+
+    // App IDs from MY_APPS_CATALOG the user has toggled on
+    myApps: { type: [String], default: [] },
   },
 }, { timestamps: true });
 

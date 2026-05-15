@@ -1,5 +1,6 @@
 'use client';
 
+import React from 'react';
 import {
   Box, Typography, Paper, Button, alpha,
 } from '@mui/material';
@@ -8,8 +9,8 @@ import LocalTaxiIcon     from '@mui/icons-material/LocalTaxi';
 import DirectionsBusIcon from '@mui/icons-material/DirectionsBus';
 import TrainIcon         from '@mui/icons-material/Train';
 import WarningAmberIcon  from '@mui/icons-material/WarningAmber';
-import OpenInNewIcon     from '@mui/icons-material/OpenInNew';
 import { getCountryTransport, resolvePreDownload } from '@/lib/data/ground-transport';
+import { openApp } from '@/lib/utils/openApp';
 
 const D = {
   terra:   '#C4714A',
@@ -22,19 +23,19 @@ const D = {
   body:    '"Archivo", "Inter", sans-serif',
 };
 
-const CATEGORY_COLOR = {
+const CATEGORY_COLOR: Record<string, string> = {
   ride:    D.terra,
   transit: '#0369a1',
   rail:    '#5c35a0',
 };
 
-const CATEGORY_LABEL = {
+const CATEGORY_LABEL: Record<string, string> = {
   ride:    'Taxi / Ride',
   transit: 'Transit',
   rail:    'Rail',
 };
 
-const CATEGORY_ICON = {
+const CATEGORY_ICON: Record<string, React.ElementType> = {
   ride:    LocalTaxiIcon,
   transit: DirectionsBusIcon,
   rail:    TrainIcon,
@@ -165,12 +166,8 @@ export default function PreTripAppsCard({ countryCode, cityName }: Props) {
                 </Box>
 
                 <Button
-                  component="a"
-                  href={svc.webUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
+                  onClick={() => openApp({ deepLink: svc.deepLink, iosStore: svc.iosStore, androidStore: svc.androidStore, webUrl: svc.webUrl })}
                   size="small"
-                  endIcon={<OpenInNewIcon sx={{ fontSize: '0.7rem !important' }} />}
                   sx={{
                     minHeight:       26,
                     py:              0.3,

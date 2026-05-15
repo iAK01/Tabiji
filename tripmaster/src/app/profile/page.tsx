@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import {
   Box, Container, Typography, AppBar, Toolbar, IconButton, Button,
   Paper, TextField, Select, MenuItem, FormControl, InputLabel,
-  Chip, CircularProgress, Alert, ToggleButton, ToggleButtonGroup,
+  Chip, CircularProgress, Alert, ToggleButton, ToggleButtonGroup, alpha,
 } from '@mui/material';
 import ArrowBackIcon          from '@mui/icons-material/ArrowBack';
 import EditIcon               from '@mui/icons-material/Edit';
@@ -25,7 +25,9 @@ import LanguageIcon           from '@mui/icons-material/Language';
 import AccessTimeIcon         from '@mui/icons-material/AccessTime';
 import LocalPhoneIcon         from '@mui/icons-material/LocalPhone';
 import SosIcon                from '@mui/icons-material/Sos';
+import RocketLaunchIcon       from '@mui/icons-material/RocketLaunch';
 import { COUNTRY_LIST, getCountryMeta } from '@/lib/data/countries';
+import { MY_APPS_CATALOG, TRANSPORT_SERVICES } from '@/lib/data/ground-transport';
 import AirportSearch          from '@/components/ui/AirportSearch';
 import PushNotificationSetup  from '@/components/notifications/PushNotificationSetup';
 import { Airport }            from '@/lib/data/airports';
@@ -169,6 +171,61 @@ function MetaChip({ icon: Icon, label }: { icon: React.ElementType; label: strin
   );
 }
 
+// ─── My Apps Card ────────────────────────────────────────────────────────────
+
+function MyAppsCard({ myApps, onToggle }: { myApps: string[]; onToggle: (id: string) => void }) {
+  return (
+    <SectionCard icon={RocketLaunchIcon} title="My Apps" ghost={RocketLaunchIcon}
+      caption="Select the travel apps you use — they'll appear as quick-launch buttons during your trips">
+      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+        {MY_APPS_CATALOG.map(group => {
+          const svcs = group.ids.map(id => TRANSPORT_SERVICES[id]).filter(Boolean);
+          return (
+            <Box key={group.category}>
+              <Typography sx={{
+                fontSize: '0.7rem', fontWeight: 700, textTransform: 'uppercase',
+                letterSpacing: '0.08em', color: D.muted, mb: 1, fontFamily: D.body,
+              }}>
+                {group.label}
+              </Typography>
+              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.75 }}>
+                {svcs.map(svc => {
+                  const selected = myApps.includes(svc.id);
+                  return (
+                    <Chip
+                      key={svc.id}
+                      label={svc.name}
+                      onClick={() => onToggle(svc.id)}
+                      variant={selected ? 'filled' : 'outlined'}
+                      sx={{
+                        fontFamily:      D.body,
+                        fontSize:        '0.82rem',
+                        fontWeight:      selected ? 700 : 500,
+                        cursor:          'pointer',
+                        backgroundColor: selected ? D.navy : 'transparent',
+                        color:           selected ? 'white' : D.navy,
+                        borderColor:     selected ? D.navy : D.rule,
+                        '&:hover': {
+                          backgroundColor: selected ? '#2d3a5e' : alpha(D.navy, 0.06),
+                        },
+                      }}
+                    />
+                  );
+                })}
+              </Box>
+            </Box>
+          );
+        })}
+        <Typography sx={{ fontSize: '0.72rem', color: D.muted, fontFamily: D.body }}>
+          {myApps.length > 0
+            ? `${myApps.length} app${myApps.length !== 1 ? 's' : ''} selected — saved automatically`
+            : 'No apps selected yet'}
+        </Typography>
+      </Box>
+    </SectionCard>
+  );
+}
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 export default function ProfilePage() {
@@ -181,6 +238,7 @@ export default function ProfilePage() {
   const [saved,        setSaved]        = useState(false);
   const [geocoding,    setGeocoding]    = useState(false);
   const [geocodeError, setGeocodeError] = useState<string | null>(null);
+  const [myApps,       setMyApps]       = useState<string[]>([]);
 
   const isOnboarding = !profile?.homeLocation?.countryCode;
 
@@ -212,6 +270,24 @@ export default function ProfilePage() {
       setLoading(false);
     });
   }, []);
+
+  useEffect(() => {
+    fetch('/api/user/my-apps').then(r => r.json()).then(data => {
+      if (Array.isArray(data.myApps)) setMyApps(data.myApps);
+    });
+  }, []);
+
+  const toggleApp = (id: string) => {
+    const updated = myApps.includes(id)
+      ? myApps.filter(a => a !== id)
+      : [...myApps, id];
+    setMyApps(updated);
+    fetch('/api/user/my-apps', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ myApps: updated }),
+    });
+  };
 
   const geocodeAddress = useCallback(async () => {
     const { addressLine1, city, country } = form.homeLocation;
@@ -498,6 +574,8 @@ export default function ProfilePage() {
               </Box>
             </SectionCard>
 
+            <MyAppsCard myApps={myApps} onToggle={toggleApp} />
+
           </Box>
         )}
 
@@ -682,6 +760,8 @@ export default function ProfilePage() {
                 </Box>
               </Box>
             </SectionCard>
+
+            <MyAppsCard myApps={myApps} onToggle={toggleApp} />
 
             {/* Actions */}
             <Box sx={{ display: 'flex', gap: 2, justifyContent: 'flex-end', pb: 4 }}>

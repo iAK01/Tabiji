@@ -1,15 +1,16 @@
 'use client';
 
+import React from 'react';
 import {
-  Box, Typography, Paper, Button, Chip, IconButton, alpha,
+  Box, Typography, Paper, Button, IconButton, alpha,
 } from '@mui/material';
 import LocalTaxiIcon      from '@mui/icons-material/LocalTaxi';
 import DirectionsBusIcon  from '@mui/icons-material/DirectionsBus';
 import TrainIcon          from '@mui/icons-material/Train';
 import CloseIcon          from '@mui/icons-material/Close';
-import OpenInNewIcon      from '@mui/icons-material/OpenInNew';
 import WarningAmberIcon   from '@mui/icons-material/WarningAmber';
 import { getCountryTransport, resolveServices } from '@/lib/data/ground-transport';
+import { openApp } from '@/lib/utils/openApp';
 
 const D = {
   terra:   '#C4714A',
@@ -20,13 +21,13 @@ const D = {
   body:    '"Archivo", "Inter", sans-serif',
 };
 
-const CATEGORY_COLOR = {
+const CATEGORY_COLOR: Record<string, string> = {
   ride:    D.terra,
   transit: '#0369a1',
   rail:    '#5c35a0',
 };
 
-const CATEGORY_ICON = {
+const CATEGORY_ICON: Record<string, React.ElementType> = {
   ride:    LocalTaxiIcon,
   transit: DirectionsBusIcon,
   rail:    TrainIcon,
@@ -127,13 +128,9 @@ export default function ArrivalTransportCard({ countryCode, cityName, onDismiss 
                 return (
                   <Button
                     key={svc.id}
-                    component="a"
-                    href={svc.webUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
+                    onClick={() => openApp({ deepLink: svc.deepLink, iosStore: svc.iosStore, androidStore: svc.androidStore, webUrl: svc.webUrl })}
                     size="small"
                     startIcon={<Icon sx={{ fontSize: '0.85rem !important' }} />}
-                    endIcon={<OpenInNewIcon sx={{ fontSize: '0.7rem !important' }} />}
                     sx={{
                       minHeight:       28,
                       py:              0.4,
@@ -150,9 +147,6 @@ export default function ArrivalTransportCard({ countryCode, cityName, onDismiss 
                     }}
                   >
                     {svc.name}
-                    {svc.note && (
-                      <Box component="span" sx={{ display: 'none' }}>{svc.note}</Box>
-                    )}
                   </Button>
                 );
               })}
@@ -181,13 +175,9 @@ export default function ArrivalTransportCard({ countryCode, cityName, onDismiss 
                 return (
                   <Button
                     key={svc.id}
-                    component="a"
-                    href={svc.webUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
+                    onClick={() => openApp({ deepLink: svc.deepLink, iosStore: svc.iosStore, androidStore: svc.androidStore, webUrl: svc.webUrl })}
                     size="small"
                     startIcon={<Icon sx={{ fontSize: '0.85rem !important' }} />}
-                    endIcon={<OpenInNewIcon sx={{ fontSize: '0.7rem !important' }} />}
                     sx={{
                       minHeight:       28,
                       py:              0.4,

@@ -34,6 +34,7 @@ import ExpandLessIcon           from '@mui/icons-material/ExpandLess';
 import AttachFileIcon           from '@mui/icons-material/AttachFile';
 import DocumentViewer, { type ViewableFile } from '@/components/files/DocumentViewer';
 import ArrivalTransportCard from '@/components/trips/ArrivalTransportCard';
+import QuickLaunchCard from '@/components/trips/QuickLaunchCard';
 
 // ─── Design tokens ─────────────────────────────────────────────────────────────
 
@@ -927,6 +928,7 @@ export default function OnTripScreen({ tripId, trip }: OnTripScreenProps) {
   const [now,            setNow]            = useState(new Date());
   const [dismissedIds,   setDismissedIds]   = useState<Set<string>>(new Set());
   const [arrivalCardDismissed, setArrivalCardDismissed] = useState(false);
+  const [myAppIds,       setMyAppIds]       = useState<string[]>([]);
   const [todayOpen,      setTodayOpen]      = useState(false);
   const [filesByStop,    setFilesByStop]    = useState<Map<string, any[]>>(new Map());
   const [viewerFile,     setViewerFile]     = useState<ViewableFile | null>(null);
@@ -934,6 +936,12 @@ export default function OnTripScreen({ tripId, trip }: OnTripScreenProps) {
   useEffect(() => {
     const id = setInterval(() => setNow(new Date()), 60_000);
     return () => clearInterval(id);
+  }, []);
+
+  useEffect(() => {
+    fetch('/api/user/my-apps').then(r => r.json()).then(data => {
+      if (Array.isArray(data.myApps)) setMyAppIds(data.myApps);
+    });
   }, []);
 
   const load = useCallback(async (quiet = false) => {
@@ -1270,6 +1278,9 @@ export default function OnTripScreen({ tripId, trip }: OnTripScreenProps) {
           onDismiss={() => setArrivalCardDismissed(true)}
         />
       )}
+
+      {/* ── 5. QUICK LAUNCH (my apps) ── */}
+      <QuickLaunchCard myAppIds={myAppIds} />
 
       <DocumentViewer file={viewerFile} onClose={() => setViewerFile(null)} />
     </Box>
