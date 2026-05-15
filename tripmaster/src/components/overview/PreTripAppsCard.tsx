@@ -9,7 +9,7 @@ import DirectionsBusIcon from '@mui/icons-material/DirectionsBus';
 import TrainIcon         from '@mui/icons-material/Train';
 import WarningAmberIcon  from '@mui/icons-material/WarningAmber';
 import OpenInNewIcon     from '@mui/icons-material/OpenInNew';
-import { getCountryTransport, resolveServices } from '@/lib/data/ground-transport';
+import { getCountryTransport, resolvePreDownload } from '@/lib/data/ground-transport';
 
 const D = {
   terra:   '#C4714A',
@@ -49,7 +49,7 @@ export default function PreTripAppsCard({ countryCode, cityName }: Props) {
   const data = getCountryTransport(countryCode);
   if (!data) return null;
 
-  const apps = resolveServices(data.preDownload);
+  const apps = resolvePreDownload(data.preDownload);
   if (apps.length === 0) return null;
 
   return (
@@ -134,19 +134,14 @@ export default function PreTripAppsCard({ countryCode, cityName }: Props) {
                   }}>
                     {svc.name}
                   </Typography>
-                  {svc.note && (
-                    <Typography sx={{
-                      fontFamily: D.body,
-                      fontSize:   '0.72rem',
-                      color:       D.muted,
-                      lineHeight:  1.3,
-                      overflow:   'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace:  'nowrap',
-                    }}>
-                      {svc.note}
-                    </Typography>
-                  )}
+                  <Typography sx={{
+                    fontFamily: D.body,
+                    fontSize:   '0.72rem',
+                    color:       D.muted,
+                    lineHeight:  1.35,
+                  }}>
+                    {svc.reason}
+                  </Typography>
                 </Box>
               </Box>
 
