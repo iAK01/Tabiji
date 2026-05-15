@@ -8,7 +8,10 @@
       "Bash(xargs ls *)",
       "Bash(xargs cat *)",
       "WebSearch",
-      "Bash(grep -v \"^$\")"
+      "Bash(grep -v \"^$\")",
+      "WebFetch(domain:developers.google.com)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:gist.github.com)"
     ]
   }
 }

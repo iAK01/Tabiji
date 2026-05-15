@@ -48,9 +48,11 @@ export default function TestAppsPage() {
                       {svc.name}
                     </Typography>
                     <Typography sx={{ fontSize: '0.65rem', color: D.muted }}>
-                      {svc.deepLink ? `deep: ${svc.deepLink}` : 'web only'}
-                      {svc.iosStore ? ' · iOS ✓' : ''}
-                      {svc.androidStore ? ' · Android ✓' : ''}
+                      {svc.deepLink
+                        ? `deep link → app (store fallback if not installed)`
+                        : svc.iosStore
+                          ? `no deep link → App Store`
+                          : `no deep link → opens website`}
                     </Typography>
                   </Box>
                   <Button

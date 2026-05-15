@@ -21,13 +21,20 @@ export function openApp(config: AppLaunchConfig): void {
   if (config.deepLink) {
     const storeUrl = isIOS ? config.iosStore : config.androidStore;
     window.location.href = config.deepLink;
+
     if (storeUrl) {
+      let appOpened = false;
+      const markOpened = () => { appOpened = true; };
+      // window.blur fires the moment iOS hands focus to the opened app — more
+      // reliable than document.hidden for custom URL scheme redirects.
+      window.addEventListener('blur', markOpened, { once: true });
+      document.addEventListener('visibilitychange', () => {
+        if (document.hidden) markOpened();
+      }, { once: true });
+
       setTimeout(() => {
-        // If the app opened, the page goes to the background — document.hidden = true.
-        // Only redirect to the store if the page is still visible (app not installed).
-        if (!document.hidden) {
-          window.location.href = storeUrl;
-        }
+        window.removeEventListener('blur', markOpened);
+        if (!appOpened) window.location.href = storeUrl;
       }, 800);
     }
     return;

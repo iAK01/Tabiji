@@ -54,7 +54,9 @@ export const TRANSPORT_SERVICES: Record<string, TransportService> = {
   },
   freenow: {
     id: 'freenow', name: 'FreeNow', category: 'ride',
-    webUrl: 'https://www.free-now.com',
+    webUrl:       'https://www.free-now.com',
+    iosStore:     'https://apps.apple.com/app/freenow-taxi-more/id357852748',
+    androidStore: 'https://play.google.com/store/apps/details?id=taxi.android.client',
   },
   cabify: {
     id: 'cabify', name: 'Cabify', category: 'ride',
@@ -94,10 +96,10 @@ export const TRANSPORT_SERVICES: Record<string, TransportService> = {
   },
   waze: {
     id: 'waze', name: 'Waze', category: 'navigation',
-    // Waze deprecated custom schemes; official recommendation is the https universal link
-    webUrl:      'https://waze.com/ul',
-    iosStore:    'https://apps.apple.com/app/waze-navigation-live-traffic/id323229106',
-    androidStore:'https://play.google.com/store/apps/details?id=com.waze',
+    webUrl:       'https://waze.com/ul',
+    deepLink:     'waze://',
+    iosStore:     'https://apps.apple.com/app/waze-navigation-live-traffic/id323229106',
+    androidStore: 'https://play.google.com/store/apps/details?id=com.waze',
   },
   // ── Accommodation ──────────────────────────────────────────────────────────
   airbnb: {
@@ -109,49 +111,49 @@ export const TRANSPORT_SERVICES: Record<string, TransportService> = {
   },
   booking_com: {
     id: 'booking_com', name: 'Booking.com', category: 'accommodation',
-    webUrl: 'https://www.booking.com',
-    // No confirmed stable custom scheme — universal link via web handles app handoff
-    iosStore:    'https://apps.apple.com/app/booking-com-hotels-travel/id367003839',
-    androidStore:'https://play.google.com/store/apps/details?id=com.booking',
+    webUrl:       'https://www.booking.com',
+    deepLink:     'booking://',
+    iosStore:     'https://apps.apple.com/app/booking-com-hotels-travel/id367003839',
+    androidStore: 'https://play.google.com/store/apps/details?id=com.booking',
   },
-  // ── Airlines ───────────────────────────────────────────────────────────────
+  // ── Airlines — no custom URL schemes, Universal Links only ─────────────────
   aer_lingus: {
     id: 'aer_lingus', name: 'Aer Lingus', category: 'airline',
-    webUrl:      'https://www.aerlingus.com',
-    iosStore:    'https://apps.apple.com/app/aer-lingus/id395590684',
-    androidStore:'https://play.google.com/store/apps/details?id=com.aerlingus.mobile',
+    webUrl:       'https://www.aerlingus.com',
+    iosStore:     'https://apps.apple.com/app/aer-lingus/id965854546',
+    androidStore: 'https://play.google.com/store/apps/details?id=com.aerlingus.mobile',
   },
   ryanair: {
     id: 'ryanair', name: 'Ryanair', category: 'airline',
-    webUrl:      'https://www.ryanair.com',
-    iosStore:    'https://apps.apple.com/app/ryanair-cheapest-flights/id504270602',
-    androidStore:'https://play.google.com/store/apps/details?id=com.ryanair.cheap.flights',
+    webUrl:       'https://www.ryanair.com',
+    iosStore:     'https://apps.apple.com/app/ryanair/id504270602',
+    androidStore: 'https://play.google.com/store/apps/details?id=com.ryanair.cheapflights',
   },
   lufthansa: {
     id: 'lufthansa', name: 'Lufthansa', category: 'airline',
-    webUrl:      'https://www.lufthansa.com',
-    iosStore:    'https://apps.apple.com/app/lufthansa/id412616098',
-    androidStore:'https://play.google.com/store/apps/details?id=de.lufthansa.android',
+    webUrl:       'https://www.lufthansa.com',
+    iosStore:     'https://apps.apple.com/app/lufthansa/id299219152',
+    androidStore: 'https://play.google.com/store/apps/details?id=com.lufthansa.android.lufthansa',
   },
   sas: {
     id: 'sas', name: 'SAS', category: 'airline',
-    webUrl:      'https://www.sas.se',
-    iosStore:    'https://apps.apple.com/app/sas-scandinavian-airlines/id514033564',
-    androidStore:'https://play.google.com/store/apps/details?id=com.sas.mobiledroid',
+    webUrl:       'https://www.sas.se',
+    iosStore:     'https://apps.apple.com/app/sas-scandinavian-airlines/id605727126',
+    androidStore: 'https://play.google.com/store/apps/details?id=se.sas.android',
   },
-  // ── Rail (personal apps) ───────────────────────────────────────────────────
+  // ── Rail ───────────────────────────────────────────────────────────────────
   trainline: {
     id: 'trainline', name: 'Trainline', category: 'rail',
-    webUrl:      'https://www.thetrainline.com',
-    iosStore:    'https://apps.apple.com/app/trainline-train-bus-tickets/id459971139',
-    androidStore:'https://play.google.com/store/apps/details?id=com.thetrainline.android',
+    webUrl:       'https://www.thetrainline.com',
+    iosStore:     'https://apps.apple.com/app/trainline-train-bus-tickets/id334235181',
+    androidStore: 'https://play.google.com/store/apps/details?id=com.thetrainline',
   },
   // ── Trip management ────────────────────────────────────────────────────────
   tripit: {
     id: 'tripit', name: 'TripIt', category: 'trip_management',
-    webUrl:      'https://www.tripit.com',
-    iosStore:    'https://apps.apple.com/app/tripit-travel-planner/id311035142',
-    androidStore:'https://play.google.com/store/apps/details?id=com.tripit',
+    webUrl:       'https://www.tripit.com',
+    iosStore:     'https://apps.apple.com/app/tripit-travel-planner/id311035142',
+    androidStore: 'https://play.google.com/store/apps/details?id=com.tripit',
   },
   // ── Transit (city public transport) ────────────────────────────────────────
   google_maps: {
