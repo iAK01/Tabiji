@@ -283,9 +283,10 @@ export default function Needtoknow({ visa, tipping, water, payment, cultural, ti
               <Typography sx={{ fontFamily: D.display, fontSize: '1.25rem', color: D.navy, mb: 2.5 }}>
                 {electrical.message}
               </Typography>
+              {/* Plug row — footnotes kept outside so they don't affect vertical alignment */}
               <Box sx={{ display: 'flex', alignItems: 'center', gap: { xs: 2, sm: 3 }, flexWrap: 'wrap' }}>
                 {groupPlugs(electrical.originPlug, 'origin').map(g => (
-                  <Box key={g.displayType} sx={{ textAlign: 'center', maxWidth: 100 }}>
+                  <Box key={g.displayType} sx={{ textAlign: 'center', width: 88 }}>
                     <Box sx={{
                       width: 80, height: 80, borderRadius: 2,
                       border: `1px solid ${D.rule}`, backgroundColor: D.paper,
@@ -299,31 +300,31 @@ export default function Needtoknow({ visa, tipping, water, payment, cultural, ti
                   </Box>
                 ))}
 
-                <Typography sx={{ fontSize: '1.5rem', color: D.muted, fontWeight: 300, flexShrink: 0 }}>→</Typography>
+                <Typography sx={{ fontSize: '1.5rem', color: D.muted, fontWeight: 300, flexShrink: 0, mb: 3 }}>→</Typography>
 
                 {groupPlugs(electrical.destinationPlug, 'destination').map(g => (
-                  <Box key={g.displayType}>
-                    <Box sx={{ textAlign: 'center', maxWidth: 100 }}>
-                      <Box sx={{
-                        width: 80, height: 80, borderRadius: 2,
-                        border: `1px solid rgba(196,113,74,0.35)`,
-                        backgroundColor: 'rgba(196,113,74,0.07)',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 1,
-                      }}>
-                        <img src={`/plugs/${g.displayType}.svg`} alt={g.name} width={52} height={52} />
-                      </Box>
-                      <Typography sx={{ fontSize: '0.7rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: D.muted, lineHeight: 1.2 }}>There</Typography>
-                      <Typography sx={{ fontSize: '0.97rem', fontWeight: 800, color: D.navy, lineHeight: 1.2 }}>{g.name}</Typography>
-                      <Typography sx={{ fontSize: '0.75rem', color: D.muted }}>{g.typeLabel}</Typography>
+                  <Box key={g.displayType} sx={{ textAlign: 'center', width: 88 }}>
+                    <Box sx={{
+                      width: 80, height: 80, borderRadius: 2,
+                      border: `1px solid rgba(196,113,74,0.35)`,
+                      backgroundColor: 'rgba(196,113,74,0.07)',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 1,
+                    }}>
+                      <img src={`/plugs/${g.displayType}.svg`} alt={g.name} width={52} height={52} />
                     </Box>
-                    {g.footnote && (
-                      <Typography sx={{ fontSize: '0.78rem', color: D.muted, fontStyle: 'italic', mt: 1, maxWidth: 280 }}>
-                        {g.footnote}
-                      </Typography>
-                    )}
+                    <Typography sx={{ fontSize: '0.7rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: D.muted, lineHeight: 1.2 }}>There</Typography>
+                    <Typography sx={{ fontSize: '0.97rem', fontWeight: 800, color: D.navy, lineHeight: 1.2 }}>{g.name}</Typography>
+                    <Typography sx={{ fontSize: '0.75rem', color: D.muted }}>{g.typeLabel}</Typography>
                   </Box>
                 ))}
               </Box>
+
+              {/* Footnotes — below the plug row, outside flex alignment */}
+              {groupPlugs(electrical.destinationPlug, 'destination').filter(g => g.footnote).map(g => (
+                <Typography key={g.displayType} sx={{ fontSize: '0.78rem', color: D.muted, fontStyle: 'italic', mt: 1.5, maxWidth: 340 }}>
+                  {g.footnote}
+                </Typography>
+              ))}
             </Box>
           </Paper>
         </Box>
