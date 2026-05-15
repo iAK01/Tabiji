@@ -17,32 +17,16 @@ export function openApp(config: AppLaunchConfig): void {
     return;
   }
 
-  // Mobile with a confirmed deep link scheme
+  // Mobile with a confirmed deep link: just fire it. No fallback timer — detecting
+  // whether the app opened is unreliable across iOS versions and PWA contexts, and
+  // the user has explicitly selected this app so it should be installed.
   if (config.deepLink) {
-    const storeUrl = isIOS ? config.iosStore : config.androidStore;
     window.location.href = config.deepLink;
-
-    if (storeUrl) {
-      let appOpened = false;
-      const markOpened = () => { appOpened = true; };
-      // window.blur fires the moment iOS hands focus to the opened app — more
-      // reliable than document.hidden for custom URL scheme redirects.
-      window.addEventListener('blur', markOpened, { once: true });
-      document.addEventListener('visibilitychange', () => {
-        if (document.hidden) markOpened();
-      }, { once: true });
-
-      setTimeout(() => {
-        window.removeEventListener('blur', markOpened);
-        if (!appOpened) window.location.href = storeUrl;
-      }, 800);
-    }
     return;
   }
 
   // Mobile with no deep link: go to the store page if available.
-  // The App Store / Play Store shows an "Open" button when the app is already installed,
-  // which launches it directly. Better than opening the website in a browser.
+  // App Store / Play Store shows an "Open" button when the app is installed.
   const storeUrl = isIOS ? config.iosStore : config.androidStore;
   window.location.href = storeUrl ?? config.webUrl;
 }
