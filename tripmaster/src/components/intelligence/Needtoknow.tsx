@@ -59,6 +59,80 @@ function RefRow({
   );
 }
 
+// ─── Plug type friendly names ────────────────────────────────────────────────
+
+const PLUG_LABEL: Record<string, string> = {
+  A: 'US / Japan',
+  B: 'US / Canada',
+  C: 'European standard',
+  D: 'India',
+  E: 'France / Belgium',
+  F: 'Germany / Austria',
+  G: 'UK / Ireland',
+  H: 'Israel',
+  I: 'Australia / NZ',
+  J: 'Switzerland',
+  K: 'Denmark',
+  L: 'Italy',
+  M: 'South Africa',
+  N: 'Brazil',
+  O: 'Thailand',
+};
+
+interface PlugGroup {
+  displayType: string;
+  name:        string;
+  typeLabel:   string;
+  footnote?:   string;
+}
+
+function groupPlugs(plugStr: string, side: 'origin' | 'destination'): PlugGroup[] {
+  const types = plugStr.split('/');
+
+  if (side === 'origin') {
+    return types.map(t => ({
+      displayType: t,
+      name:        PLUG_LABEL[t] ?? `Type ${t}`,
+      typeLabel:   `Type ${t}`,
+    }));
+  }
+
+  const euroTypes = types.filter(t => ['C', 'E', 'F'].includes(t));
+  const usTypes   = types.filter(t => ['A', 'B'].includes(t));
+  const others    = types.filter(t => !['C', 'E', 'F', 'A', 'B'].includes(t));
+  const result: PlugGroup[] = [];
+
+  if (euroTypes.length > 0) {
+    const display = euroTypes.includes('C') ? 'C' : euroTypes[0];
+    const extras  = euroTypes.filter(t => t !== display);
+    result.push({
+      displayType: display,
+      name:        'European standard',
+      typeLabel:   `Type ${euroTypes.join('/')}`,
+      footnote:    extras.length > 0
+        ? `Also used as Type ${extras.join('/')} in some countries — a Type C adapter works everywhere in Europe`
+        : undefined,
+    });
+  }
+
+  if (usTypes.length > 0) {
+    const hasA = usTypes.includes('A');
+    const hasB = usTypes.includes('B');
+    result.push({
+      displayType: hasA ? 'A' : 'B',
+      name:        hasA && hasB ? 'US / Canada' : hasA ? 'US / Japan' : 'US / Canada',
+      typeLabel:   `Type ${usTypes.join('/')}`,
+      footnote:    hasA && hasB ? 'Type B adds grounding — most devices work with either' : undefined,
+    });
+  }
+
+  for (const t of others) {
+    result.push({ displayType: t, name: PLUG_LABEL[t] ?? `Type ${t}`, typeLabel: `Type ${t}` });
+  }
+
+  return result;
+}
+
 // ─── Need to Know ─────────────────────────────────────────────────────────────
 
 export default function Needtoknow({ visa, tipping, water, payment, cultural, timezone, electrical, emergency }: Props) {
@@ -210,45 +284,43 @@ export default function Needtoknow({ visa, tipping, water, payment, cultural, ti
                 {electrical.message}
               </Typography>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: { xs: 2, sm: 3 }, flexWrap: 'wrap' }}>
-                {electrical.originPlug.split('/').map(type => (
-                  <Box key={type} sx={{ textAlign: 'center' }}>
+                {groupPlugs(electrical.originPlug, 'origin').map(g => (
+                  <Box key={g.displayType} sx={{ textAlign: 'center', maxWidth: 100 }}>
                     <Box sx={{
-                      width: 80, height: 80,
-                      borderRadius: 2,
-                      border: `1px solid ${D.rule}`,
-                      backgroundColor: D.paper,
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      mb: 1,
+                      width: 80, height: 80, borderRadius: 2,
+                      border: `1px solid ${D.rule}`, backgroundColor: D.paper,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 1,
                     }}>
-                      <img src={`/plugs/${type}.svg`} alt={`Plug type ${type}`} width={52} height={52} />
+                      <img src={`/plugs/${g.displayType}.svg`} alt={g.name} width={52} height={52} />
                     </Box>
-                    <Typography sx={{ fontSize: '0.72rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: D.muted, lineHeight: 1.2 }}>
-                      Home
-                    </Typography>
-                    <Typography sx={{ fontSize: '1rem', fontWeight: 800, color: D.navy }}>
-                      Type {type}
-                    </Typography>
+                    <Typography sx={{ fontSize: '0.7rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: D.muted, lineHeight: 1.2 }}>Home</Typography>
+                    <Typography sx={{ fontSize: '0.97rem', fontWeight: 800, color: D.navy, lineHeight: 1.2 }}>{g.name}</Typography>
+                    <Typography sx={{ fontSize: '0.75rem', color: D.muted }}>{g.typeLabel}</Typography>
                   </Box>
                 ))}
+
                 <Typography sx={{ fontSize: '1.5rem', color: D.muted, fontWeight: 300, flexShrink: 0 }}>→</Typography>
-                {electrical.destinationPlug.split('/').map(type => (
-                  <Box key={type} sx={{ textAlign: 'center' }}>
-                    <Box sx={{
-                      width: 80, height: 80,
-                      borderRadius: 2,
-                      border: `1px solid rgba(196,113,74,0.35)`,
-                      backgroundColor: 'rgba(196,113,74,0.07)',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      mb: 1,
-                    }}>
-                      <img src={`/plugs/${type}.svg`} alt={`Plug type ${type}`} width={52} height={52} />
+
+                {groupPlugs(electrical.destinationPlug, 'destination').map(g => (
+                  <Box key={g.displayType}>
+                    <Box sx={{ textAlign: 'center', maxWidth: 100 }}>
+                      <Box sx={{
+                        width: 80, height: 80, borderRadius: 2,
+                        border: `1px solid rgba(196,113,74,0.35)`,
+                        backgroundColor: 'rgba(196,113,74,0.07)',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 1,
+                      }}>
+                        <img src={`/plugs/${g.displayType}.svg`} alt={g.name} width={52} height={52} />
+                      </Box>
+                      <Typography sx={{ fontSize: '0.7rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: D.muted, lineHeight: 1.2 }}>There</Typography>
+                      <Typography sx={{ fontSize: '0.97rem', fontWeight: 800, color: D.navy, lineHeight: 1.2 }}>{g.name}</Typography>
+                      <Typography sx={{ fontSize: '0.75rem', color: D.muted }}>{g.typeLabel}</Typography>
                     </Box>
-                    <Typography sx={{ fontSize: '0.72rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: D.muted, lineHeight: 1.2 }}>
-                      There
-                    </Typography>
-                    <Typography sx={{ fontSize: '1rem', fontWeight: 800, color: D.navy }}>
-                      Type {type}
-                    </Typography>
+                    {g.footnote && (
+                      <Typography sx={{ fontSize: '0.78rem', color: D.muted, fontStyle: 'italic', mt: 1, maxWidth: 280 }}>
+                        {g.footnote}
+                      </Typography>
+                    )}
                   </Box>
                 ))}
               </Box>

@@ -6,6 +6,7 @@ import Trip                  from '@/lib/mongodb/models/Trip';
 import TripLogistics         from '@/lib/mongodb/models/TripLogistics';
 import User                  from '@/lib/mongodb/models/User';
 import { getFreeCultureAccess } from '@/lib/data/free-cultural-access';
+import { uploadFile }        from '@/lib/utils/storage';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -21,6 +22,8 @@ export interface CultureHighlight {
   address?:     string;
   coordinates?: { lat: number; lng: number };
   nearVenue?:   string;
+  imageUrl?:    string;
+  imageCredit?: { name: string; username: string; link: string };
 }
 
 export interface CultureBriefing {
@@ -132,7 +135,8 @@ Respond ONLY with valid JSON. No markdown, no preamble, no explanation outside t
       "category": "cultural|coffee|park",
       "tip": "one concrete, actionable tip — opening times, what to order, what to skip, insider detail",
       "free": true or false,
-      "searchQuery": "${ctx.city}, ${ctx.country} — PLACE NAME ONLY, e.g. 'Jackie Clarke Collection, Ballina, County Mayo, Ireland' — must include city and country to geocode correctly"
+      "searchQuery": "${ctx.city}, ${ctx.country} — PLACE NAME ONLY, e.g. 'Jackie Clarke Collection, Ballina, County Mayo, Ireland' — must include city and country to geocode correctly",
+      "imageSearchQuery": "evocative Unsplash search terms for a great landscape photo — describe what the place LOOKS like visually, e.g. 'Łódź Manufaktura red brick factory courtyard industrial' or 'Warsaw Old Town market square cobblestone' — NOT just the name"
     }
   ],
   ${includeNeighbourhood},
@@ -156,6 +160,47 @@ Absolute rules:
 - Do not mention visa, currency, adapter, transport or weather preparation — handled elsewhere`;
 }
 
+// ─── Unsplash → GCS image fetch ───────────────────────────────────────────────
+
+async function fetchHighlightImage(
+  query:   string,
+  tripId:  string,
+  slug:    string,
+): Promise<{ imageUrl?: string; imageCredit?: CultureHighlight['imageCredit'] }> {
+  try {
+    const key = process.env.NEXT_PUBLIC_UNSPLASH_ACCESS_KEY;
+    if (!key) return {};
+
+    const res = await fetch(
+      `https://api.unsplash.com/search/photos?query=${encodeURIComponent(query)}&per_page=3&orientation=landscape&content_filter=high`,
+      { headers: { Authorization: `Client-ID ${key}` } },
+    );
+    if (!res.ok) return {};
+
+    const data  = await res.json();
+    const photo = data.results?.[0];
+    if (!photo?.urls?.regular) return {};
+
+    const imgRes = await fetch(photo.urls.regular);
+    if (!imgRes.ok) return {};
+
+    const buffer   = Buffer.from(await imgRes.arrayBuffer());
+    const filename = `culture/${tripId}/${slug}-${Date.now()}.jpg`;
+    const imageUrl = await uploadFile(buffer, filename, 'image/jpeg');
+
+    return {
+      imageUrl,
+      imageCredit: {
+        name:     photo.user.name,
+        username: photo.user.username,
+        link:     photo.links.html,
+      },
+    };
+  } catch {
+    return {};
+  }
+}
+
 // ─── Generate briefing ────────────────────────────────────────────────────────
 
 async function generateBriefing(ctx: {
@@ -163,6 +208,7 @@ async function generateBriefing(ctx: {
   nights: number; hotelName: string | null; hotelAddress: string | null;
   weatherSummary: string | null; rainyDays: number;
   destCoords: { lat: number; lng: number };
+  tripId: string;
 }): Promise<CultureBriefing> {
   const msg    = await anthropic.messages.create({
     model:      'claude-sonnet-4-5',
@@ -173,11 +219,18 @@ async function generateBriefing(ctx: {
   const raw    = msg.content.filter(b => b.type === 'text').map(b => (b as any).text).join('');
   const parsed = JSON.parse(raw.replace(/```json|```/g, '').trim());
 
-  // Geocode highlights in parallel — proximity-biased + distance-validated
+  // Geocode highlights + fetch images in parallel
   const highlights: CultureHighlight[] = await Promise.all(
     (parsed.highlights ?? []).map(async (h: any) => {
-      const query = h.searchQuery ?? `${h.name}, ${ctx.city}, ${ctx.country}`;
-      const geo   = await geocode(query, ctx.destCoords, 60);
+      const geoQuery  = h.searchQuery ?? `${h.name}, ${ctx.city}, ${ctx.country}`;
+      const imgQuery  = h.imageSearchQuery ?? `${h.name} ${ctx.city}`;
+      const slug      = h.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 40);
+
+      const [geo, imgData] = await Promise.all([
+        geocode(geoQuery, ctx.destCoords, 60),
+        fetchHighlightImage(imgQuery, ctx.tripId, slug),
+      ]);
+
       return {
         name:        h.name,
         description: h.description,
@@ -188,6 +241,7 @@ async function generateBriefing(ctx: {
         address:     geo?.address,
         coordinates: geo ? { lat: geo.lat, lng: geo.lng } : null,
         nearVenue:   h.nearVenue ?? null,
+        ...imgData,
       } as CultureHighlight;
     })
   );
@@ -302,6 +356,7 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
       weatherSummary,
       rainyDays,
       destCoords,
+      tripId:       id,
     });
 
     const freeAccess = buildFreeAccess(

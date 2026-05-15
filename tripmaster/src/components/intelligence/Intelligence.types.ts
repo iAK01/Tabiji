@@ -107,6 +107,8 @@ export interface CultureHighlight {
   address?:     string;
   coordinates?: { lat: number; lng: number };
   nearVenue?:   string;
+  imageUrl?:    string;
+  imageCredit?: { name: string; username: string; link: string };
 }
 
 export interface CultureBriefing {
