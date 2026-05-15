@@ -216,11 +216,27 @@ function MyAppsCard({ myApps, onToggle }: { myApps: string[]; onToggle: (id: str
             </Box>
           );
         })}
-        <Typography sx={{ fontSize: '0.72rem', color: D.muted, fontFamily: D.body }}>
-          {myApps.length > 0
-            ? `${myApps.length} app${myApps.length !== 1 ? 's' : ''} selected — saved automatically`
-            : 'No apps selected yet'}
-        </Typography>
+        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 1 }}>
+          <Typography sx={{ fontSize: '0.72rem', color: D.muted, fontFamily: D.body }}>
+            {myApps.length > 0
+              ? `${myApps.length} app${myApps.length !== 1 ? 's' : ''} selected — saved automatically`
+              : 'No apps selected yet'}
+          </Typography>
+          <Button
+            component="a"
+            href="/test-apps"
+            size="small"
+            sx={{
+              fontFamily: D.body, fontWeight: 700, fontSize: '0.72rem',
+              textTransform: 'none', color: D.navy,
+              border: `1px solid ${D.rule}`, borderRadius: '6px',
+              px: 1.25, py: 0.3,
+              '&:hover': { borderColor: D.navy },
+            }}
+          >
+            Test deep links →
+          </Button>
+        </Box>
       </Box>
     </SectionCard>
   );
