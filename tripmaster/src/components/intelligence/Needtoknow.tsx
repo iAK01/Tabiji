@@ -284,7 +284,7 @@ export default function Needtoknow({ visa, tipping, water, payment, cultural, ti
                 {electrical.message}
               </Typography>
               {/* Plug row — footnotes kept outside so they don't affect vertical alignment */}
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: { xs: 2, sm: 3 }, flexWrap: 'wrap' }}>
+              <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: { xs: 2, sm: 3 }, flexWrap: 'wrap' }}>
                 {groupPlugs(electrical.originPlug, 'origin').map(g => (
                   <Box key={g.displayType} sx={{ textAlign: 'center', width: 88 }}>
                     <Box sx={{
@@ -300,7 +300,7 @@ export default function Needtoknow({ visa, tipping, water, payment, cultural, ti
                   </Box>
                 ))}
 
-                <Typography sx={{ fontSize: '1.5rem', color: D.muted, fontWeight: 300, flexShrink: 0, mb: 3 }}>→</Typography>
+                <Typography sx={{ fontSize: '1.5rem', color: D.muted, fontWeight: 300, flexShrink: 0, mt: '28px' }}>→</Typography>
 
                 {groupPlugs(electrical.destinationPlug, 'destination').map(g => (
                   <Box key={g.displayType} sx={{ textAlign: 'center', width: 88 }}>
