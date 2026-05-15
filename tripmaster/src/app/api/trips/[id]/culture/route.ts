@@ -160,45 +160,78 @@ Absolute rules:
 - Do not mention visa, currency, adapter, transport or weather preparation — handled elsewhere`;
 }
 
-// ─── Unsplash → GCS image fetch ───────────────────────────────────────────────
+// ─── Image waterfall: Wikipedia → Unsplash specific → Unsplash city ──────────
+// Priority: actual photo of the place > relevant photo > guaranteed something
 
-async function fetchHighlightImage(
-  query:   string,
-  tripId:  string,
-  slug:    string,
-): Promise<{ imageUrl?: string; imageCredit?: CultureHighlight['imageCredit'] }> {
+type ImageResult = { url: string; credit: CultureHighlight['imageCredit'] };
+
+async function tryWikipedia(name: string, city: string): Promise<ImageResult | null> {
+  try {
+    const q       = encodeURIComponent(`${name} ${city}`);
+    const headers = { 'User-Agent': 'TripMaster/1.0 (travel planning app)' };
+
+    // Search for the article
+    const searchRes  = await fetch(`https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${q}&format=json&srlimit=1`, { headers });
+    const searchData = await searchRes.json();
+    const hit        = searchData.query?.search?.[0];
+    if (!hit) return null;
+
+    // Get the main page image
+    const imgRes  = await fetch(`https://en.wikipedia.org/w/api.php?action=query&pageids=${hit.pageid}&prop=pageimages&format=json&pithumbsize=1200`, { headers });
+    const imgData = await imgRes.json();
+    const thumb   = imgData.query?.pages?.[hit.pageid]?.thumbnail?.source;
+    if (!thumb) return null;
+
+    const pageUrl = `https://en.wikipedia.org/wiki/${encodeURIComponent(hit.title.replace(/ /g, '_'))}`;
+    return { url: thumb, credit: { name: 'Wikimedia Commons', username: 'wikimedia', link: pageUrl } };
+  } catch { return null; }
+}
+
+async function tryUnsplash(query: string): Promise<ImageResult | null> {
   try {
     const key = process.env.NEXT_PUBLIC_UNSPLASH_ACCESS_KEY;
-    if (!key) return {};
+    if (!key) return null;
 
-    const res = await fetch(
+    const res  = await fetch(
       `https://api.unsplash.com/search/photos?query=${encodeURIComponent(query)}&per_page=3&orientation=landscape&content_filter=high`,
       { headers: { Authorization: `Client-ID ${key}` } },
     );
-    if (!res.ok) return {};
+    if (!res.ok) return null;
 
     const data  = await res.json();
     const photo = data.results?.[0];
-    if (!photo?.urls?.regular) return {};
+    if (!photo?.urls?.regular) return null;
 
-    const imgRes = await fetch(photo.urls.regular);
+    return {
+      url:    photo.urls.regular,
+      credit: { name: photo.user.name, username: photo.user.username, link: photo.links.html },
+    };
+  } catch { return null; }
+}
+
+async function fetchHighlightImage(
+  name:          string,
+  city:          string,
+  country:       string,
+  specificQuery: string,
+  tripId:        string,
+  slug:          string,
+): Promise<{ imageUrl?: string; imageCredit?: CultureHighlight['imageCredit'] }> {
+  const source =
+    await tryWikipedia(name, city) ??
+    await tryUnsplash(specificQuery) ??
+    await tryUnsplash(`${city} ${country}`);
+
+  if (!source) return {};
+
+  try {
+    const imgRes = await fetch(source.url);
     if (!imgRes.ok) return {};
-
     const buffer   = Buffer.from(await imgRes.arrayBuffer());
     const filename = `culture/${tripId}/${slug}-${Date.now()}.jpg`;
     const imageUrl = await uploadFile(buffer, filename, 'image/jpeg');
-
-    return {
-      imageUrl,
-      imageCredit: {
-        name:     photo.user.name,
-        username: photo.user.username,
-        link:     photo.links.html,
-      },
-    };
-  } catch {
-    return {};
-  }
+    return { imageUrl, imageCredit: source.credit };
+  } catch { return {}; }
 }
 
 // ─── Generate briefing ────────────────────────────────────────────────────────
@@ -228,7 +261,7 @@ async function generateBriefing(ctx: {
 
       const [geo, imgData] = await Promise.all([
         geocode(geoQuery, ctx.destCoords, 60),
-        fetchHighlightImage(imgQuery, ctx.tripId, slug),
+        fetchHighlightImage(h.name, ctx.city, ctx.country, imgQuery, ctx.tripId, slug),
       ]);
 
       return {
