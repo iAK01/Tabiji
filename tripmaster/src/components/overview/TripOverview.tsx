@@ -33,6 +33,7 @@ import ConfirmationNumberIcon   from '@mui/icons-material/ConfirmationNumber';
 import VisibilityIcon           from '@mui/icons-material/Visibility';
 import NavigateButton           from '@/components/ui/NavigateButton';
 import DocumentViewer, { type ViewableFile } from '@/components/files/DocumentViewer';
+import PreTripAppsCard from '@/components/overview/PreTripAppsCard';
 import { saveTripCache, getTripCache } from '@/lib/offline/db';
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
@@ -72,7 +73,7 @@ interface Props {
     status:           string;
     purpose?:         string;
     origin:           { city: string; country: string };
-    destination:      { city: string; country: string };
+    destination:      { city: string; country: string; countryCode?: string };
     startDate:        string;
     endDate:          string;
     nights:           number;
@@ -549,6 +550,14 @@ export default function TripOverview({ trip, onNavigate }: Props) {
             Check the itinerary tab for tomorrow.
           </Typography>
         </Paper>
+      )}
+
+      {/* ── Pre-trip apps (confirmed + ≤30 days out) ── */}
+      {['idea', 'planning', 'confirmed'].includes(trip.status) && daysUntil > 0 && trip.destination.countryCode && (
+        <PreTripAppsCard
+          countryCode={trip.destination.countryCode}
+          cityName={trip.destination.city}
+        />
       )}
 
       {/* ── Countdown hero ── */}

@@ -33,6 +33,7 @@ import ExpandMoreIcon           from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon           from '@mui/icons-material/ExpandLess';
 import AttachFileIcon           from '@mui/icons-material/AttachFile';
 import DocumentViewer, { type ViewableFile } from '@/components/files/DocumentViewer';
+import ArrivalTransportCard from '@/components/trips/ArrivalTransportCard';
 
 // ─── Design tokens ─────────────────────────────────────────────────────────────
 
@@ -925,6 +926,7 @@ export default function OnTripScreen({ tripId, trip }: OnTripScreenProps) {
   const [refreshing,     setRefreshing]     = useState(false);
   const [now,            setNow]            = useState(new Date());
   const [dismissedIds,   setDismissedIds]   = useState<Set<string>>(new Set());
+  const [arrivalCardDismissed, setArrivalCardDismissed] = useState(false);
   const [todayOpen,      setTodayOpen]      = useState(false);
   const [filesByStop,    setFilesByStop]    = useState<Map<string, any[]>>(new Map());
   const [viewerFile,     setViewerFile]     = useState<ViewableFile | null>(null);
@@ -1258,6 +1260,15 @@ export default function OnTripScreen({ tripId, trip }: OnTripScreenProps) {
             ))}
           </Paper>
         </Box>
+      )}
+
+      {/* ── 4. ARRIVAL TRANSPORT (day 1 only) ── */}
+      {dayNum === 1 && !arrivalCardDismissed && trip.destination.countryCode && (
+        <ArrivalTransportCard
+          countryCode={trip.destination.countryCode}
+          cityName={trip.destination.city}
+          onDismiss={() => setArrivalCardDismissed(true)}
+        />
       )}
 
       <DocumentViewer file={viewerFile} onClose={() => setViewerFile(null)} />
