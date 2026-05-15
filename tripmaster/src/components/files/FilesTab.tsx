@@ -56,7 +56,9 @@ import AddPhotoAlternateIcon  from '@mui/icons-material/AddPhotoAlternate';
 import CloseIcon              from '@mui/icons-material/Close';
 import VisibilityIcon         from '@mui/icons-material/Visibility';
 import WifiOffIcon            from '@mui/icons-material/WifiOff';
+import AutoFixHighIcon        from '@mui/icons-material/AutoFixHigh';
 import DocumentViewer, { type ViewableFile } from './DocumentViewer';
+import SmartExtractModal, { type ExtractedData } from './SmartExtractModal';
 import { isFileCached } from '@/lib/offline/fileCache';
 import { saveTripCache, getTripCache } from '@/lib/offline/db';
 
@@ -907,15 +909,38 @@ function ContactCard({ file, onDelete, onEdit }: { file: TripFile; onDelete: (id
 
 // ─── File / link card ─────────────────────────────────────────────────────────
 
-function ResourceCard({ file, onDelete, onEdit }: { file: TripFile; onDelete: (id: string) => void; onEdit: (file: TripFile) => void }) {
-  const [menuAnchor,   setMenuAnchor]   = useState<null | HTMLElement>(null);
-  const [confirmOpen,  setConfirmOpen]  = useState(false);
-  const [viewerFile,   setViewerFile]   = useState<ViewableFile | null>(null);
-  const [cached,       setCached]       = useState(false);
+function ResourceCard({ file, tripId, onDelete, onEdit }: { file: TripFile; tripId: string; onDelete: (id: string) => void; onEdit: (file: TripFile) => void }) {
+  const [menuAnchor,    setMenuAnchor]    = useState<null | HTMLElement>(null);
+  const [confirmOpen,   setConfirmOpen]   = useState(false);
+  const [viewerFile,    setViewerFile]    = useState<ViewableFile | null>(null);
+  const [cached,        setCached]        = useState(false);
+  const [extracting,    setExtracting]    = useState(false);
+  const [extractResult, setExtractResult] = useState<ExtractedData | null>(null);
+  const [extractError,  setExtractError]  = useState<string | null>(null);
   const color     = TYPE_COLOUR[file.type] ?? '#6b7280';
   const isLink    = file.resourceType === 'link';
   const actionUrl = isLink ? file.linkUrl : file.gcsUrl;
   const canPreview = !isLink && !!file.gcsUrl;
+  const isEventBriefPdf = file.type === 'event_brief' && file.mimeType === 'application/pdf';
+
+  async function handleSmartExtract() {
+    setExtracting(true);
+    setExtractError(null);
+    try {
+      const res = await fetch(`/api/trips/${tripId}/analyze-document`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ gcsUrl: file.gcsUrl }),
+      });
+      if (!res.ok) throw new Error('Analysis failed');
+      const { extracted } = await res.json();
+      setExtractResult(extracted);
+    } catch {
+      setExtractError('Could not analyse document. Please try again.');
+    } finally {
+      setExtracting(false);
+    }
+  }
 
   useEffect(() => {
     if (!canPreview) return;
@@ -971,6 +996,20 @@ function ResourceCard({ file, onDelete, onEdit }: { file: TripFile; onDelete: (i
             </Typography>
           )}
         </Box>
+
+        {/* Smart Extract button — event brief PDFs only */}
+        {isEventBriefPdf && (
+          <IconButton
+            size="small"
+            onClick={handleSmartExtract}
+            disabled={extracting}
+            aria-label="Smart Extract"
+            title="Smart Extract — import venues, hotel and schedule automatically"
+            sx={{ color: D.green, '&:hover': { color: '#5a6b4e' }, '&.Mui-disabled': { color: 'rgba(107,124,92,0.35)' } }}
+          >
+            {extracting ? <CircularProgress size={16} sx={{ color: D.green }} /> : <AutoFixHighIcon fontSize="small" />}
+          </IconButton>
+        )}
 
         {/* View button — primary action for files */}
         {canPreview && (
@@ -1044,6 +1083,29 @@ function ResourceCard({ file, onDelete, onEdit }: { file: TripFile; onDelete: (i
       </Dialog>
 
       <DocumentViewer file={viewerFile} onClose={() => setViewerFile(null)} />
+
+      {extractError && (
+        <Dialog open onClose={() => setExtractError(null)} maxWidth="xs" fullWidth
+          PaperProps={{ sx: { backgroundColor: D.paper, borderRadius: 2.5 } }}>
+          <DialogTitle sx={{ fontFamily: D.display, fontSize: '1rem', color: D.navy }}>Extract failed</DialogTitle>
+          <DialogContent>
+            <Typography sx={{ fontFamily: D.body, fontSize: '0.88rem', color: 'text.secondary' }}>{extractError}</Typography>
+          </DialogContent>
+          <DialogActions sx={{ px: 3, pb: 2.5 }}>
+            <Button onClick={() => setExtractError(null)} sx={{ fontFamily: D.body, fontWeight: 600 }}>OK</Button>
+          </DialogActions>
+        </Dialog>
+      )}
+
+      {extractResult && (
+        <SmartExtractModal
+          open
+          onClose={() => setExtractResult(null)}
+          tripId={tripId}
+          data={extractResult}
+          filename={file.name}
+        />
+      )}
     </>
   );
 }
@@ -1519,7 +1581,7 @@ export default function FilesTab({ tripId, fabTrigger }: FilesTabProps) {
                       ? <NoteCard    file={file} onDelete={handleDelete} onEdit={openEdit} />
                       : file.resourceType === 'contact'
                       ? <ContactCard file={file} onDelete={handleDelete} onEdit={openEdit} />
-                      : <ResourceCard file={file} onDelete={handleDelete} onEdit={openEdit} />
+                      : <ResourceCard file={file} tripId={tripId} onDelete={handleDelete} onEdit={openEdit} />
                     }
                   </Box>
                 ))}
