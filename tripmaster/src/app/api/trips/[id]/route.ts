@@ -10,6 +10,7 @@ import TripFile from '@/lib/mongodb/models/TripFile';
 import PushNotificationLog from '@/lib/mongodb/models/PushNotificationLog';
 import { deleteFile } from '@/lib/utils/storage';
 import User from '@/lib/mongodb/models/User';
+import { syncLogisticsToItinerary } from '@/lib/itinerary/syncLogistics';
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -48,12 +49,19 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
 
   if (datesChanged && body.startDate && body.endDate) {
     const TripItinerary = (await import('@/lib/mongodb/models/TripItinerary')).default;
-    const days = generateDays(body.startDate, body.endDate);
+    const existing = await TripItinerary.findOne({ tripId: id });
+    const existingDayMap = new Map<string, any>();
+    for (const day of existing?.days ?? []) {
+      const dateStr = new Date(day.date).toISOString().split('T')[0];
+      existingDayMap.set(dateStr, day);
+    }
+    const days = generateDays(body.startDate, body.endDate, existingDayMap);
     await TripItinerary.findOneAndUpdate(
       { tripId: id },
       { days },
       { upsert: true }
     );
+    await syncLogisticsToItinerary(id);
   }
 
   return NextResponse.json({ trip });
@@ -120,14 +128,16 @@ const gcsFiles = await TripFile.find({ tripId, gcsPath: { $exists: true, $ne: nu
   return NextResponse.json({ success: true, receipt });
 }
 
-function generateDays(startDate: string, endDate: string) {
+function generateDays(startDate: string, endDate: string, existingDayMap?: Map<string, any>) {
   const days = [];
   const start = new Date(startDate);
   const end = new Date(endDate);
   let current = new Date(start);
   let dayNumber = 1;
   while (current <= end) {
-    days.push({ date: current.toISOString(), dayNumber, stops: [] });
+    const dateStr = current.toISOString().split('T')[0];
+    const existing = existingDayMap?.get(dateStr);
+    days.push({ date: dateStr, dayNumber, stops: existing?.stops ?? [] });
     current.setDate(current.getDate() + 1);
     dayNumber++;
   }
