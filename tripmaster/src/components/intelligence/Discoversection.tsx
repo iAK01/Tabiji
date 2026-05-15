@@ -339,7 +339,17 @@ export default function Discoversection({ tripId }: Props) {
   useEffect(() => {
     fetch(`/api/trips/${tripId}/culture`)
       .then(r => r.json())
-      .then(d => setCulture(d.culture ?? null))
+      .then(d => {
+        const c = d.culture ?? null;
+        setCulture(c);
+        // Silently backfill images for any highlights that are missing them
+        if (c?.briefing?.highlights?.some((h: any) => !h.imageUrl)) {
+          fetch(`/api/trips/${tripId}/culture`, { method: 'PATCH' })
+            .then(r => r.json())
+            .then(d => { if (d.culture) setCulture(d.culture); })
+            .catch(() => {});
+        }
+      })
       .catch(() => {});
   }, [tripId]);
 

@@ -341,6 +341,45 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   });
 }
 
+// ─── PATCH — backfill missing images on existing briefings ───────────────────
+
+export async function PATCH(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  const session = await getServerSession();
+  if (!session?.user?.email) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
+
+  await connectDB();
+  const user = await User.findOne({ email: session.user.email });
+  const trip = await Trip.findOne({ _id: id, userId: user._id, deleted: false });
+  if (!trip?.culture?.briefing) return NextResponse.json({ error: 'No briefing' }, { status: 404 });
+
+  const city    = trip.destination?.city    ?? '';
+  const country = trip.destination?.country ?? '';
+
+  const highlights: CultureHighlight[] = trip.culture.briefing.highlights ?? [];
+  const needsImage = highlights.some((h: CultureHighlight) => !h.imageUrl);
+  if (!needsImage) return NextResponse.json({ culture: { briefing: trip.culture.briefing } });
+
+  const updated: CultureHighlight[] = await Promise.all(
+    highlights.map(async (h: CultureHighlight) => {
+      if (h.imageUrl) return h;
+      const slug    = h.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 40);
+      const imgData = await fetchHighlightImage(h.name, city, country, `${h.name} ${city}`, id, slug);
+      return { ...h, ...imgData };
+    }),
+  );
+
+  const updatedBriefing = { ...trip.culture.briefing.toObject?.() ?? trip.culture.briefing, highlights: updated };
+  await Trip.findByIdAndUpdate(id, { 'culture.briefing': updatedBriefing });
+
+  const freeAccess = buildFreeAccess(
+    new Date(trip.startDate), new Date(trip.endDate),
+    trip.destination?.countryCode ?? '',
+  );
+
+  return NextResponse.json({ culture: { briefing: updatedBriefing, freeAccess, generatedAt: trip.culture.generatedAt } });
+}
+
 // ─── POST ─────────────────────────────────────────────────────────────────────
 
 export async function POST(_req: Request, { params }: { params: Promise<{ id: string }> }) {
