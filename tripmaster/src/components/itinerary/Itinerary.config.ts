@@ -1,12 +1,13 @@
-import FlightIcon         from '@mui/icons-material/Flight';
-import HotelIcon          from '@mui/icons-material/Hotel';
-import WorkIcon           from '@mui/icons-material/Work';
-import RestaurantIcon     from '@mui/icons-material/Restaurant';
-import ExploreIcon        from '@mui/icons-material/Explore';
-import DirectionsBusIcon  from '@mui/icons-material/DirectionsBus';
-import EventIcon          from '@mui/icons-material/Event';
-import FreeBreakfastIcon  from '@mui/icons-material/FreeBreakfast';
-import LuggageIcon        from '@mui/icons-material/Luggage';
+import FlightIcon               from '@mui/icons-material/Flight';
+import HotelIcon                from '@mui/icons-material/Hotel';
+import WorkIcon                 from '@mui/icons-material/Work';
+import RestaurantIcon           from '@mui/icons-material/Restaurant';
+import ExploreIcon              from '@mui/icons-material/Explore';
+import DirectionsBusIcon        from '@mui/icons-material/DirectionsBus';
+import EventIcon                from '@mui/icons-material/Event';
+import FreeBreakfastIcon        from '@mui/icons-material/FreeBreakfast';
+import LuggageIcon              from '@mui/icons-material/Luggage';
+import ConnectingAirportsIcon   from '@mui/icons-material/ConnectingAirports';
 
 
 // ─── Timeline constants ────────────────────────────────────────────────────────
@@ -40,6 +41,7 @@ export const STOP_CONFIG: Record<string, { label: string; color: string; bg: str
   activity:    { label: '🎯 Activity',      color: '#55702C', bg: '#F0F5E8', Icon: ExploreIcon      },
   sightseeing: { label: '📸 Sightseeing',  color: '#55702C', bg: '#F0F5E8', Icon: ExploreIcon      },
   transport:   { label: '🚌 Transport',     color: '#0369a1', bg: '#E0F2FE', Icon: DirectionsBusIcon },
+  transfer:    { label: '✈️ Transfer',      color: '#455a64', bg: '#ECEFF1', Icon: ConnectingAirportsIcon },
   checkin:    { label: '🧳 Check-in',       color: '#0369a1', bg: '#EFF6FF', Icon: LuggageIcon },
   work:        { label: '💻 Work block',   color: '#1D2642', bg: '#E8EAF0', Icon: WorkIcon         },
   other:       { label: '📍 Other',        color: '#6b7280', bg: '#F3F4F6', Icon: EventIcon        },

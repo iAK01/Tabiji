@@ -186,7 +186,7 @@ export async function syncLogisticsToItinerary(tripId: string, logistics?: any) 
           _id:            new mongoose.Types.ObjectId(),
           date:           transferDate,
           name:           `Transfer — ${prevArrCode}`,
-          type:           'transport',
+          type:           'transfer',
           color:          '#455a64',
           time:           arrTime,
           scheduledStart: `${transferDate}T${arrTime}:00`,
