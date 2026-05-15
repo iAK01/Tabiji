@@ -83,6 +83,12 @@ function toScheduledStart(date: string | Date | undefined, time: string): string
   return `${toDateString(date)}T${time}:00`;
 }
 
+function extractAirportCode(location: string | undefined): string {
+  if (!location) return '';
+  const match = location.match(/^([A-Z]{3})/);
+  return match ? match[1] : '';
+}
+
 function stopColor(type: string): string {
   switch (type) {
     case 'flight':           return '#c9521b';
@@ -138,6 +144,61 @@ export async function syncLogisticsToItinerary(tripId: string, logistics?: any) 
 
     const newStops: any[] = [];
 
+    // ── Detect connecting flights ─────────────────────────────────────────────
+    // A connection = flight B departs from the same airport flight A just arrived at,
+    // within 8 hours. For connections: skip check-in for B, suppress transit arrival
+    // for A, and inject a Transfer block spanning the layover instead.
+    const connectionSet      = new Set<number>(); // indices whose check-in should be skipped
+    const suppressArrivalSet = new Set<number>(); // indices whose arrival stop is replaced
+    const transferStops: any[] = [];
+
+    {
+      const transports = log.transportation ?? [];
+      const flightEntries = transports
+        .map((t: any, idx: number) => ({ t, idx }))
+        .filter(({ t }: { t: any }) => (t.type === 'flight' || !t.type) && t.departureTime)
+        .sort((a: any, b: any) =>
+          new Date(a.t.departureTime).getTime() - new Date(b.t.departureTime).getTime()
+        );
+
+      for (let i = 0; i < flightEntries.length - 1; i++) {
+        const prev = flightEntries[i];
+        const next = flightEntries[i + 1];
+
+        const prevArrCode = extractAirportCode(prev.t.arrivalLocation ?? prev.t.arrivalAirport);
+        const nextDepCode = extractAirportCode(next.t.departureLocation ?? next.t.departureAirport);
+        if (!prevArrCode || !nextDepCode || prevArrCode !== nextDepCode) continue;
+        if (!prev.t.arrivalTime || !next.t.departureTime) continue;
+
+        const arrMs     = new Date(prev.t.arrivalTime).getTime();
+        const depMs     = new Date(next.t.departureTime).getTime();
+        const layoverMs = depMs - arrMs;
+        if (layoverMs <= 0 || layoverMs > 8 * 60 * 60 * 1000) continue;
+
+        connectionSet.add(next.idx);
+        suppressArrivalSet.add(prev.idx);
+
+        const arrTime       = toTimeString(prev.t.arrivalTime);
+        const transferDate  = toDateString(prev.t.arrivalTime);
+        const layoverMins   = Math.round(layoverMs / 60000);
+
+        transferStops.push({
+          _id:            new mongoose.Types.ObjectId(),
+          date:           transferDate,
+          name:           `Transfer — ${prevArrCode}`,
+          type:           'transport',
+          color:          '#455a64',
+          time:           arrTime,
+          scheduledStart: `${transferDate}T${arrTime}:00`,
+          scheduledEnd:   new Date(next.t.departureTime).toISOString(),
+          duration:       layoverMins,
+          locked:         true,
+          source:         'logistics',
+          metadata:       { phase: 'transfer', transitAirport: prevArrCode },
+        });
+      }
+    }
+
     // ── Transport ─────────────────────────────────────────────────────────────
     for (const [tIdx, t] of (log.transportation ?? []).entries()) {
       const depTime = t.departureTime;
@@ -157,8 +218,8 @@ export async function syncLogisticsToItinerary(tripId: string, logistics?: any) 
       if (depTime) {
         const time = toTimeString(depTime);
 
-        // Airport check-in stop: 2 hours before every flight departure
-        if (t.type === 'flight') {
+        // Airport check-in stop: 2 hours before origin flights only (not connections)
+        if (t.type === 'flight' && !connectionSet.has(tIdx)) {
           const checkInMs      = new Date(depTime).getTime() - 2 * 60 * 60 * 1000;
           const checkInDt      = new Date(checkInMs).toISOString();
           const checkInTime    = toTimeString(checkInDt);
@@ -211,7 +272,7 @@ export async function syncLogisticsToItinerary(tripId: string, logistics?: any) 
         });
       }
 
-      if (arrTime) {
+      if (arrTime && !suppressArrivalSet.has(tIdx)) {
         const arrDate = toDateString(arrTime);
         const depDate = depTime ? toDateString(depTime) : null;
         const shortMode = ['taxi', 'car', 'bicycle'].includes(t.type ?? '');
@@ -236,6 +297,8 @@ export async function syncLogisticsToItinerary(tripId: string, logistics?: any) 
         }
       }
     }
+
+    newStops.push(...transferStops);
 
     // ── Accommodation ─────────────────────────────────────────────────────────
     for (const [aIdx, a] of (log.accommodation ?? []).entries()) {

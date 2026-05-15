@@ -15,7 +15,7 @@ export function stopStartMinutes(stop: Stop): number | null {
 
 // Prefer explicit duration, then derive from scheduledEnd - scheduledStart, fallback 60
 export function stopDuration(stop: Stop): number {
-  if (stop.duration && stop.duration > 0) return stop.duration;
+  if (typeof stop.duration === 'number' && stop.duration > 0) return stop.duration;
   if (stop.scheduledEnd && stop.scheduledStart) {
     const parse = (s: string) => {
       const t = s.includes('T') ? s.split('T')[1]?.slice(0, 5) : s;
@@ -27,6 +27,8 @@ export function stopDuration(stop: Stop): number {
     const end   = parse(stop.scheduledEnd);
     if (start !== null && end !== null && end > start) return end - start;
   }
+  // Explicit 0 = instant marker (arrival stop), not a missing value
+  if (stop.duration === 0) return 0;
   return 60;
 }
 
