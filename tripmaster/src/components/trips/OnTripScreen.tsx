@@ -927,7 +927,6 @@ export default function OnTripScreen({ tripId, trip }: OnTripScreenProps) {
   const [refreshing,     setRefreshing]     = useState(false);
   const [now,            setNow]            = useState(new Date());
   const [dismissedIds,   setDismissedIds]   = useState<Set<string>>(new Set());
-  const [arrivalCardDismissed, setArrivalCardDismissed] = useState(false);
   const [myAppIds,       setMyAppIds]       = useState<string[]>([]);
   const [todayOpen,      setTodayOpen]      = useState(false);
   const [filesByStop,    setFilesByStop]    = useState<Map<string, any[]>>(new Map());
@@ -1270,17 +1269,16 @@ export default function OnTripScreen({ tripId, trip }: OnTripScreenProps) {
         </Box>
       )}
 
-      {/* ── 4. ARRIVAL TRANSPORT (day 1 only) ── */}
-      {dayNum === 1 && !arrivalCardDismissed && trip.destination.countryCode && (
+      {/* ── 4. GET AROUND — always visible for the full trip ── */}
+      {trip.destination.countryCode && (
         <ArrivalTransportCard
           countryCode={trip.destination.countryCode}
           cityName={trip.destination.city}
-          onDismiss={() => setArrivalCardDismissed(true)}
         />
       )}
 
-      {/* ── 5. QUICK LAUNCH (my apps) ── */}
-      <QuickLaunchCard myAppIds={myAppIds} />
+      {/* ── 5. QUICK LAUNCH — rides and navigation only in this context ── */}
+      <QuickLaunchCard myAppIds={myAppIds} onlyTransport />
 
       <DocumentViewer file={viewerFile} onClose={() => setViewerFile(null)} />
     </Box>

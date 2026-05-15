@@ -199,22 +199,59 @@ export default function Needtoknow({ visa, tipping, water, payment, cultural, ti
           <Typography sx={{ fontSize: '0.72rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: D.muted, mb: 1.25 }}>
             Electrical adapter
           </Typography>
-          <Paper elevation={0} sx={{ p: 2, border: `1px solid rgba(196,113,74,0.25)`, backgroundColor: 'rgba(196,113,74,0.04)', borderRadius: 1.5 }}>
-            <Typography sx={{ fontWeight: 700, fontSize: '0.97rem', color: D.navy, mb: 1.5 }}>{electrical.message}</Typography>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-              {electrical.originPlug.split('/').map(type => (
-                <Box key={type} sx={{ textAlign: 'center' }}>
-                  <img src={`/plugs/${type}.svg`} alt={`Plug type ${type}`} width={52} height={52} style={{ display: 'block' }} />
-                  <Typography sx={{ fontSize: '0.75rem', mt: 0.5, color: D.muted }}>Home · {type}</Typography>
-                </Box>
-              ))}
-              <Typography sx={{ fontSize: '1.1rem', color: D.muted }}>→</Typography>
-              {electrical.destinationPlug.split('/').map(type => (
-                <Box key={type} sx={{ textAlign: 'center' }}>
-                  <img src={`/plugs/${type}.svg`} alt={`Plug type ${type}`} width={52} height={52} style={{ display: 'block' }} />
-                  <Typography sx={{ fontSize: '0.75rem', mt: 0.5, color: D.muted }}>There · {type}</Typography>
-                </Box>
-              ))}
+          <Paper elevation={0} sx={{
+            border: `1px solid rgba(196,113,74,0.3)`,
+            backgroundColor: 'rgba(196,113,74,0.04)',
+            borderRadius: 2,
+            overflow: 'hidden',
+          }}>
+            <Box sx={{ borderLeft: `4px solid ${D.terra}`, px: 3, pt: 2.5, pb: 3 }}>
+              <Typography sx={{ fontFamily: D.display, fontSize: '1.25rem', color: D.navy, mb: 2.5 }}>
+                {electrical.message}
+              </Typography>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: { xs: 2, sm: 3 }, flexWrap: 'wrap' }}>
+                {electrical.originPlug.split('/').map(type => (
+                  <Box key={type} sx={{ textAlign: 'center' }}>
+                    <Box sx={{
+                      width: 80, height: 80,
+                      borderRadius: 2,
+                      border: `1px solid ${D.rule}`,
+                      backgroundColor: D.paper,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      mb: 1,
+                    }}>
+                      <img src={`/plugs/${type}.svg`} alt={`Plug type ${type}`} width={52} height={52} />
+                    </Box>
+                    <Typography sx={{ fontSize: '0.72rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: D.muted, lineHeight: 1.2 }}>
+                      Home
+                    </Typography>
+                    <Typography sx={{ fontSize: '1rem', fontWeight: 800, color: D.navy }}>
+                      Type {type}
+                    </Typography>
+                  </Box>
+                ))}
+                <Typography sx={{ fontSize: '1.5rem', color: D.muted, fontWeight: 300, flexShrink: 0 }}>→</Typography>
+                {electrical.destinationPlug.split('/').map(type => (
+                  <Box key={type} sx={{ textAlign: 'center' }}>
+                    <Box sx={{
+                      width: 80, height: 80,
+                      borderRadius: 2,
+                      border: `1px solid rgba(196,113,74,0.35)`,
+                      backgroundColor: 'rgba(196,113,74,0.07)',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      mb: 1,
+                    }}>
+                      <img src={`/plugs/${type}.svg`} alt={`Plug type ${type}`} width={52} height={52} />
+                    </Box>
+                    <Typography sx={{ fontSize: '0.72rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: D.muted, lineHeight: 1.2 }}>
+                      There
+                    </Typography>
+                    <Typography sx={{ fontSize: '1rem', fontWeight: 800, color: D.navy }}>
+                      Type {type}
+                    </Typography>
+                  </Box>
+                ))}
+              </Box>
             </Box>
           </Paper>
         </Box>

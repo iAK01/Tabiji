@@ -2,12 +2,11 @@
 
 import React from 'react';
 import {
-  Box, Typography, Paper, Button, IconButton, alpha,
+  Box, Typography, Paper, Button, alpha,
 } from '@mui/material';
 import LocalTaxiIcon      from '@mui/icons-material/LocalTaxi';
 import DirectionsBusIcon  from '@mui/icons-material/DirectionsBus';
 import TrainIcon          from '@mui/icons-material/Train';
-import CloseIcon          from '@mui/icons-material/Close';
 import WarningAmberIcon   from '@mui/icons-material/WarningAmber';
 import { getCountryTransport, resolveServices } from '@/lib/data/ground-transport';
 import { openApp } from '@/lib/utils/openApp';
@@ -36,10 +35,9 @@ const CATEGORY_ICON: Record<string, React.ElementType> = {
 interface Props {
   countryCode: string;
   cityName:    string;
-  onDismiss:   () => void;
 }
 
-export default function ArrivalTransportCard({ countryCode, cityName, onDismiss }: Props) {
+export default function ArrivalTransportCard({ countryCode, cityName }: Props) {
   const data = getCountryTransport(countryCode);
   if (!data) return null;
 
@@ -61,48 +59,38 @@ export default function ArrivalTransportCard({ countryCode, cityName, onDismiss 
     }}>
       {/* Header */}
       <Box sx={{
-        display:        'flex',
-        alignItems:     'center',
-        justifyContent: 'space-between',
+        display:    'flex',
+        alignItems: 'center',
+        gap:         1,
         px: { xs: 2, sm: 2.5 },
         pt: 2,
         pb: 1.25,
       }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-          <Box sx={{
-            width: 36, height: 36, borderRadius: '10px',
-            backgroundColor: alpha(D.terra, 0.12),
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            flexShrink: 0,
-          }}>
-            <LocalTaxiIcon sx={{ fontSize: 19, color: D.terra }} />
-          </Box>
-          <Box>
-            <Typography sx={{
-              fontFamily: D.display,
-              fontSize:   '1.05rem',
-              color:       D.navy,
-              lineHeight:  1.2,
-            }}>
-              Get to your hotel
-            </Typography>
-            <Typography sx={{
-              fontFamily: D.body,
-              fontSize:   '0.78rem',
-              color:       D.muted,
-            }}>
-              {cityName}
-            </Typography>
-          </Box>
+        <Box sx={{
+          width: 36, height: 36, borderRadius: '10px',
+          backgroundColor: alpha(D.terra, 0.12),
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          flexShrink: 0,
+        }}>
+          <LocalTaxiIcon sx={{ fontSize: 19, color: D.terra }} />
         </Box>
-
-        <IconButton
-          size="small"
-          onClick={onDismiss}
-          sx={{ p: 0.5, color: D.muted, '&:hover': { color: D.navy } }}
-        >
-          <CloseIcon sx={{ fontSize: '1rem' }} />
-        </IconButton>
+        <Box>
+          <Typography sx={{
+            fontFamily: D.display,
+            fontSize:   '1.05rem',
+            color:       D.navy,
+            lineHeight:  1.2,
+          }}>
+            Get around
+          </Typography>
+          <Typography sx={{
+            fontFamily: D.body,
+            fontSize:   '0.78rem',
+            color:       D.muted,
+          }}>
+            {cityName}
+          </Typography>
+        </Box>
       </Box>
 
       <Box sx={{ px: { xs: 2, sm: 2.5 }, pb: 2, display: 'flex', flexDirection: 'column', gap: 1.75 }}>

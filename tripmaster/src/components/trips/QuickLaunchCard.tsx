@@ -45,16 +45,20 @@ const CATEGORY_ICON: Record<string, React.ElementType> = {
   trip_management: LuggageIcon,
 };
 
+const TRANSPORT_CATEGORIES = new Set(['ride', 'navigation', 'transit', 'rail']);
+
 interface Props {
-  myAppIds: string[];
+  myAppIds:   string[];
+  onlyTransport?: boolean;
 }
 
-export default function QuickLaunchCard({ myAppIds }: Props) {
+export default function QuickLaunchCard({ myAppIds, onlyTransport = false }: Props) {
   if (myAppIds.length === 0) return null;
 
   const apps = myAppIds
     .map(id => TRANSPORT_SERVICES[id])
-    .filter(Boolean);
+    .filter(Boolean)
+    .filter(svc => !onlyTransport || TRANSPORT_CATEGORIES.has(svc.category));
 
   if (apps.length === 0) return null;
 

@@ -291,7 +291,7 @@ export default function Discoversection({ tripId }: Props) {
           {cultural.length > 0 && (
             <Box>
               <SubHeading>Cultural</SubHeading>
-              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+              <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 1.5 }}>
                 {cultural.map((h, i) => <HighlightCard key={i} h={h} onAddToItinerary={() => openAddDialog(h)} />)}
               </Box>
             </Box>
@@ -301,7 +301,7 @@ export default function Discoversection({ tripId }: Props) {
           {coffees.length > 0 && (
             <Box>
               <SubHeading>Coffee</SubHeading>
-              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+              <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 1.5 }}>
                 {coffees.map((h, i) => <HighlightCard key={i} h={h} onAddToItinerary={() => openAddDialog(h)} />)}
               </Box>
             </Box>
@@ -311,7 +311,7 @@ export default function Discoversection({ tripId }: Props) {
           {parks.length > 0 && (
             <Box>
               <SubHeading>Green spaces</SubHeading>
-              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+              <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 1.5 }}>
                 {parks.map((h, i) => <HighlightCard key={i} h={h} onAddToItinerary={() => openAddDialog(h)} />)}
               </Box>
             </Box>
