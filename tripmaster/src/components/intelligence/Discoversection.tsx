@@ -1,9 +1,9 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Box, Typography, Paper, CircularProgress, Alert,
-  Chip, Button, IconButton, Tooltip, Divider,
+  Chip, Button, IconButton, Tooltip,
 } from '@mui/material';
 import AutoAwesomeIcon  from '@mui/icons-material/AutoAwesome';
 import RefreshIcon      from '@mui/icons-material/Refresh';
@@ -17,117 +17,182 @@ import type { CultureData, CultureHighlight } from './Intelligence.types';
 import { D, TYPE_COLOURS, TYPE_LABELS, buildMapUrl, SectionHeading } from './Intelligence.shared';
 import Addtoitinerarydialog from './Addtoitinerarydialog';
 
-// ─── Carousel card — image-first ─────────────────────────────────────────────
+// ─── Full-width showcase carousel ────────────────────────────────────────────
 
-function CarouselCard({ h, onAddToItinerary }: { h: CultureHighlight; onAddToItinerary: () => void }) {
-  const [expanded, setExpanded] = useState(false);
+function ShowcaseCarousel({ highlights, onAddToItinerary }: {
+  highlights:       CultureHighlight[];
+  onAddToItinerary: (h: CultureHighlight) => void;
+}) {
+  const [idx,    setIdx]    = useState(0);
+  const [fading, setFading] = useState(false);
+
+  const goTo = (next: number) => {
+    if (fading) return;
+    setFading(true);
+    setTimeout(() => { setIdx(next); setFading(false); }, 180);
+  };
+
+  const prev = () => goTo((idx - 1 + highlights.length) % highlights.length);
+  const next = () => goTo((idx + 1) % highlights.length);
+
+  const h          = highlights[idx];
   const spineColor = TYPE_COLOURS[h.type] ?? '#333';
   const mapUrl     = buildMapUrl(h);
 
   return (
-    <Paper elevation={0} sx={{
-      border: `1px solid ${D.rule}`, borderRadius: 2,
-      overflow: 'hidden', backgroundColor: D.paper,
-      display: 'flex', flexDirection: 'column', height: '100%',
-    }}>
-      {/* 16:9 image */}
-      <Box sx={{ position: 'relative', width: '100%', aspectRatio: '16/9', overflow: 'hidden', flexShrink: 0 }}>
-        {h.imageUrl ? (
-          <img
-            src={h.imageUrl} alt={h.name}
-            style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
-          />
-        ) : (
-          <Box sx={{
-            width: '100%', height: '100%',
-            background: `linear-gradient(135deg, ${spineColor}28 0%, ${spineColor}0a 100%)`,
-          }} />
-        )}
-
-        {/* Type badge */}
+    <Box sx={{ borderRadius: 2, overflow: 'hidden', border: `1px solid ${D.rule}` }}>
+      {/* ── Image + overlay ── */}
+      <Box sx={{
+        position: 'relative',
+        height: { xs: 320, sm: 460, md: 540 },
+        backgroundColor: `${spineColor}20`,
+        overflow: 'hidden',
+      }}>
+        {/* Image */}
         <Box sx={{
-          position: 'absolute', top: 8, left: 8,
-          px: 0.75, py: 0.3,
-          backgroundColor: 'rgba(0,0,0,0.52)', backdropFilter: 'blur(6px)',
-          borderRadius: 0.75,
+          position: 'absolute', inset: 0,
+          opacity: fading ? 0 : 1, transition: 'opacity 0.18s ease',
         }}>
-          <Typography sx={{ fontSize: '0.65rem', fontWeight: 700, color: '#fff', textTransform: 'uppercase', letterSpacing: '0.09em' }}>
-            {TYPE_LABELS[h.type] ?? h.type}
-          </Typography>
+          {h.imageUrl ? (
+            <img
+              src={h.imageUrl} alt={h.name}
+              style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+            />
+          ) : (
+            <Box sx={{
+              width: '100%', height: '100%',
+              background: `linear-gradient(135deg, ${spineColor}30 0%, ${spineColor}0a 100%)`,
+            }} />
+          )}
         </Box>
 
+        {/* Gradient overlay — dark at bottom for text legibility */}
+        <Box sx={{
+          position: 'absolute', inset: 0,
+          background: 'linear-gradient(to bottom, rgba(0,0,0,0.08) 0%, rgba(0,0,0,0) 35%, rgba(0,0,0,0.62) 70%, rgba(0,0,0,0.88) 100%)',
+          pointerEvents: 'none',
+        }} />
+
+        {/* Top badges */}
+        <Box sx={{ position: 'absolute', top: 14, left: 14, display: 'flex', gap: 0.75 }}>
+          <Box sx={{ px: 1, py: 0.35, backgroundColor: 'rgba(0,0,0,0.52)', backdropFilter: 'blur(8px)', borderRadius: 0.75 }}>
+            <Typography sx={{ fontSize: '0.7rem', fontWeight: 700, color: '#fff', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+              {TYPE_LABELS[h.type] ?? h.type}
+            </Typography>
+          </Box>
+          {h.nearVenue && (
+            <Box sx={{ px: 1, py: 0.35, backgroundColor: 'rgba(107,124,92,0.75)', backdropFilter: 'blur(8px)', borderRadius: 0.75 }}>
+              <Typography sx={{ fontSize: '0.7rem', fontWeight: 700, color: '#fff', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+                Near {h.nearVenue}
+              </Typography>
+            </Box>
+          )}
+        </Box>
         {h.free && (
-          <Box sx={{
-            position: 'absolute', top: 8, right: 8,
-            px: 0.75, py: 0.3,
-            backgroundColor: 'rgba(107,124,92,0.82)', backdropFilter: 'blur(6px)',
-            borderRadius: 0.75,
-          }}>
-            <Typography sx={{ fontSize: '0.65rem', fontWeight: 700, color: '#fff', textTransform: 'uppercase', letterSpacing: '0.09em' }}>
+          <Box sx={{ position: 'absolute', top: 14, right: 14, px: 1, py: 0.35, backgroundColor: 'rgba(107,124,92,0.82)', backdropFilter: 'blur(8px)', borderRadius: 0.75 }}>
+            <Typography sx={{ fontSize: '0.7rem', fontWeight: 700, color: '#fff', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
               Free
             </Typography>
           </Box>
         )}
-      </Box>
 
-      {/* Content */}
-      <Box sx={{ p: 2, flexGrow: 1, display: 'flex', flexDirection: 'column', gap: 0.75 }}>
-        <Typography sx={{ fontFamily: D.display, fontSize: '1.1rem', color: D.navy, lineHeight: 1.2 }}>
-          {h.name}
-        </Typography>
+        {/* Text overlay at bottom */}
+        <Box sx={{
+          position: 'absolute', bottom: 0, left: 0, right: 0,
+          p: { xs: 2.5, sm: 3.5 },
+          opacity: fading ? 0 : 1, transition: 'opacity 0.18s ease',
+        }}>
+          <Typography sx={{
+            fontFamily: D.display,
+            fontSize: { xs: '1.8rem', sm: '2.4rem', md: '2.75rem' },
+            color: '#fff', lineHeight: 1.05, letterSpacing: '-0.02em',
+            mb: 0.75, textShadow: '0 2px 16px rgba(0,0,0,0.5)',
+          }}>
+            {h.name}
+          </Typography>
 
-        <Typography
-          onClick={() => setExpanded(e => !e)}
-          sx={{
-            fontSize: '0.88rem', lineHeight: 1.55, color: 'rgba(29,38,66,0.65)',
-            cursor: 'pointer', flexGrow: 1,
-            ...(expanded ? {} : {
-              display: '-webkit-box', WebkitLineClamp: 3,
+          <Typography sx={{
+            fontSize: { xs: '0.92rem', sm: '1rem' },
+            color: 'rgba(255,255,255,0.85)', lineHeight: 1.55,
+            display: '-webkit-box', WebkitLineClamp: 2,
+            WebkitBoxOrient: 'vertical', overflow: 'hidden',
+            mb: h.tip ? 0.75 : 1.5, maxWidth: 680,
+          }}>
+            {h.description}
+          </Typography>
+
+          {h.tip && (
+            <Typography sx={{
+              fontSize: '0.88rem', color: 'rgba(255,255,255,0.65)',
+              fontStyle: 'italic', lineHeight: 1.45,
+              display: '-webkit-box', WebkitLineClamp: 2,
               WebkitBoxOrient: 'vertical', overflow: 'hidden',
-            }),
-          }}
-        >
-          {h.description}
-        </Typography>
-
-        {h.tip && (
-          <Box sx={{ borderLeft: `2px solid ${D.terra}`, pl: 1.25, mt: 0.25 }}>
-            <Typography sx={{ fontSize: '0.82rem', color: D.terra, fontStyle: 'italic', lineHeight: 1.45 }}>
+              mb: 1.5, maxWidth: 600,
+            }}>
               {h.tip}
             </Typography>
-          </Box>
-        )}
+          )}
 
-        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mt: 'auto', pt: 1 }}>
-          <Box
-            component="a" href={mapUrl} target="_blank" rel="noopener noreferrer"
-            sx={{
-              display: 'inline-flex', alignItems: 'center', gap: 0.5,
-              fontSize: '0.8rem', color: D.muted, textDecoration: 'none', fontWeight: 500,
-              border: `1px solid ${D.rule}`, borderRadius: 1, px: 0.75, py: 0.35,
-              '&:hover': { borderColor: D.green, color: D.green },
-            }}
-          >
-            <MapIcon sx={{ fontSize: '0.85rem' }} />
-            Map
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25, flexWrap: 'wrap' }}>
+            <Box component="a" href={mapUrl} target="_blank" rel="noopener noreferrer"
+              sx={{
+                display: 'inline-flex', alignItems: 'center', gap: 0.5,
+                fontSize: '0.85rem', color: 'rgba(255,255,255,0.72)', textDecoration: 'none', fontWeight: 500,
+                border: '1px solid rgba(255,255,255,0.28)', borderRadius: 1, px: 1.25, py: 0.45,
+                '&:hover': { borderColor: 'rgba(255,255,255,0.65)', color: '#fff' },
+              }}
+            >
+              <MapIcon sx={{ fontSize: '0.9rem' }} />
+              Map
+            </Box>
+            <Button
+              size="small"
+              startIcon={<AddIcon sx={{ fontSize: '0.9rem !important' }} />}
+              onClick={() => onAddToItinerary(h)}
+              sx={{
+                fontSize: '0.88rem', fontWeight: 700, py: 0.45, px: 1.75,
+                backgroundColor: 'rgba(255,255,255,0.14)', backdropFilter: 'blur(8px)',
+                border: '1px solid rgba(255,255,255,0.35)', color: '#fff',
+                '&:hover': { backgroundColor: 'rgba(255,255,255,0.25)' },
+              }}
+            >
+              Add to day
+            </Button>
           </Box>
-          <Button
-            size="small"
-            startIcon={<AddIcon sx={{ fontSize: '0.85rem !important' }} />}
-            onClick={onAddToItinerary}
-            sx={{
-              fontSize: '0.8rem', fontWeight: 700, py: 0.35, px: 1,
-              border: `1px solid rgba(29,38,66,0.25)`,
-              color: D.navy, backgroundColor: 'rgba(29,38,66,0.03)',
-              '&:hover': { backgroundColor: 'rgba(29,38,66,0.08)' },
-            }}
-          >
-            Add to day
-          </Button>
         </Box>
 
-        {h.imageCredit && (
-          <Typography sx={{ fontSize: '0.65rem', color: 'rgba(29,38,66,0.3)', textAlign: 'right' }}>
+        {/* Navigation arrows */}
+        <IconButton
+          onClick={prev}
+          sx={{
+            position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)',
+            backgroundColor: 'rgba(0,0,0,0.38)', backdropFilter: 'blur(8px)',
+            color: '#fff', border: '1px solid rgba(255,255,255,0.18)',
+            '&:hover': { backgroundColor: 'rgba(0,0,0,0.6)' },
+          }}
+        >
+          <ChevronLeftIcon />
+        </IconButton>
+        <IconButton
+          onClick={next}
+          sx={{
+            position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)',
+            backgroundColor: 'rgba(0,0,0,0.38)', backdropFilter: 'blur(8px)',
+            color: '#fff', border: '1px solid rgba(255,255,255,0.18)',
+            '&:hover': { backgroundColor: 'rgba(0,0,0,0.6)' },
+          }}
+        >
+          <ChevronRightIcon />
+        </IconButton>
+      </Box>
+
+      {/* ── Footer: photo credit + dot indicators ── */}
+      <Box sx={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        px: 2.5, py: 1.25, backgroundColor: D.paper, borderTop: `1px solid ${D.rule}`,
+      }}>
+        {h.imageCredit ? (
+          <Typography sx={{ fontSize: '0.68rem', color: 'rgba(29,38,66,0.3)' }}>
             Photo:{' '}
             <Box component="a" href={h.imageCredit.link} target="_blank" rel="noopener noreferrer"
               sx={{ color: 'inherit', textDecoration: 'underline' }}>
@@ -135,71 +200,26 @@ function CarouselCard({ h, onAddToItinerary }: { h: CultureHighlight; onAddToIti
             </Box>
             {' '}/ Unsplash
           </Typography>
-        )}
+        ) : <Box />}
+
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+          {highlights.map((_, i) => (
+            <Box
+              key={i} onClick={() => goTo(i)}
+              sx={{
+                width: i === idx ? 18 : 6, height: 6, borderRadius: 3,
+                backgroundColor: i === idx ? D.navy : D.rule,
+                cursor: 'pointer', transition: 'all 0.2s ease',
+              }}
+            />
+          ))}
+        </Box>
       </Box>
-    </Paper>
-  );
-}
-
-// ─── Horizontal snap-scroll carousel ─────────────────────────────────────────
-
-function HighlightCarousel({ highlights, onAddToItinerary }: {
-  highlights:       CultureHighlight[];
-  onAddToItinerary: (h: CultureHighlight) => void;
-}) {
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const scroll = (dir: 'left' | 'right') =>
-    scrollRef.current?.scrollBy({ left: dir === 'right' ? 360 : -360, behavior: 'smooth' });
-
-  return (
-    <Box sx={{ position: 'relative' }}>
-      <Box
-        ref={scrollRef}
-        sx={{
-          display: 'flex', gap: 2,
-          overflowX: 'auto', scrollSnapType: 'x mandatory',
-          scrollbarWidth: 'none', '&::-webkit-scrollbar': { display: 'none' },
-          mx: { xs: -2, sm: -3 }, px: { xs: 2, sm: 3 }, pb: 1,
-        }}
-      >
-        {highlights.map((h, i) => (
-          <Box key={i} sx={{
-            flexShrink: 0,
-            width: { xs: 'min(85vw, 300px)', sm: 320, md: 340 },
-            scrollSnapAlign: 'start',
-          }}>
-            <CarouselCard h={h} onAddToItinerary={() => onAddToItinerary(h)} />
-          </Box>
-        ))}
-      </Box>
-
-      {highlights.length > 2 && (
-        <>
-          <IconButton size="small" onClick={() => scroll('left')} sx={{
-            position: 'absolute', left: -14, top: '38%', transform: 'translateY(-50%)',
-            backgroundColor: D.paper, border: `1px solid ${D.rule}`,
-            boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
-            display: { xs: 'none', sm: 'flex' },
-            '&:hover': { backgroundColor: '#fff' },
-          }}>
-            <ChevronLeftIcon sx={{ fontSize: '1.2rem' }} />
-          </IconButton>
-          <IconButton size="small" onClick={() => scroll('right')} sx={{
-            position: 'absolute', right: -14, top: '38%', transform: 'translateY(-50%)',
-            backgroundColor: D.paper, border: `1px solid ${D.rule}`,
-            boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
-            display: { xs: 'none', sm: 'flex' },
-            '&:hover': { backgroundColor: '#fff' },
-          }}>
-            <ChevronRightIcon sx={{ fontSize: '1.2rem' }} />
-          </IconButton>
-        </>
-      )}
     </Box>
   );
 }
 
-// ─── List card — text-focused (used in the "Browse all" section below) ────────
+// ─── List card — detail view below carousel ───────────────────────────────────
 
 function HighlightCard({ h, onAddToItinerary }: { h: CultureHighlight; onAddToItinerary: () => void }) {
   const [expanded, setExpanded] = useState(false);
@@ -432,14 +452,12 @@ export default function Discoversection({ tripId }: Props) {
             </Box>
           )}
 
-          {/* ── Hero carousel — all highlights ── */}
+          {/* ── Hero showcase ── */}
           {allHighlights.length > 0 && (
-            <HighlightCarousel highlights={allHighlights} onAddToItinerary={openAddDialog} />
+            <ShowcaseCarousel highlights={allHighlights} onAddToItinerary={openAddDialog} />
           )}
 
-          <Divider sx={{ borderColor: D.rule }} />
-
-          {/* ── Cultural highlights list ── */}
+          {/* ── Cultural list ── */}
           {cultural.length > 0 && (
             <Box>
               <SubHeading>Cultural</SubHeading>
