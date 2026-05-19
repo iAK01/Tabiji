@@ -59,6 +59,11 @@ function transportStopName(t: any): string {
       const to   = t.arrivalLocation   ?? '';
       return from && to ? `Cycle: ${from} → ${to}` : 'Bicycle';
     }
+    case 'parking': {
+      const product  = t.details?.parkingProduct ?? '';
+      const location = t.departureLocation ?? '';
+      return ['Park', location, product].filter(Boolean).join(' · ');
+    }
     default: {
       const from = t.departureLocation ?? '';
       const to   = t.arrivalLocation   ?? '';
@@ -100,6 +105,7 @@ function stopColor(type: string): string {
     case 'taxi':
     case 'private_transfer': return '#f57f17';
     case 'bicycle':          return '#558b2f';
+    case 'parking':          return '#37474F';
     default:                 return '#455a64';
   }
 }
@@ -208,7 +214,7 @@ export async function syncLogisticsToItinerary(tripId: string, logistics?: any) 
       const type    = t.type === 'flight' ? 'flight' : 'transport';
 
       let duration = 60;
-      if (depTime && arrTime) {
+      if (depTime && arrTime && t.type !== 'parking') {
         const diff = Math.round(
           (new Date(arrTime).getTime() - new Date(depTime).getTime()) / 60000
         );
@@ -281,12 +287,14 @@ export async function syncLogisticsToItinerary(tripId: string, logistics?: any) 
           newStops.push({
             _id:            new mongoose.Types.ObjectId(),
             date:           arrDate,
-            name:           `Arrive: ${t.arrivalLocation ?? t.arrivalAirport ?? name}`,
+            name:           t.type === 'parking'
+              ? `Exit parking: ${t.departureLocation ?? name}`
+              : `Arrive: ${t.arrivalLocation ?? t.arrivalAirport ?? name}`,
             type,
             color,
             time,
             scheduledStart: toScheduledStart(arrTime, time),
-            duration:       0,
+            duration:       t.type === 'parking' ? 60 : 0,
             locked:         true,
             source:         'logistics',
             address:     t.arrivalAddress ?? t.arrivalLocation ?? undefined,

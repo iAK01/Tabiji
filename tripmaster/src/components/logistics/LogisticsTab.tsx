@@ -711,15 +711,34 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
       {/* ── Transport ── */}
       {section === 0 && (() => {
         const allTransport = logistics?.transportation ?? [];
-        const renderCard   = (t: any, i: number) => (
+
+        const sortedByTime = (items: { t: any; i: number }[]) =>
+          [...items].sort((a, b) => {
+            const ta = a.t.departureTime ? new Date(a.t.departureTime).getTime() : 0;
+            const tb = b.t.departureTime ? new Date(b.t.departureTime).getTime() : 0;
+            return ta - tb;
+          });
+
+        const flightSeqLabel = (items: { t: any; i: number }[], idx: number): string | undefined => {
+          const flights = items.filter(x => x.t.type === 'flight');
+          if (flights.length <= 1) return undefined;
+          const pos = flights.findIndex(x => x.i === items[idx].i);
+          return pos >= 0 ? `Flight ${pos + 1} of ${flights.length}` : undefined;
+        };
+
+        const renderCard = (t: any, i: number, seqLabel?: string) => (
           <TransportCard
             key={i} t={t} i={i} onMenu={openMenu} fmtDateTime={fmtDateTime}
             linkedFiles={filesById.get(String(i)) ?? []}
             onOpenFile={f => setViewerFile({ _id: f._id, name: f.name, mimeType: f.mimeType, gcsUrl: f.gcsUrl })}
+            sequenceLabel={seqLabel}
           />
         );
-        const thereItems = allTransport.map((t: any, i: number) => ({ t, i })).filter(({ t }: { t: any; i: number }) => classifyDirection(t, trip) === 'there');
-        const backItems  = allTransport.map((t: any, i: number) => ({ t, i })).filter(({ t }: { t: any; i: number }) => classifyDirection(t, trip) === 'back');
+
+        const thereRaw  = allTransport.map((t: any, i: number) => ({ t, i })).filter(({ t }: { t: any; i: number }) => classifyDirection(t, trip) === 'there');
+        const backRaw   = allTransport.map((t: any, i: number) => ({ t, i })).filter(({ t }: { t: any; i: number }) => classifyDirection(t, trip) === 'back');
+        const thereItems = sortedByTime(thereRaw);
+        const backItems  = sortedByTime(backRaw);
         return (
           <Box>
             <BookingLinks
@@ -746,7 +765,7 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
               </Box>
               {thereItems.length === 0
                 ? <Alert severity="info" sx={{ mb: 2, fontFamily: D.body }}>No outbound transport yet.</Alert>
-                : thereItems.map(({ t, i }: { t: any; i: number }) => renderCard(t, i))
+                : thereItems.map(({ t, i }: { t: any; i: number }, idx: number) => renderCard(t, i, t.type === 'flight' ? flightSeqLabel(thereItems, idx) : undefined))
               }
               {/* Getting back */}
               <Box sx={{ mt: 3, mb: 1.5 }}>
@@ -759,7 +778,7 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
               </Box>
               {backItems.length === 0
                 ? <Alert severity="info" sx={{ mb: 2, fontFamily: D.body }}>No return transport yet.</Alert>
-                : backItems.map(({ t, i }: { t: any; i: number }) => renderCard(t, i))
+                : backItems.map(({ t, i }: { t: any; i: number }, idx: number) => renderCard(t, i, t.type === 'flight' ? flightSeqLabel(backItems, idx) : undefined))
               }
             </>)}
             <Button

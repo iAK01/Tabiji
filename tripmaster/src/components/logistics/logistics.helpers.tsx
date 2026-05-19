@@ -21,7 +21,6 @@ import SportsSoccerIcon    from '@mui/icons-material/SportsSoccer';
 import AttractionIcon      from '@mui/icons-material/AccountBalance';
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
-// Single source of truth — import into any sub-component that needs them.
 export const D = {
   green:   '#6B7C5C',
   terra:   '#C4714A',
@@ -31,6 +30,20 @@ export const D = {
   display: '"Archivo Black", sans-serif',
   body:    '"Archivo", "Inter", sans-serif',
 } as const;
+
+// ─── Transport card colours (left icon column) ────────────────────────────────
+export const TRANSPORT_COLORS: Record<string, string> = {
+  flight:           '#2C3E50',
+  train:            '#7b52ab',
+  bus:              '#1565c0',
+  ferry:            '#00838f',
+  car:              '#2e7d32',
+  car_hire:         '#2e7d32',
+  taxi:             '#c4714a',
+  private_transfer: '#c4714a',
+  bicycle:          '#558b2f',
+  parking:          '#37474F',
+};
 
 // ─── Status dot colours ───────────────────────────────────────────────────────
 export const DOT_COLOUR: Record<string, string> = {
