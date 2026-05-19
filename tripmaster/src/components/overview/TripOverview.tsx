@@ -79,6 +79,7 @@ interface Props {
     nights:           number;
     dismissedChecks?: string[];
     weather?: {
+      mode?:         'forecast' | 'historical' | 'current';
       summary?:      string;
       packingNotes?: string[];
       days?:         WeatherDay[];
@@ -653,6 +654,7 @@ export default function TripOverview({ trip, onNavigate }: Props) {
         </Box>
       ) : (
         <>
+          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(2, 1fr)' }, gap: { xs: 1.5, sm: 2 } }}>
           {/* ── LOGISTICS ── */}
           {!dismissed.includes('logistics') && (
             <Strip
@@ -808,38 +810,54 @@ export default function TripOverview({ trip, onNavigate }: Props) {
               status="ok"
               sectionKey="weather"
             >
-              {weatherDay ? (
-                <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 2 }}>
-                  {/* Temp hero */}
-                  <Box sx={{ flexShrink: 0, textAlign: 'center' }}>
-                    <Typography sx={{ fontSize: '2rem', lineHeight: 1 }}>{weatherDay.icon}</Typography>
-                    <Typography sx={{ fontFamily: D.display, fontSize: '1.4rem', color: D.navy, lineHeight: 1, letterSpacing: '-0.03em', mt: 0.5 }}>
-                      {weatherDay.tempMax}°
-                    </Typography>
-                    <Typography sx={{ fontFamily: D.body, fontSize: '0.7rem', color: D.muted }}>
-                      {weatherDay.tempMin}° low
-                    </Typography>
-                  </Box>
+              {weatherDay ? (() => {
+                const isHistorical = trip.weather?.mode === 'historical';
+                const days = trip.weather?.days ?? [];
+                const avgHigh = isHistorical && days.length
+                  ? Math.round(days.reduce((s, d) => s + d.tempMax, 0) / days.length)
+                  : weatherDay.tempMax;
+                const avgLow = isHistorical && days.length
+                  ? Math.round(days.reduce((s, d) => s + d.tempMin, 0) / days.length)
+                  : weatherDay.tempMin;
+                const tripMonth = new Date(trip.startDate).toLocaleDateString('en-IE', { month: 'long' });
 
-                  <Box sx={{ width: '1px', bgcolor: D.rule, alignSelf: 'stretch', mx: 0.5 }} />
+                return (
+                  <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 2 }}>
+                    <Box sx={{ flexShrink: 0, textAlign: 'center' }}>
+                      <Typography sx={{ fontSize: '2rem', lineHeight: 1 }}>{weatherDay.icon}</Typography>
+                      <Typography sx={{ fontFamily: D.display, fontSize: '1.4rem', color: D.navy, lineHeight: 1, letterSpacing: '-0.03em', mt: 0.5 }}>
+                        {avgHigh}°
+                      </Typography>
+                      <Typography sx={{ fontFamily: D.body, fontSize: '0.7rem', color: D.muted }}>
+                        {avgLow}° low
+                      </Typography>
+                    </Box>
 
-                  <Box sx={{ flex: 1, minWidth: 0 }}>
-                    <Typography sx={{ fontFamily: D.display, fontSize: '0.95rem', color: D.navy, lineHeight: 1.2 }}>
-                      {weatherDay.condition}
-                    </Typography>
-                    {trip.weather?.summary && (
-                      <Typography sx={{ fontFamily: D.body, fontSize: '0.75rem', color: D.muted, mt: 0.5 }}>
-                        {trip.weather.summary}
+                    <Box sx={{ width: '1px', bgcolor: D.rule, alignSelf: 'stretch', mx: 0.5 }} />
+
+                    <Box sx={{ flex: 1, minWidth: 0 }}>
+                      {isHistorical && (
+                        <Typography sx={{ fontFamily: D.body, fontSize: '0.65rem', color: '#C9521B', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', mb: 0.3 }}>
+                          Historical avg · {tripMonth}
+                        </Typography>
+                      )}
+                      <Typography sx={{ fontFamily: D.display, fontSize: '0.95rem', color: D.navy, lineHeight: 1.2 }}>
+                        {isHistorical ? 'Typical conditions' : weatherDay.condition}
                       </Typography>
-                    )}
-                    {trip.weather?.packingNotes?.[0] && (
-                      <Typography sx={{ fontFamily: D.body, fontSize: '0.75rem', color: D.green, fontWeight: 600, mt: 0.4 }}>
-                        {trip.weather.packingNotes[0]}
-                      </Typography>
-                    )}
+                      {trip.weather?.summary && (
+                        <Typography sx={{ fontFamily: D.body, fontSize: '0.75rem', color: D.muted, mt: 0.5 }}>
+                          {trip.weather.summary}
+                        </Typography>
+                      )}
+                      {trip.weather?.packingNotes?.[0] && (
+                        <Typography sx={{ fontFamily: D.body, fontSize: '0.75rem', color: D.green, fontWeight: 600, mt: 0.4 }}>
+                          {trip.weather.packingNotes[0]}
+                        </Typography>
+                      )}
+                    </Box>
                   </Box>
-                </Box>
-              ) : trip.weather?.summary ? (
+                );
+              })() : trip.weather?.summary ? (
                 <Typography sx={{ fontFamily: D.body, fontSize: '0.82rem', color: D.muted }}>{trip.weather.summary}</Typography>
               ) : (
                 <Typography sx={{ fontFamily: D.body, fontSize: '0.82rem', color: 'text.disabled' }}>No forecast data yet</Typography>
@@ -1028,6 +1046,8 @@ export default function TripOverview({ trip, onNavigate }: Props) {
               </Typography>
             </Strip>
           )}
+
+          </Box>
 
           {/* ── Dismissed row ── */}
           {dismissed.length > 0 && (

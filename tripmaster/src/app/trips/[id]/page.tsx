@@ -50,6 +50,8 @@ import GrainIcon           from '@mui/icons-material/Grain';
 import dynamic             from 'next/dynamic';
 import { saveTripCache, getTripCache, queueAction } from '@/lib/offline/db';
 import { autoCacheTripFiles } from '@/lib/offline/fileCache';
+import { COUNTRY_LIST }    from '@/lib/data/countries';
+import AirportSearch       from '@/components/ui/AirportSearch';
 
 const MapTab = dynamic(() => import('@/components/map/MapTab'), { ssr: false });
 
@@ -64,6 +66,38 @@ const D = {
   display: '"Archivo Black", sans-serif',
   body:    '"Archivo", "Inter", sans-serif',
 } as const;
+
+const REGIONS = Array.from(new Set(COUNTRY_LIST.map(c => c.region)));
+
+function CountrySelect({ label, value, onChange }: {
+  label:    string;
+  value:    string;
+  onChange: (code: string, name: string) => void;
+}) {
+  return (
+    <FormControl fullWidth>
+      <InputLabel sx={{ fontFamily: D.body }}>{label}</InputLabel>
+      <Select value={value} label={label}
+        onChange={e => {
+          const code = e.target.value;
+          const name = COUNTRY_LIST.find(c => c.code === code)?.name ?? '';
+          onChange(code, name);
+        }}
+        sx={{ fontFamily: D.body }}>
+        {REGIONS.map(region => [
+          <MenuItem key={`hdr-${region}`} disabled
+            sx={{ fontWeight: 700, opacity: 1, color: 'rgba(44,62,80,0.45)', fontSize: '0.72rem',
+                  textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+            {region}
+          </MenuItem>,
+          ...COUNTRY_LIST.filter(c => c.region === region).map(c => (
+            <MenuItem key={c.code} value={c.code} sx={{ fontFamily: D.body }}>{c.name}</MenuItem>
+          )),
+        ])}
+      </Select>
+    </FormControl>
+  );
+}
 
 const STATUS_DOT: Record<string, string> = {
   confirmed: D.green,
@@ -195,6 +229,8 @@ export default function TripPage() {
   const [editOpen,  setEditOpen]  = useState(false);
   const [editForm,  setEditForm]  = useState({
     name: '', tripType: '', purpose: '', startDate: '', endDate: '', status: '',
+    originCity: '', originCountry: '', originCountryCode: '', originIata: '',
+    destinationCity: '', destinationCountry: '', destinationCountryCode: '', destinationIata: '',
   });
 
   const [fabTrigger, setFabTrigger] = useState<FabTrigger | null>(null);
@@ -262,6 +298,14 @@ export default function TripPage() {
       startDate: trip.startDate?.split('T')[0] ?? '',
       endDate:   trip.endDate?.split('T')[0] ?? '',
       status:    trip.status,
+      originCity:             (trip.origin as any)?.city ?? '',
+      originCountry:          (trip.origin as any)?.country ?? '',
+      originCountryCode:      (trip.origin as any)?.countryCode ?? '',
+      originIata:             (trip.origin as any)?.iataCode ?? '',
+      destinationCity:        (trip.destination as any)?.city ?? '',
+      destinationCountry:     (trip.destination as any)?.country ?? '',
+      destinationCountryCode: (trip.destination as any)?.countryCode ?? '',
+      destinationIata:        (trip.destination as any)?.iataCode ?? '',
     });
     setEditOpen(true);
   };
@@ -272,7 +316,23 @@ export default function TripPage() {
       editForm.startDate && editForm.endDate
         ? Math.round((new Date(editForm.endDate).getTime() - new Date(editForm.startDate).getTime()) / 86400000)
         : trip.nights;
-    const payload = { ...editForm, nights };
+    const { originCity, originCountry, originCountryCode, originIata,
+            destinationCity, destinationCountry, destinationCountryCode, destinationIata,
+            ...rest } = editForm;
+    const payload = {
+      ...rest,
+      nights,
+      origin: {
+        ...(trip.origin as any),
+        city: originCity, country: originCountry,
+        countryCode: originCountryCode, iataCode: originIata || undefined,
+      },
+      destination: {
+        ...(trip.destination as any),
+        city: destinationCity, country: destinationCountry,
+        countryCode: destinationCountryCode, iataCode: destinationIata || undefined,
+      },
+    };
 
     if (!navigator.onLine) {
       await queueAction({ type: 'UPDATE_TRIP', tripId: trip._id, payload });
@@ -812,6 +872,67 @@ export default function TripPage() {
                 InputProps={{ sx: { fontFamily: D.body } }}
                 InputLabelProps={{ sx: { fontFamily: D.body } }}
               />
+
+              {/* Origin */}
+              <Box>
+                <Typography sx={{ fontSize: '0.72rem', fontWeight: 700, textTransform: 'uppercase',
+                                  letterSpacing: '0.06em', color: 'rgba(44,62,80,0.45)', mb: 1.5, fontFamily: D.body }}>
+                  Origin
+                </Typography>
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                  <TextField label="City" value={editForm.originCity}
+                    onChange={e => setEditForm(p => ({ ...p, originCity: e.target.value }))}
+                    fullWidth InputProps={{ sx: { fontFamily: D.body } }}
+                    InputLabelProps={{ sx: { fontFamily: D.body } }}
+                  />
+                  <CountrySelect label="Country" value={editForm.originCountryCode}
+                    onChange={(code, name) => setEditForm(p => ({ ...p, originCountryCode: code, originCountry: name }))}
+                  />
+                  <AirportSearch
+                    label="Nearest airport (optional)"
+                    value={editForm.originIata ? `${editForm.originIata} — ${editForm.originCity}` : ''}
+                    onChange={airport => setEditForm(p => ({ ...p, originIata: airport.iata }))}
+                    placeholder="Search by city or IATA code"
+                  />
+                </Box>
+              </Box>
+
+              {/* Destination */}
+              <Box>
+                <Typography sx={{ fontSize: '0.72rem', fontWeight: 700, textTransform: 'uppercase',
+                                  letterSpacing: '0.06em', color: 'rgba(44,62,80,0.45)', mb: 1.5, fontFamily: D.body }}>
+                  Destination
+                </Typography>
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                  <TextField label="City" value={editForm.destinationCity}
+                    onChange={e => setEditForm(p => ({ ...p, destinationCity: e.target.value }))}
+                    fullWidth InputProps={{ sx: { fontFamily: D.body } }}
+                    InputLabelProps={{ sx: { fontFamily: D.body } }}
+                  />
+                  <CountrySelect label="Country" value={editForm.destinationCountryCode}
+                    onChange={(code, name) => setEditForm(p => ({ ...p, destinationCountryCode: code, destinationCountry: name }))}
+                  />
+                  <AirportSearch
+                    label="Nearest airport (optional)"
+                    value={editForm.destinationIata ? `${editForm.destinationIata} — ${editForm.destinationCity}` : ''}
+                    onChange={airport => setEditForm(p => ({ ...p, destinationIata: airport.iata }))}
+                    placeholder="Search by city or IATA code"
+                  />
+                </Box>
+              </Box>
+
+              <Box sx={{ display: 'flex', gap: 2, flexDirection: { xs: 'column', sm: 'row' } }}>
+                <TextField label="Departure date" type="date" value={editForm.startDate}
+                  onChange={e => setEditForm(p => ({ ...p, startDate: e.target.value }))}
+                  fullWidth InputLabelProps={{ shrink: true, sx: { fontFamily: D.body } }}
+                  InputProps={{ sx: { fontFamily: D.body } }}
+                />
+                <TextField label="Return date" type="date" value={editForm.endDate}
+                  onChange={e => setEditForm(p => ({ ...p, endDate: e.target.value }))}
+                  fullWidth InputLabelProps={{ shrink: true, sx: { fontFamily: D.body } }}
+                  InputProps={{ sx: { fontFamily: D.body } }}
+                />
+              </Box>
               <FormControl fullWidth>
                 <InputLabel sx={{ fontFamily: D.body }}>Status</InputLabel>
                 <Select value={editForm.status} label="Status"
@@ -832,18 +953,6 @@ export default function TripPage() {
                   <MenuItem value="mixed"   sx={{ fontFamily: D.body }}>Mixed</MenuItem>
                 </Select>
               </FormControl>
-              <Box sx={{ display: 'flex', gap: 2, flexDirection: { xs: 'column', sm: 'row' } }}>
-                <TextField label="Departure date" type="date" value={editForm.startDate}
-                  onChange={e => setEditForm(p => ({ ...p, startDate: e.target.value }))}
-                  fullWidth InputLabelProps={{ shrink: true, sx: { fontFamily: D.body } }}
-                  InputProps={{ sx: { fontFamily: D.body } }}
-                />
-                <TextField label="Return date" type="date" value={editForm.endDate}
-                  onChange={e => setEditForm(p => ({ ...p, endDate: e.target.value }))}
-                  fullWidth InputLabelProps={{ shrink: true, sx: { fontFamily: D.body } }}
-                  InputProps={{ sx: { fontFamily: D.body } }}
-                />
-              </Box>
               <TextField label="Purpose / notes" value={editForm.purpose}
                 onChange={e => setEditForm(p => ({ ...p, purpose: e.target.value }))}
                 fullWidth multiline rows={2}

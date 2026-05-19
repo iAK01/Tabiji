@@ -373,11 +373,15 @@ function generateSummary(days: DayWeather[], mode: 'forecast' | 'historical'): {
   const packingNotes: string[] = [];
 
   if (rainyDays >= 2) {
-    packingNotes.push(
-      `Rain expected on ${rainyDays} of ${tripLength} days — a compact umbrella or waterproof jacket is worth it`
+    packingNotes.push(mode === 'historical'
+      ? `Historically rains on ${rainyDays} of ${tripLength} days — a compact umbrella or waterproof jacket is worth it`
+      : `Rain expected on ${rainyDays} of ${tripLength} days — a compact umbrella or waterproof jacket is worth it`
     );
   } else if (rainyDays === 1) {
-    packingNotes.push(`One rainy day expected — worth having a light waterproof`);
+    packingNotes.push(mode === 'historical'
+      ? `Typically one rainy day — worth having a light waterproof`
+      : `One rainy day expected — worth having a light waterproof`
+    );
   }
 
   const coldNights = days.filter(d => d.tempMin < 8).length;
