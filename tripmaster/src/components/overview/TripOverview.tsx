@@ -475,11 +475,12 @@ export default function TripOverview({ trip, onNavigate, onEdit }: Props) {
                         : D.navy;
 
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', gap: { xs: 1.5, sm: 2 } }}>
+    <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(2, 1fr)' }, gap: { xs: 1.5, sm: 2 }, alignItems: 'start' }}>
 
       {/* ── What's Next (active trips only) ── */}
       {isActive && nextStop && (
         <Paper elevation={0} sx={{
+          gridColumn: { md: '1 / -1' },
           overflow: 'hidden',
           border: '1.5px solid',
           borderColor: isUrgent ? 'rgba(237,108,2,0.5)' : 'rgba(107,124,92,0.4)',
@@ -545,6 +546,7 @@ export default function TripOverview({ trip, onNavigate, onEdit }: Props) {
 
       {isActive && !nextStop && (
         <Paper elevation={0} sx={{
+          gridColumn: { md: '1 / -1' },
           p: 2.5, border: '1.5px solid rgba(107,124,92,0.4)', borderRadius: '12px',
           bgcolor: 'rgba(107,124,92,0.04)',
         }}>
@@ -653,12 +655,11 @@ export default function TripOverview({ trip, onNavigate, onEdit }: Props) {
       </Paper>
 
       {loading ? (
-        <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
+        <Box sx={{ gridColumn: { md: '1 / -1' }, display: 'flex', justifyContent: 'center', py: 4 }}>
           <CircularProgress size={26} />
         </Box>
       ) : (
         <>
-          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(2, 1fr)' }, gap: { xs: 1.5, sm: 2 } }}>
           {/* ── LOGISTICS ── */}
           {!dismissed.includes('logistics') && (
             <Strip
@@ -1055,11 +1056,9 @@ export default function TripOverview({ trip, onNavigate, onEdit }: Props) {
             </Strip>
           )}
 
-          </Box>
-
           {/* ── Dismissed row ── */}
           {dismissed.length > 0 && (
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, px: 0.5 }}>
+            <Box sx={{ gridColumn: { md: '1 / -1' }, display: 'flex', alignItems: 'center', gap: 1, px: 0.5 }}>
               <Typography sx={{ fontFamily: D.body, fontSize: '0.72rem', color: D.muted, flexGrow: 1 }}>
                 {dismissed.length} section{dismissed.length !== 1 ? 's' : ''} hidden
               </Typography>
