@@ -738,8 +738,8 @@ export default function TripPage() {
           </Container>
         </Box>
 
-        {/* ── Cover photo ── */}
-        {trip.coverPhotoUrl && (
+        {/* ── Cover photo ── (hidden on overview tab — photo lives in the hero band there) */}
+        {activeTab !== 0 && trip.coverPhotoUrl && (
           <Box sx={{
             height: { xs: 200, sm: 260 },
             backgroundImage: `url(${trip.coverPhotoUrl})`,
@@ -787,7 +787,7 @@ export default function TripPage() {
             ref={trip.status === 'active' ? tabContentRef : undefined}
             sx={{ scrollMarginTop: '66px' }}
           >
-            {activeTab === 0 && <TripOverview trip={trip} onNavigate={setActiveTab} onEdit={openEdit} />}
+            {activeTab === 0 && <TripOverview trip={trip} onNavigate={setActiveTab} onEdit={openEdit} coverPhotoUrl={trip.coverPhotoUrl} coverPhotoCredit={trip.coverPhotoCredit} />}
             {activeTab === 1 && <LogisticsTab tripId={trip._id} trip={trip} fabTrigger={fabTrigger} />}
             {activeTab === 2 && <ItineraryTab tripId={trip._id} startDate={trip.startDate} endDate={trip.endDate} fabTrigger={fabTrigger} />}
             {activeTab === 3 && <PackingTab tripId={trip._id} tripType={trip.tripType} nights={trip.nights} startDate={trip.startDate} fabTrigger={fabTrigger} />}
