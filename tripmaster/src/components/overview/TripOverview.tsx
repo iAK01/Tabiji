@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import {
   Box, Typography, Paper, Button, Chip, CircularProgress,
-  LinearProgress, Divider, alpha, Tooltip, IconButton,
+  LinearProgress, Divider, alpha, Tooltip, IconButton, Collapse,
 } from '@mui/material';
 import ChevronRightIcon         from '@mui/icons-material/ChevronRight';
 import FlightIcon               from '@mui/icons-material/Flight';
@@ -31,6 +31,8 @@ import BadgeIcon                from '@mui/icons-material/Badge';
 import HealthAndSafetyIcon      from '@mui/icons-material/HealthAndSafety';
 import ConfirmationNumberIcon   from '@mui/icons-material/ConfirmationNumber';
 import VisibilityIcon           from '@mui/icons-material/Visibility';
+import EditIcon                 from '@mui/icons-material/Edit';
+import ExpandMoreIcon           from '@mui/icons-material/ExpandMore';
 import NavigateButton           from '@/components/ui/NavigateButton';
 import DocumentViewer, { type ViewableFile } from '@/components/files/DocumentViewer';
 import PreTripAppsCard from '@/components/overview/PreTripAppsCard';
@@ -91,6 +93,7 @@ interface Props {
     };
   };
   onNavigate: (tab: number) => void;
+  onEdit?:    () => void;
 }
 
 // ─── Section colours ──────────────────────────────────────────────────────────
@@ -305,14 +308,15 @@ const TICKET_ICONS: Record<string, React.ElementType> = {
   event_brief:        ConfirmationNumberIcon,
 };
 
-export default function TripOverview({ trip, onNavigate }: Props) {
-  const [logistics,  setLogistics]  = useState<any>(null);
-  const [packing,    setPacking]    = useState<any>(null);
-  const [itinerary,  setItinerary]  = useState<any>(null);
-  const [resources,  setResources]  = useState<any[]>([]);
-  const [loading,    setLoading]    = useState(true);
-  const [dismissed,  setDismissed]  = useState<string[]>(trip.dismissedChecks ?? []);
-  const [viewerFile, setViewerFile] = useState<ViewableFile | null>(null);
+export default function TripOverview({ trip, onNavigate, onEdit }: Props) {
+  const [logistics,    setLogistics]    = useState<any>(null);
+  const [packing,      setPacking]      = useState<any>(null);
+  const [itinerary,    setItinerary]    = useState<any>(null);
+  const [resources,    setResources]    = useState<any[]>([]);
+  const [loading,      setLoading]      = useState(true);
+  const [dismissed,    setDismissed]    = useState<string[]>(trip.dismissedChecks ?? []);
+  const [viewerFile,   setViewerFile]   = useState<ViewableFile | null>(null);
+  const [detailsOpen,  setDetailsOpen]  = useState(false);
 
   const toggleDismiss = async (key: string) => {
     const next = dismissed.includes(key)
@@ -851,7 +855,11 @@ export default function TripOverview({ trip, onNavigate }: Props) {
                       )}
                       {trip.weather?.packingNotes?.[0] && (
                         <Typography sx={{ fontFamily: D.body, fontSize: '0.75rem', color: D.green, fontWeight: 600, mt: 0.4 }}>
-                          {trip.weather.packingNotes[0]}
+                          {isHistorical
+                            ? trip.weather.packingNotes[0]
+                                .replace('Rain expected on', 'Historically rains on')
+                                .replace('One rainy day expected', 'Typically one rainy day')
+                            : trip.weather.packingNotes[0]}
                         </Typography>
                       )}
                     </Box>
@@ -1078,92 +1086,125 @@ export default function TripOverview({ trip, onNavigate }: Props) {
             borderRadius: '12px',
             border: `1.5px solid ${D.rule}`,
             overflow: 'hidden',
-            position: 'relative',
           }}>
-            {/* Ghost AccessTime icon */}
-            <Box sx={{
-              position: 'absolute', right: -16, bottom: -16,
-              opacity: 0.04, color: D.navy, pointerEvents: 'none', transform: 'rotate(-8deg)',
-              '& .MuiSvgIcon-root': { fontSize: '10rem', width: '10rem', height: '10rem' },
-            }}>
-              <AccessTimeIcon />
+            {/* Clickable header row */}
+            <Box
+              onClick={() => setDetailsOpen(o => !o)}
+              sx={{
+                px: 2.5, py: 1.5,
+                display: 'flex', alignItems: 'center', gap: 1,
+                cursor: 'pointer', userSelect: 'none',
+                borderBottom: detailsOpen ? `1px solid ${D.rule}` : 'none',
+                transition: 'background-color 0.15s',
+                '&:hover': { backgroundColor: alpha(D.navy, 0.03) },
+              }}
+            >
+              <Typography sx={{
+                flexGrow: 1,
+                fontFamily: D.display, fontSize: '0.78rem',
+                letterSpacing: '0.08em', textTransform: 'uppercase',
+                color: D.muted,
+              }}>
+                Trip Details
+              </Typography>
+              {onEdit && (
+                <Tooltip title="Edit trip">
+                  <IconButton
+                    size="small"
+                    onClick={(e) => { e.stopPropagation(); onEdit(); }}
+                    sx={{ color: D.muted, '&:hover': { color: D.navy } }}
+                  >
+                    <EditIcon sx={{ fontSize: 16 }} />
+                  </IconButton>
+                </Tooltip>
+              )}
+              <ExpandMoreIcon sx={{
+                fontSize: 18, color: D.muted,
+                transform: detailsOpen ? 'rotate(180deg)' : 'rotate(0deg)',
+                transition: 'transform 0.2s',
+              }} />
             </Box>
 
-            <Box sx={{ px: 2.5, pt: 2.5, pb: 2.5 }}>
-              <SectionTag>Trip Details</SectionTag>
-
-              {/* FROM → TO hero row */}
-              <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1.5, mt: 1.25 }}>
-                <Box>
-                  <SectionTag color={D.muted}>From</SectionTag>
-                  <Typography sx={{ fontFamily: D.display, fontSize: '1.4rem', color: D.navy, lineHeight: 1, letterSpacing: '-0.02em' }}>
-                    {trip.origin?.city}
-                  </Typography>
-                  <Typography sx={{ fontFamily: D.body, fontSize: '0.72rem', color: D.muted, mt: 0.25 }}>
-                    {trip.origin?.country}
-                  </Typography>
+            <Collapse in={detailsOpen}>
+              <Box sx={{ px: 2.5, pt: 2, pb: 2.5, position: 'relative' }}>
+                {/* Ghost icon */}
+                <Box sx={{
+                  position: 'absolute', right: -16, bottom: -16,
+                  opacity: 0.04, color: D.navy, pointerEvents: 'none', transform: 'rotate(-8deg)',
+                  '& .MuiSvgIcon-root': { fontSize: '10rem', width: '10rem', height: '10rem' },
+                }}>
+                  <AccessTimeIcon />
                 </Box>
 
-                <Typography sx={{ fontFamily: D.display, fontSize: '1.2rem', color: D.terra, alignSelf: 'center', px: 0.5 }}>
-                  →
-                </Typography>
-
-                <Box>
-                  <SectionTag color={D.muted}>To</SectionTag>
-                  <Typography sx={{ fontFamily: D.display, fontSize: '1.4rem', color: D.navy, lineHeight: 1, letterSpacing: '-0.02em' }}>
-                    {trip.destination?.city}
-                  </Typography>
-                  <Typography sx={{ fontFamily: D.body, fontSize: '0.72rem', color: D.muted, mt: 0.25 }}>
-                    {trip.destination?.country}
-                  </Typography>
-                </Box>
-              </Box>
-
-              {/* Dashed divider */}
-              <Box sx={{ borderTop: `1px dashed ${D.rule}`, my: 2 }} />
-
-              {/* Meta grid */}
-              <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1.5 }}>
-                {[
-                  {
-                    label: 'Departs',
-                    value: new Date(trip.startDate).toLocaleDateString('en-IE', { day: 'numeric', month: 'long' }),
-                    sub:   String(new Date(trip.startDate).getFullYear()),
-                  },
-                  {
-                    label: 'Type',
-                    value: trip.tripType,
-                    sub:   trip.nights > 0 ? `${trip.nights} nights` : 'Day trip',
-                    capitalize: true,
-                  },
-                ].map(({ label, value, sub, capitalize }) => (
-                  <Box key={label}>
-                    <SectionTag color={D.muted}>{label}</SectionTag>
-                    <Typography sx={{
-                      fontFamily: D.display, fontSize: '0.95rem', color: D.navy, mt: 0.25,
-                      textTransform: capitalize ? 'capitalize' : 'none',
-                    }}>
-                      {value}
+                {/* FROM → TO */}
+                <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1.5 }}>
+                  <Box>
+                    <SectionTag color={D.muted}>From</SectionTag>
+                    <Typography sx={{ fontFamily: D.display, fontSize: '1.4rem', color: D.navy, lineHeight: 1, letterSpacing: '-0.02em' }}>
+                      {trip.origin?.city}
                     </Typography>
-                    <Typography sx={{
-                      fontFamily: D.body, fontSize: '0.75rem', color: D.muted,
-                      textTransform: capitalize ? 'capitalize' : 'none',
-                    }}>
-                      {sub}
+                    <Typography sx={{ fontFamily: D.body, fontSize: '0.72rem', color: D.muted, mt: 0.25 }}>
+                      {trip.origin?.country}
                     </Typography>
                   </Box>
-                ))}
-              </Box>
-
-              {trip.purpose && (
-                <Box sx={{ mt: 1.75, pt: 1.75, borderTop: `1px dashed ${D.rule}` }}>
-                  <SectionTag color={D.muted}>Purpose</SectionTag>
-                  <Typography sx={{ fontFamily: D.body, fontSize: '0.88rem', color: D.navy, mt: 0.25 }}>
-                    {trip.purpose}
+                  <Typography sx={{ fontFamily: D.display, fontSize: '1.2rem', color: D.terra, alignSelf: 'center', px: 0.5 }}>
+                    →
                   </Typography>
+                  <Box>
+                    <SectionTag color={D.muted}>To</SectionTag>
+                    <Typography sx={{ fontFamily: D.display, fontSize: '1.4rem', color: D.navy, lineHeight: 1, letterSpacing: '-0.02em' }}>
+                      {trip.destination?.city}
+                    </Typography>
+                    <Typography sx={{ fontFamily: D.body, fontSize: '0.72rem', color: D.muted, mt: 0.25 }}>
+                      {trip.destination?.country}
+                    </Typography>
+                  </Box>
                 </Box>
-              )}
-            </Box>
+
+                <Box sx={{ borderTop: `1px dashed ${D.rule}`, my: 2 }} />
+
+                <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1.5 }}>
+                  {[
+                    {
+                      label: 'Departs',
+                      value: new Date(trip.startDate).toLocaleDateString('en-IE', { day: 'numeric', month: 'long' }),
+                      sub:   String(new Date(trip.startDate).getFullYear()),
+                    },
+                    {
+                      label: 'Type',
+                      value: trip.tripType,
+                      sub:   trip.nights > 0 ? `${trip.nights} nights` : 'Day trip',
+                      capitalize: true,
+                    },
+                  ].map(({ label, value, sub, capitalize }) => (
+                    <Box key={label}>
+                      <SectionTag color={D.muted}>{label}</SectionTag>
+                      <Typography sx={{
+                        fontFamily: D.display, fontSize: '0.95rem', color: D.navy, mt: 0.25,
+                        textTransform: capitalize ? 'capitalize' : 'none',
+                      }}>
+                        {value}
+                      </Typography>
+                      <Typography sx={{
+                        fontFamily: D.body, fontSize: '0.75rem', color: D.muted,
+                        textTransform: capitalize ? 'capitalize' : 'none',
+                      }}>
+                        {sub}
+                      </Typography>
+                    </Box>
+                  ))}
+                </Box>
+
+                {trip.purpose && (
+                  <Box sx={{ mt: 1.75, pt: 1.75, borderTop: `1px dashed ${D.rule}` }}>
+                    <SectionTag color={D.muted}>Purpose</SectionTag>
+                    <Typography sx={{ fontFamily: D.body, fontSize: '0.88rem', color: D.navy, mt: 0.25 }}>
+                      {trip.purpose}
+                    </Typography>
+                  </Box>
+                )}
+              </Box>
+            </Collapse>
           </Paper>
         </>
       )}
