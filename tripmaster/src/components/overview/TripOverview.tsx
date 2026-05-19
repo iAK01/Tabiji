@@ -213,20 +213,10 @@ function Strip({
         </Typography>
 
         {status === 'ok' && (
-          <Chip
-            icon={<CheckCircleIcon sx={{ fontSize: '0.85rem !important', color: '#4ade80 !important' }} />}
-            label="Good"
-            size="small"
-            sx={{ height: 22, fontSize: '0.68rem', fontWeight: 700, fontFamily: D.body, backgroundColor: 'rgba(74,222,128,0.15)', color: '#4ade80', border: '1px solid rgba(74,222,128,0.3)', '& .MuiChip-icon': { ml: '6px' } }}
-          />
+          <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: '#4ade80', flexShrink: 0 }} />
         )}
         {status === 'warn' && (
-          <Chip
-            icon={<WarningAmberIcon sx={{ fontSize: '0.85rem !important', color: '#fbbf24 !important' }} />}
-            label="Action needed"
-            size="small"
-            sx={{ height: 22, fontSize: '0.68rem', fontWeight: 700, fontFamily: D.body, backgroundColor: 'rgba(251,191,36,0.15)', color: '#fbbf24', border: '1px solid rgba(251,191,36,0.3)', '& .MuiChip-icon': { ml: '6px' } }}
-          />
+          <WarningAmberIcon sx={{ fontSize: 16, color: '#fbbf24', flexShrink: 0 }} />
         )}
         {status === 'empty' && onDismiss && (
           <Tooltip title="Not needed for this trip">
@@ -569,85 +559,118 @@ export default function TripOverview({ trip, onNavigate, onEdit }: Props) {
 
       {/* ── Countdown hero ── */}
       <Paper elevation={0} sx={{
-        borderRadius: '12px',
-        border: '1.5px solid',
-        borderColor: D.rule,
+        gridColumn: { md: '1 / -1' },
+        borderRadius: '16px',
         overflow: 'hidden',
+        background: `linear-gradient(135deg, ${D.navy} 0%, #2a3558 100%)`,
         position: 'relative',
       }}>
-        {/* Left accent bar */}
+        {/* Faint decorative circle */}
         <Box sx={{
-          position: 'absolute', left: 0, top: 0, bottom: 0, width: 4,
-          bgcolor: accentColor,
+          position: 'absolute', right: -60, top: -60,
+          width: 280, height: 280, borderRadius: '50%',
+          background: 'rgba(255,255,255,0.03)',
+          pointerEvents: 'none',
         }} />
 
-        <Box sx={{ px: 2.5, pt: 2.5, pb: items.length > 0 && !isPast ? 1.5 : 2.5, pl: 3.5 }}>
-          {/* Two-zone layout: number hero left, destination right */}
-          <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 2 }}>
+        <Box sx={{ px: { xs: 2.5, md: 4 }, py: { xs: 2.5, md: 3 } }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: { xs: 2, md: 4 } }}>
 
-            {/* LEFT: number hero */}
+            {/* Number */}
             <Box sx={{ flexShrink: 0 }}>
               {countdownNumber !== null ? (
                 <>
                   <Typography sx={{
                     fontFamily: D.display,
-                    fontSize: '4.5rem',
-                    color: accentColor,
+                    fontSize: { xs: '4rem', md: '6rem' },
+                    color: isPast ? 'rgba(255,255,255,0.3)'
+                         : isActive ? '#4ade80'
+                         : daysUntil <= 7 ? '#fbbf24'
+                         : 'rgba(255,255,255,0.95)',
                     lineHeight: 1,
-                    letterSpacing: '-0.04em',
+                    letterSpacing: '-0.05em',
                   }}>
                     {countdownNumber}
                   </Typography>
-                  <SectionTag color={alpha(accentColor, 0.7)}>{countdownLabel}</SectionTag>
+                  <Typography sx={{
+                    fontFamily: D.body, fontSize: '0.65rem', fontWeight: 700,
+                    letterSpacing: '0.14em', textTransform: 'uppercase',
+                    color: 'rgba(255,255,255,0.35)', mt: 0.75,
+                  }}>
+                    {countdownLabel}
+                  </Typography>
                 </>
               ) : (
-                <Typography sx={{ fontFamily: D.display, fontSize: '1.8rem', color: D.muted, lineHeight: 1, letterSpacing: '-0.02em' }}>
-                  COMPLETE
+                <Typography sx={{ fontFamily: D.display, fontSize: '1.8rem', color: 'rgba(255,255,255,0.4)', lineHeight: 1, letterSpacing: '-0.02em' }}>
+                  Complete
                 </Typography>
               )}
             </Box>
 
-            {/* Vertical rule */}
-            <Box sx={{ width: '1px', bgcolor: D.rule, alignSelf: 'stretch', flexShrink: 0, mx: 0.5 }} />
+            {/* Divider */}
+            <Box sx={{ width: '1px', alignSelf: 'stretch', bgcolor: 'rgba(255,255,255,0.1)', flexShrink: 0 }} />
 
-            {/* RIGHT: destination + dates */}
+            {/* Destination */}
             <Box sx={{ flex: 1, minWidth: 0 }}>
-              <SectionTag>Destination</SectionTag>
               <Typography sx={{
-                fontFamily: D.display, fontSize: '1.4rem', color: D.navy,
-                lineHeight: 1.1, letterSpacing: '-0.02em', mt: 0.5,
+                fontFamily: D.body, fontSize: '0.62rem', fontWeight: 700,
+                letterSpacing: '0.14em', textTransform: 'uppercase',
+                color: 'rgba(255,255,255,0.35)',
+              }}>
+                Destination
+              </Typography>
+              <Typography sx={{
+                fontFamily: D.display,
+                fontSize: { xs: '1.8rem', md: '2.8rem' },
+                color: 'white', lineHeight: 1, letterSpacing: '-0.03em', mt: 0.5,
+                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
               }}>
                 {trip.destination?.city}
               </Typography>
-              <Typography sx={{ fontFamily: D.body, fontSize: '0.78rem', color: D.muted, mt: 0.25 }}>
+              <Typography sx={{ fontFamily: D.body, fontSize: '0.82rem', color: 'rgba(255,255,255,0.5)', mt: 0.5 }}>
                 {trip.destination?.country}
-              </Typography>
-              <Typography sx={{ fontFamily: D.body, fontSize: '0.75rem', color: D.muted, mt: 0.75 }}>
+                {' · '}
                 {new Date(trip.startDate).toLocaleDateString('en-IE', { day: 'numeric', month: 'short' })}
                 {' → '}
                 {new Date(trip.endDate).toLocaleDateString('en-IE', { day: 'numeric', month: 'short', year: 'numeric' })}
                 {trip.nights > 0 && ` · ${trip.nights}N`}
               </Typography>
             </Box>
+
+            {/* Origin + type */}
+            <Box sx={{ flexShrink: 0, textAlign: 'right', display: { xs: 'none', sm: 'block' } }}>
+              <Typography sx={{
+                fontFamily: D.body, fontSize: '0.62rem', fontWeight: 700,
+                letterSpacing: '0.14em', textTransform: 'uppercase',
+                color: 'rgba(255,255,255,0.35)',
+              }}>
+                From
+              </Typography>
+              <Typography sx={{ fontFamily: D.display, fontSize: '1.1rem', color: 'rgba(255,255,255,0.85)', lineHeight: 1, mt: 0.4 }}>
+                {trip.origin?.city}
+              </Typography>
+              <Typography sx={{ fontFamily: D.body, fontSize: '0.72rem', color: 'rgba(255,255,255,0.35)', mt: 0.4, textTransform: 'capitalize' }}>
+                {trip.tripType}
+              </Typography>
+            </Box>
+
           </Box>
 
           {/* Packing progress */}
           {items.length > 0 && !isPast && (
-            <Box sx={{ mt: 2.5, pt: 2, borderTop: `1px dashed ${D.rule}` }}>
+            <Box sx={{ mt: 2.5, pt: 2, borderTop: '1px solid rgba(255,255,255,0.08)' }}>
               <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.75 }}>
-                <Typography sx={{ fontFamily: D.body, fontSize: '0.72rem', color: D.muted, fontWeight: 600 }}>
+                <Typography sx={{ fontFamily: D.body, fontSize: '0.7rem', color: 'rgba(255,255,255,0.35)', fontWeight: 600, letterSpacing: '0.04em' }}>
                   Packing · {packedItems} of {items.length}
                 </Typography>
-                <Typography sx={{
-                  fontFamily: D.display, fontSize: '0.78rem',
-                  color: packPct === 100 ? 'success.main' : D.muted,
-                }}>
+                <Typography sx={{ fontFamily: D.display, fontSize: '0.75rem', color: packPct === 100 ? '#4ade80' : 'rgba(255,255,255,0.35)' }}>
                   {packPct}%
                 </Typography>
               </Box>
               <LinearProgress variant="determinate" value={packPct} sx={{
-                height: 4, borderRadius: 3, backgroundColor: D.rule,
-                '& .MuiLinearProgress-bar': { borderRadius: 3, backgroundColor: packPct === 100 ? 'success.main' : D.green },
+                height: 3, borderRadius: 3,
+                backgroundColor: 'rgba(255,255,255,0.08)',
+                '& .MuiLinearProgress-bar': { borderRadius: 3, backgroundColor: packPct === 100 ? '#4ade80' : 'rgba(255,255,255,0.35)' },
               }} />
             </Box>
           )}
@@ -1081,7 +1104,7 @@ export default function TripOverview({ trip, onNavigate, onEdit }: Props) {
           )}
 
           {/* ── Trip Details ── */}
-          <Paper elevation={0} sx={{
+          <Paper elevation={0} sx={{ gridColumn: { md: '1 / -1' },
             borderRadius: '12px',
             border: `1.5px solid ${D.rule}`,
             overflow: 'hidden',
