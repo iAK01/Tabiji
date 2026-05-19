@@ -15,7 +15,6 @@ import ArrowBackIcon       from '@mui/icons-material/ArrowBack';
 import EditIcon            from '@mui/icons-material/Edit';
 import DeleteForeverIcon   from '@mui/icons-material/DeleteForever';
 import WarningAmberIcon    from '@mui/icons-material/WarningAmber';
-import RefreshIcon         from '@mui/icons-material/Refresh';
 import FlightIcon          from '@mui/icons-material/Flight';
 import MapIcon             from '@mui/icons-material/Map';
 import BackpackIcon        from '@mui/icons-material/Backpack';
@@ -369,12 +368,6 @@ export default function TripPage() {
     };
   };
 
-  const refreshPhoto = async () => {
-    if (!trip) return;
-    const res  = await fetch(`/api/trips/${trip._id}/cover-photo`, { method: 'POST' });
-    const data = await res.json();
-    if (data.trip) setTrip(data.trip);
-  };
 
   const openDeletePreview = async () => {
     setDeletePreview(null);
@@ -738,72 +731,45 @@ export default function TripPage() {
           </Container>
         </Box>
 
-        {/* ── Cover photo ── (hidden on overview tab — photo lives in the hero band there) */}
-        {activeTab !== 0 && trip.coverPhotoUrl && (
-          <Box sx={{
-            height: { xs: 200, sm: 260 },
-            backgroundImage: `url(${trip.coverPhotoUrl})`,
-            backgroundSize: 'cover',
-            backgroundPosition: 'center',
-            position: 'relative',
-          }}>
-            <Box sx={{
-              position: 'absolute', inset: 0,
-              background: `linear-gradient(to bottom, ${alpha(D.navy, 0.08)}, ${alpha(D.navy, 0.55)})`,
-            }} />
-
-            {/* Credit */}
-            {trip.coverPhotoCredit && (
-              <Typography sx={{
-                position: 'absolute', bottom: 12, left: 16,
-                fontFamily: D.body, color: alpha('#fff', 0.5),
-                fontSize: '0.6rem', letterSpacing: '0.06em',
-              }}>
-                {trip.coverPhotoCredit}
-              </Typography>
-            )}
-
-            <IconButton
-              onClick={refreshPhoto}
-              size="small"
-              sx={{
-                position: 'absolute', bottom: 10, right: 14,
-                color: 'white',
-                backgroundColor: alpha(D.navy, 0.45),
-                backdropFilter: 'blur(4px)',
-                '&:hover': { backgroundColor: alpha(D.navy, 0.65) },
-                p: 0.9,
-              }}
-            >
-              <RefreshIcon sx={{ fontSize: '1rem' }} />
-            </IconButton>
-          </Box>
-        )}
-
         {/* ── Tab content ── */}
-        <Container maxWidth="lg" sx={{ py: { xs: 3, sm: 4 }, px: { xs: 2, sm: 3 } }}>
-          {trip.status === 'active' && <OnTripScreen tripId={trip._id} trip={trip} />}
-          <Box
-            ref={trip.status === 'active' ? tabContentRef : undefined}
-            sx={{ scrollMarginTop: '66px' }}
-          >
-            {activeTab === 0 && <TripOverview trip={trip} onNavigate={setActiveTab} onEdit={openEdit} coverPhotoUrl={trip.coverPhotoUrl} coverPhotoCredit={trip.coverPhotoCredit} />}
-            {activeTab === 1 && <LogisticsTab tripId={trip._id} trip={trip} fabTrigger={fabTrigger} />}
-            {activeTab === 2 && <ItineraryTab tripId={trip._id} startDate={trip.startDate} endDate={trip.endDate} fabTrigger={fabTrigger} />}
-            {activeTab === 3 && <PackingTab tripId={trip._id} tripType={trip.tripType} nights={trip.nights} startDate={trip.startDate} fabTrigger={fabTrigger} />}
-            {activeTab === 4 && <IntelligenceTab tripId={trip._id} />}
-            {activeTab === 5 && (
-              <WeatherTab
-                tripId={trip._id}
-                destinationCity={trip.destination?.city}
-                startDate={trip.startDate}
-                endDate={trip.endDate}
-              />
+        {activeTab === 0 ? (
+          <>
+            {trip.status === 'active' && (
+              <Container maxWidth="lg" sx={{ pt: { xs: 2, sm: 2.5 }, px: { xs: 2, sm: 3 } }}>
+                <OnTripScreen tripId={trip._id} trip={trip} />
+              </Container>
             )}
-            {activeTab === 6 && <MapTab tripId={trip._id} trip={trip} />}
-            {activeTab === 7 && <FilesTab tripId={trip._id} fabTrigger={fabTrigger} />}
-          </Box>
-        </Container>
+            <Box
+              ref={trip.status === 'active' ? tabContentRef : undefined}
+              sx={{ scrollMarginTop: '66px' }}
+            >
+              <TripOverview trip={trip} onNavigate={setActiveTab} onEdit={openEdit} coverPhotoUrl={trip.coverPhotoUrl} coverPhotoCredit={trip.coverPhotoCredit} />
+            </Box>
+          </>
+        ) : (
+          <Container maxWidth="lg" sx={{ py: { xs: 3, sm: 4 }, px: { xs: 2, sm: 3 } }}>
+            {trip.status === 'active' && <OnTripScreen tripId={trip._id} trip={trip} />}
+            <Box
+              ref={trip.status === 'active' ? tabContentRef : undefined}
+              sx={{ scrollMarginTop: '66px' }}
+            >
+              {activeTab === 1 && <LogisticsTab tripId={trip._id} trip={trip} fabTrigger={fabTrigger} />}
+              {activeTab === 2 && <ItineraryTab tripId={trip._id} startDate={trip.startDate} endDate={trip.endDate} fabTrigger={fabTrigger} />}
+              {activeTab === 3 && <PackingTab tripId={trip._id} tripType={trip.tripType} nights={trip.nights} startDate={trip.startDate} fabTrigger={fabTrigger} />}
+              {activeTab === 4 && <IntelligenceTab tripId={trip._id} />}
+              {activeTab === 5 && (
+                <WeatherTab
+                  tripId={trip._id}
+                  destinationCity={trip.destination?.city}
+                  startDate={trip.startDate}
+                  endDate={trip.endDate}
+                />
+              )}
+              {activeTab === 6 && <MapTab tripId={trip._id} trip={trip} />}
+              {activeTab === 7 && <FilesTab tripId={trip._id} fabTrigger={fabTrigger} />}
+            </Box>
+          </Container>
+        )}
 
         {/* ── Context-aware FAB ── */}
         {getTripFabActions(trip.tripType)[activeTab] && (() => {
