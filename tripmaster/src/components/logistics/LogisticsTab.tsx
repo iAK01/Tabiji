@@ -45,7 +45,7 @@ import {
   VENUE_TYPES, ACCOM_TYPES,
   BLANK_TRANSPORT, BLANK_ACCOM, BLANK_VENUE,
   toDateOnly, addDays,
-  detectTransportGaps,
+  detectTransportGaps, classifyDirection,
   type TransportType, type VenueType,
   type LogisticsTabProps, type MenuKind, type GapPromptItem,
 } from './logistics.helpers';
@@ -618,11 +618,22 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
           />
         </>)}
 
+        {type === 'parking' && (<>
+          <AirportSearch label="Airport" value={transport.departureLocation}
+            onChange={a => setTransport(p => ({ ...p, departureLocation: `${a.iata} — ${a.city}` }))} />
+          <TextField label="Parking product" fullWidth placeholder="Express Red Long Term"
+            value={transport.details.parkingProduct ?? ''}
+            onChange={e => setDetail('parkingProduct', e.target.value)} />
+          <TextField label="Booking ID" fullWidth placeholder="DUBMP17788643803"
+            value={transport.confirmationNumber}
+            onChange={e => setTransport(p => ({ ...p, confirmationNumber: e.target.value }))} />
+        </>)}
+
         {/* ── Common fields ── */}
 
-        {/* Departure — constrained to trip date range, seeded to trip start */}
+        {/* Departure / Entry */}
         <TripDateTimePicker
-          label="Departure date & time"
+          label={type === 'parking' ? 'Entry date & time' : 'Departure date & time'}
           value={transport.departureTime}
           onChange={val => {
             // If new departure is after current arrival, clear arrival to avoid impossible range
@@ -634,9 +645,9 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
           initialMonth={toDateOnly(trip.startDate)}
         />
 
-        {/* Arrival — min is the chosen departure date; can extend a day past trip end */}
+        {/* Arrival / Exit */}
         <TripDateTimePicker
-          label="Arrival date & time"
+          label={type === 'parking' ? 'Exit date & time' : 'Arrival date & time'}
           value={transport.arrivalTime}
           onChange={val => setTransport(p => ({ ...p, arrivalTime: val }))}
           minDate={departureDateOnly || toDateOnly(trip.startDate)}
@@ -644,7 +655,7 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
           initialMonth={departureDateOnly || toDateOnly(trip.startDate)}
         />
 
-        {!['car', 'bicycle', 'taxi'].includes(type) && (
+        {!['car', 'bicycle', 'taxi', 'parking'].includes(type) && (
           <TextField label="Confirmation ref" fullWidth value={transport.confirmationNumber}
             onChange={e => setTransport(p => ({ ...p, confirmationNumber: e.target.value }))} />
         )}
@@ -698,38 +709,70 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
       </Tabs>
 
       {/* ── Transport ── */}
-      {section === 0 && (
-        <Box>
-          <BookingLinks
-            originIata={trip.origin?.iataCode}
-            destIata={trip.destination?.iataCode}
-            originCity={trip.origin?.city ?? ''}
-            destCity={trip.destination?.city ?? ''}
-            startDate={trip.startDate}
-            endDate={trip.endDate}
-            fallbackOriginIata={fallbackOriginIata}
-            fallbackOriginCity={fallbackOriginCity}
+      {section === 0 && (() => {
+        const allTransport = logistics?.transportation ?? [];
+        const renderCard   = (t: any, i: number) => (
+          <TransportCard
+            key={i} t={t} i={i} onMenu={openMenu} fmtDateTime={fmtDateTime}
+            linkedFiles={filesById.get(String(i)) ?? []}
+            onOpenFile={f => setViewerFile({ _id: f._id, name: f.name, mimeType: f.mimeType, gcsUrl: f.gcsUrl })}
           />
-          {(logistics?.transportation ?? []).map((t: any, i: number) => (
-            <TransportCard
-              key={i} t={t} i={i} onMenu={openMenu} fmtDateTime={fmtDateTime}
-              linkedFiles={filesById.get(String(i)) ?? []}
-              onOpenFile={f => setViewerFile({ _id: f._id, name: f.name, mimeType: f.mimeType, gcsUrl: f.gcsUrl })}
+        );
+        const thereItems = allTransport.map((t: any, i: number) => ({ t, i })).filter(({ t }: { t: any; i: number }) => classifyDirection(t, trip) === 'there');
+        const backItems  = allTransport.map((t: any, i: number) => ({ t, i })).filter(({ t }: { t: any; i: number }) => classifyDirection(t, trip) === 'back');
+        return (
+          <Box>
+            <BookingLinks
+              originIata={trip.origin?.iataCode}
+              destIata={trip.destination?.iataCode}
+              originCity={trip.origin?.city ?? ''}
+              destCity={trip.destination?.city ?? ''}
+              startDate={trip.startDate}
+              endDate={trip.endDate}
+              fallbackOriginIata={fallbackOriginIata}
+              fallbackOriginCity={fallbackOriginCity}
             />
-          ))}
-          {(!logistics?.transportation || logistics.transportation.length === 0) && (
-            <Alert severity="info" sx={{ mb: 2, fontFamily: D.body }}>No transport added yet.</Alert>
-          )}
-          <Button
-            variant="outlined" startIcon={<AddIcon />}
-            onClick={() => setTransportOpen(true)}
-            fullWidth={mobile} size={mobile ? 'large' : 'medium'}
-            sx={{ py: mobile ? 1.5 : 1, fontFamily: D.body }}
-          >
-            Add transport
-          </Button>
-        </Box>
-      )}
+            {allTransport.length === 0 ? (
+              <Alert severity="info" sx={{ mb: 2, fontFamily: D.body }}>No transport added yet.</Alert>
+            ) : (<>
+              {/* Getting there */}
+              <Box sx={{ mb: 1.5 }}>
+                <Typography sx={{ fontFamily: D.body, fontSize: '0.65rem', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'text.secondary' }}>
+                  Getting there
+                </Typography>
+                <Typography sx={{ fontFamily: D.display, fontSize: '0.9rem', color: D.navy, mt: 0.25 }}>
+                  {trip.origin?.city} → {trip.destination?.city}
+                </Typography>
+              </Box>
+              {thereItems.length === 0
+                ? <Alert severity="info" sx={{ mb: 2, fontFamily: D.body }}>No outbound transport yet.</Alert>
+                : thereItems.map(({ t, i }: { t: any; i: number }) => renderCard(t, i))
+              }
+              {/* Getting back */}
+              <Box sx={{ mt: 3, mb: 1.5 }}>
+                <Typography sx={{ fontFamily: D.body, fontSize: '0.65rem', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'text.secondary' }}>
+                  Getting back
+                </Typography>
+                <Typography sx={{ fontFamily: D.display, fontSize: '0.9rem', color: D.navy, mt: 0.25 }}>
+                  {trip.destination?.city} → {trip.origin?.city}
+                </Typography>
+              </Box>
+              {backItems.length === 0
+                ? <Alert severity="info" sx={{ mb: 2, fontFamily: D.body }}>No return transport yet.</Alert>
+                : backItems.map(({ t, i }: { t: any; i: number }) => renderCard(t, i))
+              }
+            </>)}
+            <Button
+              variant="outlined" startIcon={<AddIcon />}
+              onClick={() => setTransportOpen(true)}
+              fullWidth={mobile} size={mobile ? 'large' : 'medium'}
+              sx={{ py: mobile ? 1.5 : 1, mt: 1, fontFamily: D.body }}
+            >
+              Add transport
+            </Button>
+          </Box>
+        );
+      })()}
 
       {/* ── Accommodation ── */}
       {section === 1 && (

@@ -12,6 +12,7 @@ import DirectionsBoatIcon  from '@mui/icons-material/DirectionsBoat';
 import LocalTaxiIcon       from '@mui/icons-material/LocalTaxi';
 import PedalBikeIcon       from '@mui/icons-material/PedalBike';
 import AirportShuttleIcon  from '@mui/icons-material/AirportShuttle';
+import LocalParkingIcon    from '@mui/icons-material/LocalParking';
 import PlaceIcon           from '@mui/icons-material/Place';
 import MusicNoteIcon       from '@mui/icons-material/MusicNote';
 import BusinessIcon        from '@mui/icons-material/Business';
@@ -51,13 +52,14 @@ export const TRANSPORT_TYPES = [
   { value: 'taxi',             label: 'Taxi',     Icon: LocalTaxiIcon },
   { value: 'private_transfer', label: 'Transfer', Icon: AirportShuttleIcon },
   { value: 'bicycle',          label: 'Bicycle',  Icon: PedalBikeIcon },
+  { value: 'parking',          label: 'Parking',  Icon: LocalParkingIcon },
 ] as const;
 
 export type TransportType = typeof TRANSPORT_TYPES[number]['value'];
 
 // Transport types where departure location is a navigable real-world place
 export const NAVIGABLE_TRANSPORT_TYPES = new Set([
-  'train', 'bus', 'ferry', 'car', 'bicycle', 'car_hire', 'taxi', 'private_transfer',
+  'train', 'bus', 'ferry', 'car', 'bicycle', 'car_hire', 'taxi', 'private_transfer', 'parking',
 ]);
 
 // ─── Venue types ──────────────────────────────────────────────────────────────
@@ -119,6 +121,7 @@ export const BLANK_TRANSPORT = {
     dropoffLocation:     '',
     dropoffCoordinates:  null as { lat: number; lng: number } | null,
     vehicle:             '',
+    parkingProduct:      '',
   },
 };
 
@@ -190,6 +193,11 @@ export function getTransportLabel(t: any): string {
       const route = from && to ? `${from} → ${to}` : (from || to);
       return [label, route].filter(Boolean).join(': ');
     }
+    case 'parking': {
+      const product  = t.details?.parkingProduct ?? '';
+      const location = t.departureLocation ?? '';
+      return [location || 'Airport parking', product].filter(Boolean).join(' · ');
+    }
     default:
       return t.departureLocation ?? t.type ?? 'Transport';
   }
@@ -204,6 +212,7 @@ export function getTransportSubtitle(t: any): string {
     case 'car_hire':         return t.details?.vehicle  ?? '';
     case 'taxi':
     case 'private_transfer': return t.details?.operator ?? '';
+    case 'parking':          return t.details?.parkingProduct ?? '';
     default:                 return '';
   }
 }
@@ -308,6 +317,31 @@ export function detectTransportGaps(
   }
 
   return gaps;
+}
+
+// ─── Direction classifier ─────────────────────────────────────────────────────
+// Returns 'there' if the transport item belongs to the outbound leg, 'back' for return.
+// Flights: matched by IATA code in departure location string.
+// Everything else: date-based split at trip midpoint.
+export function classifyDirection(t: any, trip: { startDate: string; endDate: string; origin?: { iataCode?: string }; destination?: { iataCode?: string } }): 'there' | 'back' {
+  const originIata = (trip.origin?.iataCode ?? '').toUpperCase();
+  const destIata   = (trip.destination?.iataCode ?? '').toUpperCase();
+
+  if (t.type === 'flight') {
+    const depLoc = (t.departureLocation ?? '').toUpperCase();
+    if (originIata && depLoc.includes(originIata)) return 'there';
+    if (destIata   && depLoc.includes(destIata))   return 'back';
+  }
+
+  if (t.departureTime) {
+    const start = new Date(toDateOnly(trip.startDate) + 'T00:00:00').getTime();
+    const end   = new Date(toDateOnly(trip.endDate)   + 'T23:59:59').getTime();
+    const mid   = (start + end) / 2;
+    const dep   = new Date(t.departureTime).getTime();
+    return dep <= mid ? 'there' : 'back';
+  }
+
+  return 'there';
 }
 
 // ─── Shared prop interfaces ───────────────────────────────────────────────────

@@ -1,9 +1,11 @@
 'use client';
 // TransportCard.tsx → src/components/logistics/TransportCard.tsx
 
-import { Box, Button, IconButton, Paper, Typography } from '@mui/material';
+import { useState } from 'react';
+import { Box, Button, IconButton, Paper, Snackbar, Typography } from '@mui/material';
 import AttachFileIcon from '@mui/icons-material/AttachFile';
 import MoreVertIcon   from '@mui/icons-material/MoreVert';
+import ShareIcon      from '@mui/icons-material/Share';
 import NavigateButton from '@/components/ui/NavigateButton';
 import DestinationMap from '@/components/ui/DestinationMap';
 import {
@@ -292,10 +294,39 @@ function CarBicycleHero({ t }: { t: any }) {
   );
 }
 
+function ParkingHero({ t }: { t: any }) {
+  const airport = t.departureLocation ?? '';
+  const product = t.details?.parkingProduct ?? '';
+  const entry   = t.departureTime ? `${dateShort(t.departureTime)} · ${timeOnly(t.departureTime)}` : '';
+  const exit_   = t.arrivalTime   ? `${dateShort(t.arrivalTime)} · ${timeOnly(t.arrivalTime)}`   : '';
+
+  return (
+    <Box sx={{ pt: 2.5, px: 2.5 }}>
+      <SectionTag>Parking</SectionTag>
+      <Typography sx={{ fontFamily: D.display, fontSize: '1.5rem', color: D.navy, lineHeight: 1, letterSpacing: '-0.02em' }}>
+        {airport || 'Airport parking'}
+      </Typography>
+      {product && (
+        <Typography sx={{ fontFamily: D.body, fontSize: '0.82rem', color: 'text.secondary', mt: 0.5 }}>
+          {product}
+        </Typography>
+      )}
+      {(entry || exit_) && (
+        <Box sx={{ mt: 1.25 }}>
+          <SectionTag>Entry → Exit</SectionTag>
+          <Typography sx={{ fontFamily: D.display, fontSize: '0.9rem', color: D.navy, lineHeight: 1.4 }}>
+            {entry}{exit_ ? ` → ${exit_}` : ''}
+          </Typography>
+        </Box>
+      )}
+    </Box>
+  );
+}
+
 // ── Bottom time + ref strip ───────────────────────────────────────────────────
 
 function TimeRefStrip({ t, type }: { t: any; type: string }) {
-  if (['taxi', 'private_transfer', 'car_hire'].includes(type)) {
+  if (['taxi', 'private_transfer', 'car_hire', 'parking'].includes(type)) {
     // For these types time is already in the hero — just show ref
     if (!t.confirmationNumber && !t.cost) return null;
     return (
@@ -359,11 +390,89 @@ function getMapTarget(t: any) {
   return address ? { address, coordinates: t.departureCoordinates ?? t.details?.pickupCoordinates ?? null } : null;
 }
 
+// ── Share formatter ───────────────────────────────────────────────────────────
+
+function formatTransportForShare(t: any): string {
+  const fmt = (dt: string) =>
+    dt ? new Date(dt).toLocaleString('en-IE', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false }) : '';
+  const lines: string[] = [];
+
+  switch (t.type) {
+    case 'flight': {
+      const num     = t.details?.flightNumber ?? '';
+      const airline = t.details?.airline ?? '';
+      lines.push([num, airline].filter(Boolean).join(' · ') || 'Flight');
+      if (t.departureLocation || t.arrivalLocation)
+        lines.push(`${t.departureLocation ?? ''} → ${t.arrivalLocation ?? ''}`);
+      if (t.departureTime) lines.push(`Departs: ${fmt(t.departureTime)}`);
+      if (t.arrivalTime)   lines.push(`Arrives: ${fmt(t.arrivalTime)}`);
+      const seat = t.details?.seat; const cabin = t.details?.cabin;
+      if (seat || cabin) lines.push([seat && `Seat ${seat}`, cabin].filter(Boolean).join(' · '));
+      break;
+    }
+    case 'parking': {
+      lines.push('Airport parking');
+      if (t.departureLocation)       lines.push(t.departureLocation);
+      if (t.details?.parkingProduct) lines.push(t.details.parkingProduct);
+      if (t.departureTime) lines.push(`Entry: ${fmt(t.departureTime)}`);
+      if (t.arrivalTime)   lines.push(`Exit:  ${fmt(t.arrivalTime)}`);
+      break;
+    }
+    case 'train': case 'bus': case 'ferry': {
+      const label = t.type.charAt(0).toUpperCase() + t.type.slice(1);
+      lines.push([t.details?.operator, label].filter(Boolean).join(' · '));
+      if (t.departureLocation || t.arrivalLocation)
+        lines.push(`${t.departureLocation ?? ''} → ${t.arrivalLocation ?? ''}`);
+      if (t.departureTime) lines.push(`Departs: ${fmt(t.departureTime)}`);
+      if (t.arrivalTime)   lines.push(`Arrives: ${fmt(t.arrivalTime)}`);
+      if (t.details?.seat) lines.push(`Seat: ${t.details.seat}`);
+      break;
+    }
+    case 'car_hire': {
+      lines.push(`Car hire — ${t.details?.rentalCompany || 'Car hire'}`);
+      if (t.details?.vehicle)         lines.push(t.details.vehicle);
+      if (t.details?.pickupLocation)  lines.push(`Pickup: ${fmt(t.departureTime)} — ${t.details.pickupLocation}`);
+      if (t.details?.dropoffLocation) lines.push(`Drop-off: ${fmt(t.arrivalTime)} — ${t.details.dropoffLocation}`);
+      break;
+    }
+    case 'taxi': case 'private_transfer': {
+      const label = t.type === 'taxi' ? 'Taxi' : 'Transfer';
+      lines.push([label, t.details?.operator].filter(Boolean).join(' — '));
+      if (t.departureLocation) lines.push(`From: ${t.departureLocation}`);
+      if (t.arrivalLocation)   lines.push(`To: ${t.arrivalLocation}`);
+      if (t.departureTime)     lines.push(fmt(t.departureTime));
+      break;
+    }
+    default: {
+      lines.push(t.type || 'Transport');
+      if (t.departureLocation || t.arrivalLocation)
+        lines.push(`${t.departureLocation ?? ''} → ${t.arrivalLocation ?? ''}`);
+      if (t.departureTime) lines.push(fmt(t.departureTime));
+    }
+  }
+
+  if (t.confirmationNumber) lines.push(`Ref: ${t.confirmationNumber}`);
+  if (t.cost)               lines.push(`€${t.cost}`);
+  if (t.notes)              lines.push(t.notes);
+  return lines.join('\n');
+}
+
 // ── Main export ───────────────────────────────────────────────────────────────
 
 export default function TransportCard({ t, i, onMenu, linkedFiles, onOpenFile }: TransportCardProps) {
   const mapTarget = getMapTarget(t);
   const navDest   = mapTarget ? { name: mapTarget.address, address: mapTarget.address, coordinates: mapTarget.coordinates } : null;
+  const [copied, setCopied] = useState(false);
+
+  const handleShare = async () => {
+    const text = formatTransportForShare(t);
+    if (typeof navigator !== 'undefined' && navigator.share) {
+      try { await navigator.share({ text }); } catch {}
+    } else {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+    }
+  };
 
   const renderHero = () => {
     switch (t.type) {
@@ -376,6 +485,7 @@ export default function TransportCard({ t, i, onMenu, linkedFiles, onOpenFile }:
       case 'private_transfer': return <TaxiTransferHero t={t} />;
       case 'car':
       case 'bicycle':          return <CarBicycleHero t={t} />;
+      case 'parking':          return <ParkingHero t={t} />;
       default:                 return <TrainBusFerryHero t={t} />;
     }
   };
@@ -398,14 +508,17 @@ export default function TransportCard({ t, i, onMenu, linkedFiles, onOpenFile }:
         {/* Hero section */}
         {renderHero()}
 
-        {/* Dashed strip: status + nav + more vert */}
+        {/* Dashed strip: status + nav + share + more vert */}
         <Box sx={{ display: 'flex', alignItems: 'center', mx: 2.5, my: 1.5, gap: 1 }}>
           <DashedRule />
           {navDest && (
             <NavigateButton destination={navDest} suggestedMode="driving" size="medium" />
           )}
           <StatusPill status={t.status} />
-          <IconButton size="small" onClick={e => onMenu(e, 'transport', i)} sx={{ ml: 0.25 }}>
+          <IconButton size="small" onClick={handleShare} sx={{ ml: 0.25 }}>
+            <ShareIcon fontSize="small" />
+          </IconButton>
+          <IconButton size="small" onClick={e => onMenu(e, 'transport', i)}>
             <MoreVertIcon fontSize="small" />
           </IconButton>
         </Box>
@@ -449,6 +562,13 @@ export default function TransportCard({ t, i, onMenu, linkedFiles, onOpenFile }:
           <DestinationMap coordinates={mapTarget.coordinates} address={mapTarget.address} />
         </Box>
       )}
+      <Snackbar
+        open={copied}
+        autoHideDuration={2000}
+        onClose={() => setCopied(false)}
+        message="Copied to clipboard"
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      />
     </Box>
   );
 }
