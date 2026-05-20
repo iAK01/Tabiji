@@ -92,7 +92,7 @@ export default function PreTripAppsCard({ countryCode, cityName }: Props) {
             fontSize:   '0.78rem',
             color:       D.muted,
           }}>
-            Download these apps for {cityName}
+            These apps for {cityName} might be worth downloading before your trip.
           </Typography>
         </Box>
       </Box>

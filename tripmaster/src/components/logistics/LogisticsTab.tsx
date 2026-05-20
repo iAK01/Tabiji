@@ -37,6 +37,7 @@ import TransportCard      from './TransportCard';
 import AccomCard          from './AccomCard';
 import VenueCard          from './VenueCard';
 import TripDateTimePicker from '@/components/ui/TripDateTimePicker';
+import GettingThereStrip  from './GettingThereStrip';
 
 // ── Shared helpers ─────────────────────────────────────────────────────────────
 import {
@@ -679,6 +680,9 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
   // ─────────────────────────────────────────────────────────────────────────────
   return (
     <Box>
+      {/* ── Getting There AI strip ── */}
+      <GettingThereStrip tripId={tripId} trip={trip} />
+
       {/* ── Section tabs ── */}
       <Tabs
         value={section}
