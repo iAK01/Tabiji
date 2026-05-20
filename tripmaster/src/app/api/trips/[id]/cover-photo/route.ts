@@ -13,7 +13,7 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
   const trip = await Trip.findOne({ _id: id, userId: user._id });
   if (!trip) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
-  const query = `${trip.destination.city} ${trip.destination.country} travel`;
+  const query = `${trip.destination.city} ${trip.destination.country} landmark skyline architecture photography`;
   const res = await fetch(
     `https://api.unsplash.com/search/photos?query=${encodeURIComponent(query)}&orientation=landscape&per_page=30&client_id=${process.env.NEXT_PUBLIC_UNSPLASH_ACCESS_KEY}`
   );
