@@ -294,10 +294,17 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
   const trip = await Trip.findOne({ _id: id, userId: user._id, deleted: false });
   if (!trip) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
-  const [logistics, itinerary] = await Promise.all([
-    TripLogistics.findOne({ tripId: id }),
-    TripItinerary.findOne({ tripId: id }),
-  ]);
+  let logistics: any = null;
+  let itinerary: any = null;
+  try {
+    [logistics, itinerary] = await Promise.all([
+      TripLogistics.findOne({ tripId: id }),
+      TripItinerary.findOne({ tripId: id }),
+    ]);
+  } catch (dbErr: any) {
+    console.error('Ground transport DB error:', dbErr?.message);
+    return NextResponse.json({ error: `Database error: ${dbErr?.message}` }, { status: 500 });
+  }
 
   const transport     = logistics?.transportation ?? [];
   const accommodation = logistics?.accommodation  ?? [];
@@ -383,12 +390,19 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
   try {
     const msg = await anthropic.messages.create({
       model:      'claude-sonnet-4-6',
-      max_tokens: 2048,
+      max_tokens: 4096,
       messages:   [{ role: 'user', content: prompt }],
     });
 
-    const raw    = msg.content.filter(b => b.type === 'text').map(b => (b as any).text).join('');
-    const parsed = JSON.parse(raw.replace(/```json|```/g, '').trim());
+    const raw = msg.content.filter(b => b.type === 'text').map(b => (b as any).text).join('');
+
+    // Extract the outermost JSON object robustly — Claude sometimes adds preamble/postamble
+    const jsonMatch = raw.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      console.error('Ground transport: no JSON object in response. Raw:', raw.slice(0, 500));
+      return NextResponse.json({ error: 'AI returned an unexpected response. Please try again.' }, { status: 500 });
+    }
+    const parsed = JSON.parse(jsonMatch[0]);
 
     // Inject server-computed dates for "Add to itinerary" — not asked of Claude
     const depDayStr  = outbound[0]?.departureTime
@@ -405,8 +419,9 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
     return NextResponse.json({ plan });
 
   } catch (err: any) {
-    console.error('Ground transport error:', err);
-    return NextResponse.json({ error: 'Failed to generate transport plan' }, { status: 500 });
+    const message = err?.message ?? String(err);
+    console.error('Ground transport error:', message);
+    return NextResponse.json({ error: `Failed to generate transport plan: ${message}` }, { status: 500 });
   }
 }
 

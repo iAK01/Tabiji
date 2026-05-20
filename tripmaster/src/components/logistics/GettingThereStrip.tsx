@@ -487,9 +487,10 @@ export default function GettingThereStrip({ tripId, trip }: Props) {
       const res  = await fetch(`/api/trips/${tripId}/transport`, { method: 'POST' });
       const data = await res.json();
       if (data.error) setError(data.error);
+      else if (!data.plan) setError('No plan returned — please try again');
       else setPlan(data.plan);
-    } catch {
-      setError('Failed to generate — check your connection');
+    } catch (e: any) {
+      setError(e?.message ?? 'Failed to generate — check your connection');
     } finally {
       setGenerating(false);
     }
