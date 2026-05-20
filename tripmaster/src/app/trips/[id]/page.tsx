@@ -369,6 +369,13 @@ export default function TripPage() {
   };
 
 
+  const refreshPhoto = async () => {
+    if (!trip) return;
+    const res  = await fetch(`/api/trips/${trip._id}/cover-photo`, { method: 'POST' });
+    const data = await res.json();
+    if (data.trip) setTrip(data.trip);
+  };
+
   const openDeletePreview = async () => {
     setDeletePreview(null);
     setDeleteError('');
@@ -441,16 +448,24 @@ export default function TripPage() {
         @import url('https://fonts.googleapis.com/css2?family=Archivo+Black&family=Archivo:wght@300;400;500;600;700&display=swap');
       `}</style>
 
-      <Box sx={{ minHeight: '100vh', backgroundColor: D.bg, pb: { xs: 10, sm: 4 } }}>
+      <Box sx={{ minHeight: '100vh', backgroundColor: D.bg, pb: { xs: 10, sm: 4 }, position: 'relative' }}>
 
         {/* ── AppBar ── */}
-        <AppBar position="static" elevation={0} sx={{
-          backgroundColor: D.navy,
-          borderBottom: activeTab === 0 ? 'none' : `3px solid ${D.terra}`,
-        }}>
+        <AppBar
+          position={activeTab === 0 ? 'absolute' : 'static'}
+          elevation={0}
+          sx={{
+            backgroundColor: activeTab === 0 ? 'transparent' : D.navy,
+            borderBottom: activeTab === 0 ? 'none' : `3px solid ${D.terra}`,
+            zIndex: 200,
+          }}
+        >
 
           {/* Utility row */}
-          <Toolbar sx={{ minHeight: 52, gap: 1, px: { xs: 1.5, sm: 2.5 } }}>
+          <Toolbar sx={{
+            minHeight: 52, gap: 1, px: { xs: 1.5, sm: 2.5 },
+            background: activeTab === 0 ? 'linear-gradient(to bottom, rgba(10,16,44,0.6) 0%, transparent 100%)' : 'none',
+          }}>
             <IconButton
               color="inherit"
               onClick={() => router.push('/dashboard')}
@@ -668,69 +683,52 @@ export default function TripPage() {
           </Box>}
         </AppBar>
 
-        {/* ── Tabs ── */}
-        <Box sx={{
-          backgroundColor: activeTab === 0 ? alpha(D.navy, 0.72) : D.navy,
-          backdropFilter: activeTab === 0 ? 'blur(12px)' : 'none',
-          borderBottom: activeTab === 0 ? `1px solid ${alpha('#fff', 0.06)}` : `1px solid ${alpha('#fff', 0.08)}`,
-          position: 'sticky',
-          top: 0,
-          zIndex: 100,
-          boxShadow: activeTab === 0 ? 'none' : `0 4px 20px ${alpha(D.navy, 0.35)}`,
-        }}>
-          <Container maxWidth="lg" disableGutters>
-            <Tabs
-              value={activeTab}
-              onChange={(_, val) => {
-            setActiveTab(val);
-            if (trip.status === 'active') {
-              requestAnimationFrame(() => requestAnimationFrame(() => {
-                tabContentRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-              }));
-            }
-          }}
-              textColor="inherit"
-              variant={isMobile ? 'scrollable' : 'fullWidth'}
-              scrollButtons={false}
-              TabIndicatorProps={{
-                style: {
-                  backgroundColor: D.terra,
-                  height: 3,
-                  borderRadius: '3px 3px 0 0',
-                },
-              }}
-              sx={{
-                '& .MuiTab-root': {
-                  fontFamily: D.body,
-                  minHeight: 58,
-                  minWidth: { xs: 72, sm: 100 },
-                  flexDirection: 'column',
-                  gap: 0.6,
-                  fontSize: { xs: '0.7rem', sm: '0.8rem' },
-                  fontWeight: 700,
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.1em',
-                  color: alpha('#fff', 0.35),
-                  transition: 'color 0.15s',
-                  '&:hover': { color: alpha('#fff', 0.8) },
-                  '&.Mui-selected': {
-                    color: 'white',
-                    fontWeight: 800,
+        {/* ── Tabs — shown above content on all tabs except overview ── */}
+        {activeTab !== 0 && (
+          <Box sx={{
+            backgroundColor: D.navy,
+            borderBottom: `1px solid ${alpha('#fff', 0.08)}`,
+            position: 'sticky',
+            top: 0,
+            zIndex: 100,
+            boxShadow: `0 4px 20px ${alpha(D.navy, 0.35)}`,
+          }}>
+            <Container maxWidth="lg" disableGutters>
+              <Tabs
+                value={activeTab}
+                onChange={(_, val) => {
+                  setActiveTab(val);
+                  if (trip.status === 'active') {
+                    requestAnimationFrame(() => requestAnimationFrame(() => {
+                      tabContentRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    }));
+                  }
+                }}
+                textColor="inherit"
+                variant={isMobile ? 'scrollable' : 'fullWidth'}
+                scrollButtons={false}
+                TabIndicatorProps={{ style: { backgroundColor: D.terra, height: 3, borderRadius: '3px 3px 0 0' } }}
+                sx={{
+                  '& .MuiTab-root': {
+                    fontFamily: D.body, minHeight: 58, minWidth: { xs: 72, sm: 100 },
+                    flexDirection: 'column', gap: 0.6,
+                    fontSize: { xs: '0.7rem', sm: '0.8rem' }, fontWeight: 700,
+                    textTransform: 'uppercase', letterSpacing: '0.1em',
+                    color: alpha('#fff', 0.35), transition: 'color 0.15s',
+                    '&:hover': { color: alpha('#fff', 0.8) },
+                    '&.Mui-selected': { color: 'white', fontWeight: 800 },
+                    '& svg': { fontSize: { xs: '1.3rem', sm: '1.5rem' }, transition: 'color 0.15s' },
+                    '&.Mui-selected svg': { color: D.terra },
                   },
-                  '& svg': {
-                    fontSize: { xs: '1.3rem', sm: '1.5rem' },
-                    transition: 'color 0.15s',
-                  },
-                  '&.Mui-selected svg': { color: D.terra },
-                },
-              }}
-            >
-              {TAB_CONFIG.map(({ label, Icon }) => (
-                <Tab key={label} label={label} icon={<Icon />} iconPosition="top" />
-              ))}
-            </Tabs>
-          </Container>
-        </Box>
+                }}
+              >
+                {TAB_CONFIG.map(({ label, Icon }) => (
+                  <Tab key={label} label={label} icon={<Icon />} iconPosition="top" />
+                ))}
+              </Tabs>
+            </Container>
+          </Box>
+        )}
 
         {/* ── Tab content ── */}
         {activeTab === 0 ? (
@@ -744,7 +742,58 @@ export default function TripPage() {
               ref={trip.status === 'active' ? tabContentRef : undefined}
               sx={{ scrollMarginTop: '66px' }}
             >
-              <TripOverview trip={trip} onNavigate={setActiveTab} onEdit={openEdit} coverPhotoUrl={trip.coverPhotoUrl} coverPhotoCredit={trip.coverPhotoCredit} />
+              <TripOverview
+                trip={trip}
+                onNavigate={setActiveTab}
+                coverPhotoUrl={trip.coverPhotoUrl}
+                coverPhotoCredit={trip.coverPhotoCredit}
+                onRefreshPhoto={trip.coverPhotoUrl ? refreshPhoto : undefined}
+                tabsSlot={
+                  <Box sx={{
+                    backgroundColor: D.navy,
+                    borderBottom: `1px solid ${alpha('#fff', 0.08)}`,
+                    position: 'sticky',
+                    top: 0,
+                    zIndex: 100,
+                    boxShadow: `0 4px 20px ${alpha(D.navy, 0.35)}`,
+                  }}>
+                    <Container maxWidth="lg" disableGutters>
+                      <Tabs
+                        value={activeTab}
+                        onChange={(_, val) => {
+                          setActiveTab(val);
+                          if (trip.status === 'active') {
+                            requestAnimationFrame(() => requestAnimationFrame(() => {
+                              tabContentRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                            }));
+                          }
+                        }}
+                        textColor="inherit"
+                        variant={isMobile ? 'scrollable' : 'fullWidth'}
+                        scrollButtons={false}
+                        TabIndicatorProps={{ style: { backgroundColor: D.terra, height: 3, borderRadius: '3px 3px 0 0' } }}
+                        sx={{
+                          '& .MuiTab-root': {
+                            fontFamily: D.body, minHeight: 58, minWidth: { xs: 72, sm: 100 },
+                            flexDirection: 'column', gap: 0.6,
+                            fontSize: { xs: '0.7rem', sm: '0.8rem' }, fontWeight: 700,
+                            textTransform: 'uppercase', letterSpacing: '0.1em',
+                            color: alpha('#fff', 0.35), transition: 'color 0.15s',
+                            '&:hover': { color: alpha('#fff', 0.8) },
+                            '&.Mui-selected': { color: 'white', fontWeight: 800 },
+                            '& svg': { fontSize: { xs: '1.3rem', sm: '1.5rem' }, transition: 'color 0.15s' },
+                            '&.Mui-selected svg': { color: D.terra },
+                          },
+                        }}
+                      >
+                        {TAB_CONFIG.map(({ label, Icon }) => (
+                          <Tab key={label} label={label} icon={<Icon />} iconPosition="top" />
+                        ))}
+                      </Tabs>
+                    </Container>
+                  </Box>
+                }
+              />
             </Box>
           </>
         ) : (

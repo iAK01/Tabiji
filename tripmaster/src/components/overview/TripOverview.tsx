@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Box, Typography, Paper, Button, Chip, CircularProgress,
   LinearProgress, Divider, alpha, Tooltip, IconButton,
@@ -14,7 +14,6 @@ import BackpackIcon             from '@mui/icons-material/Backpack';
 import WbSunnyIcon              from '@mui/icons-material/WbSunny';
 import FolderOpenIcon           from '@mui/icons-material/FolderOpen';
 import MapIcon                  from '@mui/icons-material/Map';
-import AccessTimeIcon           from '@mui/icons-material/AccessTime';
 import PhoneIcon                from '@mui/icons-material/Phone';
 import EmailIcon                from '@mui/icons-material/Email';
 import LinkIcon                 from '@mui/icons-material/Link';
@@ -31,7 +30,7 @@ import BadgeIcon                from '@mui/icons-material/Badge';
 import HealthAndSafetyIcon      from '@mui/icons-material/HealthAndSafety';
 import ConfirmationNumberIcon   from '@mui/icons-material/ConfirmationNumber';
 import VisibilityIcon           from '@mui/icons-material/Visibility';
-import EditIcon                 from '@mui/icons-material/Edit';
+import RefreshIcon              from '@mui/icons-material/Refresh';
 import NavigateButton           from '@/components/ui/NavigateButton';
 import DocumentViewer, { type ViewableFile } from '@/components/files/DocumentViewer';
 import PreTripAppsCard from '@/components/overview/PreTripAppsCard';
@@ -94,7 +93,8 @@ interface Props {
   coverPhotoUrl?:    string;
   coverPhotoCredit?: string;
   onNavigate: (tab: number) => void;
-  onEdit?:    () => void;
+  onRefreshPhoto?:  () => void;
+  tabsSlot?:        React.ReactNode;
 }
 
 // ─── Section colours ──────────────────────────────────────────────────────────
@@ -136,27 +136,6 @@ const SectionTag = ({ children, color = D.muted }: { children: React.ReactNode; 
   </Typography>
 );
 
-function StatusPill({ status }: { status: string }) {
-  const DOT: Record<string, string> = {
-    not_booked: '#9e9e9e', pending: '#ed6c02', booked: D.navy,
-    confirmed: '#2e7d32', cancelled: '#d32f2f',
-  };
-  const color = DOT[status] ?? DOT.not_booked;
-  return (
-    <Box sx={{
-      display: 'inline-flex', alignItems: 'center', gap: 0.6,
-      px: 1.25, py: 0.4,
-      bgcolor: `${color}14`,
-      border: `1px solid ${color}28`,
-      borderRadius: 99,
-    }}>
-      <Box sx={{ width: 6, height: 6, borderRadius: '50%', bgcolor: color, flexShrink: 0 }} />
-      <Typography sx={{ fontSize: '0.72rem', fontFamily: D.body, fontWeight: 600, textTransform: 'capitalize', color }}>
-        {status.replace('_', ' ')}
-      </Typography>
-    </Box>
-  );
-}
 
 function statusDot(level: 'ok' | 'warn' | 'empty') {
   if (level === 'ok')   return <CheckCircleIcon sx={{ fontSize: 14, color: 'success.main', flexShrink: 0 }} />;
@@ -299,7 +278,7 @@ const TICKET_ICONS: Record<string, React.ElementType> = {
   event_brief:        ConfirmationNumberIcon,
 };
 
-export default function TripOverview({ trip, coverPhotoUrl, coverPhotoCredit, onNavigate, onEdit }: Props) {
+export default function TripOverview({ trip, coverPhotoUrl, coverPhotoCredit, onNavigate, onRefreshPhoto, tabsSlot }: Props) {
   const [logistics,    setLogistics]    = useState<any>(null);
   const [packing,      setPacking]      = useState<any>(null);
   const [itinerary,    setItinerary]    = useState<any>(null);
@@ -459,10 +438,6 @@ export default function TripOverview({ trip, coverPhotoUrl, coverPhotoCredit, on
                         : isActive ? `DAY ${currentDayNum} OF ${tripTotalDays}`
                         : isToday  ? 'DEPARTING TODAY'
                         : 'DAYS TO GO';
-  const accentColor     = isActive ? '#2e7d32'
-                        : isPast   ? D.muted
-                        : daysUntil <= 7 ? '#ed6c02'
-                        : D.navy;
 
   return (
     <>
@@ -470,7 +445,7 @@ export default function TripOverview({ trip, coverPhotoUrl, coverPhotoCredit, on
       {/* ── Full-bleed photo hero ── */}
       <Box sx={{
         position: 'relative',
-        height: { xs: 380, sm: 440, md: 500 },
+        height: { xs: 440, sm: 480, md: 540 },
         overflow: 'hidden',
         background: `linear-gradient(135deg, ${D.navy} 0%, #2a3558 100%)`,
       }}>
@@ -483,36 +458,78 @@ export default function TripOverview({ trip, coverPhotoUrl, coverPhotoCredit, on
           }} />
         )}
 
-        {/* Gradient — photo visible in upper half, heavy dark at bottom */}
+        {/* Gradient — clear in middle, dark at top and heavy at bottom */}
         <Box sx={{
           position: 'absolute', inset: 0,
           background: coverPhotoUrl
-            ? 'linear-gradient(to bottom, rgba(10,16,44,0.22) 0%, rgba(10,16,44,0.0) 28%, rgba(10,16,44,0.72) 62%, rgba(10,16,44,0.97) 100%)'
+            ? 'linear-gradient(to bottom, rgba(10,16,44,0.55) 0%, rgba(10,16,44,0.05) 35%, rgba(10,16,44,0.75) 65%, rgba(10,16,44,0.98) 100%)'
             : 'none',
         }} />
 
-        {/* Edit button */}
-        {onEdit && (
-          <IconButton onClick={onEdit} size="small" sx={{
+        {/* Weather — top left */}
+        {weatherDay && (
+          <Box sx={{
+            position: 'absolute', top: 16, left: { xs: 20, md: 28 },
+            display: 'flex', alignItems: 'center', gap: 1,
+          }}>
+            <Typography sx={{ fontSize: { xs: '1.8rem', md: '2.2rem' }, lineHeight: 1 }}>
+              {weatherDay.icon}
+            </Typography>
+            <Box>
+              <Typography sx={{
+                fontFamily: D.display, fontSize: { xs: '1.6rem', md: '2rem' },
+                color: 'white', lineHeight: 1, letterSpacing: '-0.03em',
+                textShadow: '0 2px 12px rgba(0,0,0,0.6)',
+              }}>
+                {Math.round(weatherDay.tempAvg)}°
+              </Typography>
+              <Typography sx={{
+                fontFamily: D.body, fontSize: '0.6rem', fontWeight: 700,
+                letterSpacing: '0.08em', textTransform: 'uppercase',
+                color: 'rgba(255,255,255,0.55)',
+                textShadow: '0 1px 4px rgba(0,0,0,0.6)',
+              }}>
+                {trip.weather?.mode === 'historical' ? 'Avg · ' : ''}{weatherDay.condition}
+              </Typography>
+            </Box>
+          </Box>
+        )}
+
+        {/* Refresh photo — top right */}
+        {onRefreshPhoto && coverPhotoUrl && (
+          <IconButton onClick={onRefreshPhoto} size="small" sx={{
             position: 'absolute', top: 14, right: 14,
             color: 'rgba(255,255,255,0.65)',
             bgcolor: 'rgba(0,0,0,0.28)',
             backdropFilter: 'blur(6px)',
             '&:hover': { color: 'white', bgcolor: 'rgba(0,0,0,0.5)' },
           }}>
-            <EditIcon sx={{ fontSize: 16 }} />
+            <RefreshIcon sx={{ fontSize: 16 }} />
           </IconButton>
         )}
 
         {/* Bottom content */}
         <Box sx={{ position: 'absolute', bottom: 0, left: 0, right: 0, px: { xs: 3, md: 5 }, pb: { xs: 3.5, md: 4.5 } }}>
 
+          {/* Trip name */}
+          <Typography sx={{
+            fontFamily: D.display,
+            fontSize: { xs: '1.15rem', md: '1.5rem' },
+            color: 'white', lineHeight: 1.2,
+            letterSpacing: '-0.01em',
+            mb: 0.5,
+            textShadow: '0 2px 12px rgba(0,0,0,0.65)',
+            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          }}>
+            {trip.name}
+          </Typography>
+
           {/* Route + type breadcrumb */}
           <Typography sx={{
-            fontFamily: D.body, fontSize: '0.65rem', fontWeight: 700,
-            letterSpacing: '0.16em', textTransform: 'uppercase',
-            color: 'rgba(255,255,255,0.5)',
-            mb: { xs: 1.5, md: 2 },
+            fontFamily: D.body, fontSize: '0.62rem', fontWeight: 700,
+            letterSpacing: '0.14em', textTransform: 'uppercase',
+            color: 'rgba(255,255,255,0.45)',
+            mb: { xs: 2, md: 2.5 },
             textShadow: '0 1px 4px rgba(0,0,0,0.6)',
           }}>
             {trip.origin?.city} → {trip.destination?.city}
@@ -596,7 +613,7 @@ export default function TripOverview({ trip, coverPhotoUrl, coverPhotoCredit, on
           <Typography sx={{
             position: 'absolute', bottom: 10, right: 14,
             fontFamily: D.body, fontSize: '0.55rem',
-            color: 'rgba(255,255,255,0.25)', letterSpacing: '0.04em',
+            color: 'rgba(255,255,255,0.22)', letterSpacing: '0.04em',
             textShadow: '0 1px 3px rgba(0,0,0,0.5)',
           }}>
             {coverPhotoCredit}
@@ -604,11 +621,13 @@ export default function TripOverview({ trip, coverPhotoUrl, coverPhotoCredit, on
         )}
       </Box>
 
-      {/* ── Cards sheet — slides up over hero on mobile ── */}
+      {tabsSlot}
+
+      {/* ── Cards sheet ── */}
       <Box sx={{
         bgcolor: D.bg,
-        borderRadius: { xs: '20px 20px 0 0', md: 0 },
-        mt: { xs: '-28px', md: 0 },
+        borderRadius: 0,
+        mt: 0,
         position: 'relative', zIndex: 1,
         pt: { xs: 3, md: 4 },
       }}>
