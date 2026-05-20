@@ -2,13 +2,15 @@
 
 import { useEffect, useState } from 'react';
 import {
-  Box, Typography, Button,
+  Box, Typography, Button, Chip,
   Dialog, DialogTitle, DialogContent, DialogActions,
   List, ListItemButton, ListItemText,
 } from '@mui/material';
 import CheckCircleIcon   from '@mui/icons-material/CheckCircle';
 import CalendarTodayIcon from '@mui/icons-material/CalendarToday';
+import AccessTimeIcon    from '@mui/icons-material/AccessTime';
 import type { CultureHighlight, ItineraryDay } from './Intelligence.types';
+import { freeSlots, formatTime } from '@/components/itinerary/Itinerary.helpers';
 
 interface Props {
   open:      boolean;
@@ -139,25 +141,66 @@ export default function Addtoitinerarydialog({ open, onClose, highlight, tripId 
               </Box>
             )}
 
-            {(selectedDay || days.length === 1) && (
-              <Box>
-                <Typography fontWeight={700}
-                  sx={{ fontSize: '0.88rem', mb: 0.75, textTransform: 'uppercase', letterSpacing: 0.5, color: 'text.secondary' }}>
-                  What time?
-                </Typography>
-                <input
-                  type="time"
-                  value={time}
-                  onChange={e => setTime(e.target.value)}
-                  style={{
-                    fontSize: '1.1rem', fontWeight: 700,
-                    border: '1px solid #ddd', borderRadius: 6,
-                    padding: '10px 14px', width: '100%',
-                    boxSizing: 'border-box',
-                  }}
-                />
-              </Box>
-            )}
+            {(selectedDay || days.length === 1) && (() => {
+              const day      = selectedDay ?? days[0];
+              const slots    = freeSlots(day.stops).filter(s => s.mins >= defaultDuration(highlight!));
+              return (
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+                  {slots.length > 0 && (
+                    <Box>
+                      <Typography fontWeight={700}
+                        sx={{ fontSize: '0.88rem', mb: 0.75, textTransform: 'uppercase', letterSpacing: 0.5, color: 'text.secondary' }}>
+                        Free slots
+                      </Typography>
+                      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.75 }}>
+                        {slots.map((slot, i) => {
+                          const slotTime  = formatTime(slot.start);
+                          const freeH     = Math.floor(slot.mins / 60);
+                          const freeM     = slot.mins % 60;
+                          const freeLabel = freeH > 0 ? `${freeH}h${freeM > 0 ? ` ${freeM}m` : ''} free` : `${freeM}m free`;
+                          const selected  = time === slotTime;
+                          return (
+                            <Chip
+                              key={i}
+                              icon={<AccessTimeIcon sx={{ fontSize: '0.9rem !important' }} />}
+                              label={`${slotTime} · ${freeLabel}`}
+                              onClick={() => setTime(slotTime)}
+                              variant={selected ? 'filled' : 'outlined'}
+                              size="small"
+                              sx={{
+                                fontWeight:      700,
+                                fontSize:        '0.82rem',
+                                borderColor:     selected ? '#55702C' : 'divider',
+                                backgroundColor: selected ? 'rgba(85,112,44,0.12)' : 'transparent',
+                                color:           selected ? '#55702C' : 'text.secondary',
+                                cursor:          'pointer',
+                              }}
+                            />
+                          );
+                        })}
+                      </Box>
+                    </Box>
+                  )}
+                  <Box>
+                    <Typography fontWeight={700}
+                      sx={{ fontSize: '0.88rem', mb: 0.75, textTransform: 'uppercase', letterSpacing: 0.5, color: 'text.secondary' }}>
+                      {slots.length > 0 ? 'Or pick a time' : 'What time?'}
+                    </Typography>
+                    <input
+                      type="time"
+                      value={time}
+                      onChange={e => setTime(e.target.value)}
+                      style={{
+                        fontSize: '1.1rem', fontWeight: 700,
+                        border: '1px solid #ddd', borderRadius: 6,
+                        padding: '10px 14px', width: '100%',
+                        boxSizing: 'border-box',
+                      }}
+                    />
+                  </Box>
+                </Box>
+              );
+            })()}
 
             {error && (
               <Typography color="error" sx={{ fontSize: '0.9rem' }}>{error}</Typography>

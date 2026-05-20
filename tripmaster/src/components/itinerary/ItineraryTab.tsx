@@ -30,17 +30,19 @@ import {
   freeSlots, totalFreeMinutes, freeLabelText, computeStopColumns,
 } from './Itinerary.helpers';
 import { HourRuler, GridLines, FreeGap, TravelConnector } from './Timelinechrome';
-import { StopBlock }      from './Stopblock';
-import { AddStopDrawer }  from './Addstopdrawer';
+import { StopBlock }            from './Stopblock';
+import { AddStopDrawer }        from './Addstopdrawer';
+import { FreeSuggestionsModal } from './FreeSuggestionsModal';
 
 interface Props {
-  tripId:      string;
-  startDate:   string;
-  endDate:     string;
-  fabTrigger?: { action: string; seq: number } | null;
+  tripId:           string;
+  startDate:        string;
+  endDate:          string;
+  fabTrigger?:      { action: string; seq: number } | null;
+  onSwitchToDiscover?: () => void;
 }
 
-export default function ItineraryTab({ tripId, startDate, endDate, fabTrigger }: Props) {
+export default function ItineraryTab({ tripId, startDate, endDate, fabTrigger, onSwitchToDiscover }: Props) {
   const theme    = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
 
@@ -61,6 +63,7 @@ export default function ItineraryTab({ tripId, startDate, endDate, fabTrigger }:
     type:      string;
     editStop?: Stop;
   }>({ open: false, time: '09:00', type: 'activity' });
+  const [suggestionSlot, setSuggestionSlot] = useState<{ start: number; mins: number } | null>(null);
 
   const nowLineRef = useRef<HTMLDivElement>(null);
 
@@ -723,15 +726,20 @@ export default function ItineraryTab({ tripId, startDate, endDate, fabTrigger }:
                   );
                 })()}
 
-                {freeSlots(activeDay.stops).map((slot, i) => (
-                  <FreeGap
-                    key={i}
-                    slot={slot}
-                    onQuickAdd={time => openDrawer(time)}
-                    pxPerMin={pxPerMin}
-                    isMobile={isMobile}
-                  />
-                ))}
+                {(() => {
+                  const slots      = freeSlots(activeDay.stops);
+                  const largestIdx = slots.reduce((best, s, i) => s.mins > (slots[best]?.mins ?? 0) ? i : best, 0);
+                  return slots.map((slot, i) => (
+                    <FreeGap
+                      key={i}
+                      slot={slot}
+                      onQuickAdd={time => openDrawer(time)}
+                      onDiscover={i === largestIdx && slot.mins >= 120 ? () => setSuggestionSlot(slot) : undefined}
+                      pxPerMin={pxPerMin}
+                      isMobile={isMobile}
+                    />
+                  ));
+                })()}
 
                 {(() => {
                   const cols = computeStopColumns(activeDay.stops);
@@ -796,6 +804,16 @@ export default function ItineraryTab({ tripId, startDate, endDate, fabTrigger }:
           </DndContext>
         </Paper>
       )}
+
+      {/* ── Free-slot suggestions modal ── */}
+      <FreeSuggestionsModal
+        open={!!suggestionSlot}
+        onClose={() => setSuggestionSlot(null)}
+        tripId={tripId}
+        slot={suggestionSlot}
+        onAdd={addStop}
+        onSwitchToDiscover={onSwitchToDiscover}
+      />
 
       {/* ── Add / edit drawer ── */}
       <AddStopDrawer

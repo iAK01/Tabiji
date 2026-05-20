@@ -66,12 +66,13 @@ export function GridLines({ pxPerMin }: { pxPerMin: number }) {
 
 // ─── Free time gap ─────────────────────────────────────────────────────────────
 export function FreeGap({
-  slot, onQuickAdd, pxPerMin, isMobile,
+  slot, onQuickAdd, onDiscover, pxPerMin, isMobile,
 }: {
-  slot:       { start: number; end: number; mins: number };
-  onQuickAdd: (time: string) => void;
-  pxPerMin:   number;
-  isMobile:   boolean;
+  slot:        { start: number; end: number; mins: number };
+  onQuickAdd:  (time: string) => void;
+  onDiscover?: () => void;
+  pxPerMin:    number;
+  isMobile:    boolean;
 }) {
   if (slot.mins < 30) return null;
 
@@ -80,6 +81,7 @@ export function FreeGap({
   const h      = Math.floor(slot.mins / 60);
   const m      = slot.mins % 60;
   const label  = h > 0 ? `${h}h${m > 0 ? ` ${m}m` : ''} free` : `${m}m free`;
+  const isLarge = slot.mins >= 120;
 
   return (
     <Box
@@ -87,8 +89,10 @@ export function FreeGap({
       sx={{
         position: 'absolute', left: 0, right: isMobile ? 2 : 4, top, height,
         display: 'flex', alignItems: 'center', justifyContent: 'center',
+        flexDirection: 'column', gap: 0.75,
         cursor: 'pointer', zIndex: 1, borderRadius: 1,
         '&:hover .free-label': { opacity: 1 },
+        '&:hover .discover-hint': { opacity: 1 },
         '&:active': { backgroundColor: alpha(D.green, 0.06) },
         '&:hover':  { backgroundColor: alpha(D.green, 0.04) },
       }}
@@ -111,6 +115,29 @@ export function FreeGap({
       >
         + {label}
       </Typography>
+
+      {isLarge && onDiscover && (
+        <Typography
+          className="discover-hint"
+          component="span"
+          onClick={e => { e.stopPropagation(); onDiscover(); }}
+          sx={{
+            opacity:         0,
+            transition:      'opacity 0.15s',
+            color:           D.terra,
+            fontSize:        '0.68rem',
+            fontFamily:      D.body,
+            fontWeight:      700,
+            letterSpacing:   '0.04em',
+            backgroundColor: 'rgba(196,113,74,0.08)',
+            border:          `1px dashed rgba(196,113,74,0.35)`,
+            px: 1.25, py: 0.35, borderRadius: 4,
+            cursor:          'pointer',
+          }}
+        >
+          See ideas →
+        </Typography>
+      )}
     </Box>
   );
 }
