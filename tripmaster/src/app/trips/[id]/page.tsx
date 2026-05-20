@@ -510,7 +510,7 @@ export default function TripPage() {
           </Toolbar>
 
           {/* Photo strip — all tabs except overview */}
-          {activeTab !== 0 && <Box sx={{ position: 'relative', height: { xs: 160, sm: 180, md: 200 }, overflow: 'hidden', bgcolor: D.navy }}>
+          {activeTab !== 0 && <Box sx={{ position: 'relative', height: { xs: 180, sm: 210, md: 240 }, overflow: 'hidden', bgcolor: D.navy }}>
 
             {/* Photo background */}
             {trip.coverPhotoUrl && (
@@ -530,29 +530,31 @@ export default function TripPage() {
                 : `linear-gradient(135deg, ${D.navy} 0%, #2a3558 100%)`,
             }} />
 
-            {/* Bottom-left: destination + name + meta */}
+            {/* Bottom-left: tab name dominant + trip name as context */}
             <Box sx={{
               position: 'absolute', bottom: 0, left: 0, right: 0,
               px: { xs: 2.5, sm: 3.5 }, pb: { xs: 1.75, sm: 2 },
             }}>
+              {/* Small: trip name as context breadcrumb */}
               <Typography sx={{
-                fontFamily: D.body, fontSize: '0.6rem', fontWeight: 800,
-                letterSpacing: '0.22em', textTransform: 'uppercase',
-                color: 'rgba(255,255,255,0.45)', mb: 0.5,
-                textShadow: '0 1px 4px rgba(0,0,0,0.5)',
+                fontFamily: D.body, fontSize: '0.62rem', fontWeight: 700,
+                letterSpacing: '0.18em', textTransform: 'uppercase',
+                color: 'rgba(255,255,255,0.38)', mb: 0.6,
+                textShadow: '0 1px 4px rgba(0,0,0,0.6)',
+                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
               }}>
-                {trip.destination?.city}{trip.destination?.country ? `, ${trip.destination.country}` : ''}
+                {trip.name}{trip.destination?.city ? ` · ${trip.destination.city}` : ''}
               </Typography>
 
+              {/* Large: current tab name */}
               <Typography sx={{
                 fontFamily: D.display,
-                fontSize: { xs: '1.6rem', sm: '2.2rem', md: '2.8rem' },
-                color: 'white', lineHeight: 1, letterSpacing: '-0.02em',
-                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                textShadow: '0 2px 12px rgba(0,0,0,0.6)',
+                fontSize: { xs: '3rem', sm: '4rem', md: '5rem' },
+                color: 'white', lineHeight: 1, letterSpacing: '-0.03em',
+                textShadow: '0 3px 20px rgba(0,0,0,0.7)',
                 mb: 0.75,
               }}>
-                {trip.name}
+                {TAB_CONFIG[activeTab]?.label}
               </Typography>
 
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
