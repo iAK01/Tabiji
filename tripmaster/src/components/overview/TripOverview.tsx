@@ -93,8 +93,8 @@ interface Props {
   coverPhotoUrl?:    string;
   coverPhotoCredit?: string;
   onNavigate: (tab: number) => void;
-  onRefreshPhoto?:  () => void;
-  tabsSlot?:        React.ReactNode;
+  onRefreshPhoto?: () => void;
+  tabsSlot?:       React.ReactNode;
 }
 
 // ─── Section colours ──────────────────────────────────────────────────────────
@@ -599,8 +599,8 @@ export default function TripOverview({ trip, coverPhotoUrl, coverPhotoCredit, on
           )}
         </Box>
 
-        {/* Refresh photo — after bottom content so it sits on top */}
-        {onRefreshPhoto && coverPhotoUrl && (
+        {/* Refresh photo */}
+        {onRefreshPhoto && (
           <IconButton onClick={onRefreshPhoto} size="small" sx={{
             position: 'absolute', bottom: { xs: 52, md: 60 }, right: 14,
             color: 'rgba(255,255,255,0.55)',

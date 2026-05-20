@@ -747,7 +747,7 @@ export default function TripPage() {
                 onNavigate={setActiveTab}
                 coverPhotoUrl={trip.coverPhotoUrl}
                 coverPhotoCredit={trip.coverPhotoCredit}
-                onRefreshPhoto={trip.coverPhotoUrl ? refreshPhoto : undefined}
+                onRefreshPhoto={refreshPhoto}
                 tabsSlot={
                   <Box sx={{
                     backgroundColor: D.navy,

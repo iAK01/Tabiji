@@ -13,9 +13,9 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
   const trip = await Trip.findOne({ _id: id, userId: user._id });
   if (!trip) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
-  const query = `${trip.destination.city} ${trip.destination.country}`;
+  const query = `${trip.destination.city} ${trip.destination.country} travel`;
   const res = await fetch(
-    `https://api.unsplash.com/search/photos?query=${encodeURIComponent(query)}&orientation=landscape&per_page=10&client_id=${process.env.NEXT_PUBLIC_UNSPLASH_ACCESS_KEY}`
+    `https://api.unsplash.com/search/photos?query=${encodeURIComponent(query)}&orientation=landscape&per_page=30&client_id=${process.env.NEXT_PUBLIC_UNSPLASH_ACCESS_KEY}`
   );
   const data = await res.json();
 
@@ -24,8 +24,8 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
   const photo = data.results[Math.floor(Math.random() * data.results.length)];
 
   const updated = await Trip.findByIdAndUpdate(id, {
-    coverPhotoUrl: photo.urls.regular,
-    coverPhotoThumb: photo.urls.thumb,
+    coverPhotoUrl:    photo.urls.regular,
+    coverPhotoThumb:  photo.urls.thumb,
     coverPhotoCredit: `${photo.user.name} on Unsplash`,
   }, { new: true });
 
