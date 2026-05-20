@@ -458,18 +458,18 @@ export default function TripOverview({ trip, coverPhotoUrl, coverPhotoCredit, on
           }} />
         )}
 
-        {/* Gradient — clear in middle, dark at top and heavy at bottom */}
+        {/* Gradient — strong dark band at top (covers AppBar), clear middle, heavy at bottom */}
         <Box sx={{
           position: 'absolute', inset: 0,
           background: coverPhotoUrl
-            ? 'linear-gradient(to bottom, rgba(10,16,44,0.55) 0%, rgba(10,16,44,0.05) 35%, rgba(10,16,44,0.75) 65%, rgba(10,16,44,0.98) 100%)'
+            ? 'linear-gradient(to bottom, rgba(10,16,44,0.82) 0%, rgba(10,16,44,0.45) 18%, rgba(10,16,44,0.05) 38%, rgba(10,16,44,0.78) 65%, rgba(10,16,44,0.98) 100%)'
             : 'none',
         }} />
 
-        {/* Weather — top left */}
+        {/* Weather — below the AppBar toolbar (~60px down) */}
         {weatherDay && (
           <Box sx={{
-            position: 'absolute', top: 16, left: { xs: 20, md: 28 },
+            position: 'absolute', top: { xs: 62, md: 66 }, left: { xs: 20, md: 28 },
             display: 'flex', alignItems: 'center', gap: 1,
           }}>
             <Typography sx={{ fontSize: { xs: '1.8rem', md: '2.2rem' }, lineHeight: 1 }}>
@@ -479,15 +479,15 @@ export default function TripOverview({ trip, coverPhotoUrl, coverPhotoCredit, on
               <Typography sx={{
                 fontFamily: D.display, fontSize: { xs: '1.6rem', md: '2rem' },
                 color: 'white', lineHeight: 1, letterSpacing: '-0.03em',
-                textShadow: '0 2px 12px rgba(0,0,0,0.6)',
+                textShadow: '0 2px 12px rgba(0,0,0,0.7)',
               }}>
                 {Math.round(weatherDay.tempAvg)}°
               </Typography>
               <Typography sx={{
                 fontFamily: D.body, fontSize: '0.6rem', fontWeight: 700,
                 letterSpacing: '0.08em', textTransform: 'uppercase',
-                color: 'rgba(255,255,255,0.55)',
-                textShadow: '0 1px 4px rgba(0,0,0,0.6)',
+                color: 'rgba(255,255,255,0.6)',
+                textShadow: '0 1px 4px rgba(0,0,0,0.7)',
               }}>
                 {trip.weather?.mode === 'historical' ? 'Avg · ' : ''}{weatherDay.condition}
               </Typography>
@@ -495,16 +495,16 @@ export default function TripOverview({ trip, coverPhotoUrl, coverPhotoCredit, on
           </Box>
         )}
 
-        {/* Refresh photo — top right */}
+        {/* Refresh photo — bottom right, above credit */}
         {onRefreshPhoto && coverPhotoUrl && (
           <IconButton onClick={onRefreshPhoto} size="small" sx={{
-            position: 'absolute', top: 14, right: 14,
-            color: 'rgba(255,255,255,0.65)',
-            bgcolor: 'rgba(0,0,0,0.28)',
+            position: 'absolute', bottom: { xs: 52, md: 60 }, right: 14,
+            color: 'rgba(255,255,255,0.55)',
+            bgcolor: 'rgba(0,0,0,0.25)',
             backdropFilter: 'blur(6px)',
-            '&:hover': { color: 'white', bgcolor: 'rgba(0,0,0,0.5)' },
+            '&:hover': { color: 'white', bgcolor: 'rgba(0,0,0,0.45)' },
           }}>
-            <RefreshIcon sx={{ fontSize: 16 }} />
+            <RefreshIcon sx={{ fontSize: 15 }} />
           </IconButton>
         )}
 
