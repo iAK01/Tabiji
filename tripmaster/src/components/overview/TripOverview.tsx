@@ -418,7 +418,10 @@ export default function TripOverview({ trip, coverPhotoUrl, coverPhotoCredit, on
     daysUntil <= 3 ? 'warn' : 'empty';
 
   // ── Weather ───────────────────────────────────────────────────────────────
-  const weatherDay = trip.weather?.days?.[0] ?? trip.weather?.currentWeather?.[0] ?? null;
+  // currentWeather is always today's live conditions — prefer it over trip forecast/historical
+  const currentWeatherDay = trip.weather?.currentWeather?.[0] ?? null;
+  const weatherDay        = currentWeatherDay ?? trip.weather?.days?.[0] ?? null;
+  const isLiveWeather     = !!currentWeatherDay;
 
   // ── Resources ─────────────────────────────────────────────────────────────
   const contacts   = resources.filter(r => r.resourceType === 'contact');
@@ -489,23 +492,10 @@ export default function TripOverview({ trip, coverPhotoUrl, coverPhotoCredit, on
                 color: 'rgba(255,255,255,0.6)',
                 textShadow: '0 1px 4px rgba(0,0,0,0.7)',
               }}>
-                {trip.weather?.mode === 'historical' ? 'Avg · ' : ''}{weatherDay.condition}
+                {isLiveWeather ? 'Now · ' : trip.weather?.mode === 'historical' ? 'Avg · ' : ''}{weatherDay.condition}
               </Typography>
             </Box>
           </Box>
-        )}
-
-        {/* Refresh photo — bottom right, above credit */}
-        {onRefreshPhoto && coverPhotoUrl && (
-          <IconButton onClick={onRefreshPhoto} size="small" sx={{
-            position: 'absolute', bottom: { xs: 52, md: 60 }, right: 14,
-            color: 'rgba(255,255,255,0.55)',
-            bgcolor: 'rgba(0,0,0,0.25)',
-            backdropFilter: 'blur(6px)',
-            '&:hover': { color: 'white', bgcolor: 'rgba(0,0,0,0.45)' },
-          }}>
-            <RefreshIcon sx={{ fontSize: 15 }} />
-          </IconButton>
         )}
 
         {/* Bottom content */}
@@ -586,7 +576,7 @@ export default function TripOverview({ trip, coverPhotoUrl, coverPhotoCredit, on
                 {new Date(trip.startDate).toLocaleDateString('en-IE', { day: 'numeric', month: 'short' })}
                 {' → '}
                 {new Date(trip.endDate).toLocaleDateString('en-IE', { day: 'numeric', month: 'short', year: 'numeric' })}
-                {trip.nights > 0 && ` · ${trip.nights}N`}
+                {trip.nights > 0 && ` · ${trip.nights} night${trip.nights === 1 ? '' : 's'}`}
               </Typography>
             </Box>
           </Box>
@@ -608,6 +598,19 @@ export default function TripOverview({ trip, coverPhotoUrl, coverPhotoCredit, on
             </Box>
           )}
         </Box>
+
+        {/* Refresh photo — after bottom content so it sits on top */}
+        {onRefreshPhoto && coverPhotoUrl && (
+          <IconButton onClick={onRefreshPhoto} size="small" sx={{
+            position: 'absolute', bottom: { xs: 52, md: 60 }, right: 14,
+            color: 'rgba(255,255,255,0.55)',
+            bgcolor: 'rgba(0,0,0,0.25)',
+            backdropFilter: 'blur(6px)',
+            '&:hover': { color: 'white', bgcolor: 'rgba(0,0,0,0.45)' },
+          }}>
+            <RefreshIcon sx={{ fontSize: 15 }} />
+          </IconButton>
+        )}
 
         {coverPhotoCredit && (
           <Typography sx={{
