@@ -446,7 +446,7 @@ export default function TripPage() {
         {/* ── AppBar ── */}
         <AppBar position="static" elevation={0} sx={{
           backgroundColor: D.navy,
-          borderBottom: `3px solid ${D.terra}`,
+          borderBottom: activeTab === 0 ? 'none' : `3px solid ${D.terra}`,
         }}>
 
           {/* Utility row */}
@@ -494,8 +494,8 @@ export default function TripPage() {
             </IconButton>
           </Toolbar>
 
-          {/* Hero name block */}
-          <Box sx={{ px: { xs: 2.5, sm: 3.5 }, pt: 0.5, pb: { xs: 2.5, sm: 3.5 }, display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
+          {/* Hero name block — hidden on overview tab (info lives in photo hero) */}
+          {activeTab !== 0 && <Box sx={{ px: { xs: 2.5, sm: 3.5 }, pt: 0.5, pb: { xs: 2.5, sm: 3.5 }, display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
 
             {/* Left: destination label + name + meta */}
             <Box sx={{ flex: 1, minWidth: 0 }}>
@@ -665,17 +665,18 @@ export default function TripPage() {
               </Box>
             )}
 
-          </Box>
+          </Box>}
         </AppBar>
 
         {/* ── Tabs ── */}
         <Box sx={{
-          backgroundColor: D.navy,
-          borderBottom: `1px solid ${alpha('#fff', 0.08)}`,
+          backgroundColor: activeTab === 0 ? alpha(D.navy, 0.72) : D.navy,
+          backdropFilter: activeTab === 0 ? 'blur(12px)' : 'none',
+          borderBottom: activeTab === 0 ? `1px solid ${alpha('#fff', 0.06)}` : `1px solid ${alpha('#fff', 0.08)}`,
           position: 'sticky',
           top: 0,
           zIndex: 100,
-          boxShadow: `0 4px 20px ${alpha(D.navy, 0.35)}`,
+          boxShadow: activeTab === 0 ? 'none' : `0 4px 20px ${alpha(D.navy, 0.35)}`,
         }}>
           <Container maxWidth="lg" disableGutters>
             <Tabs
