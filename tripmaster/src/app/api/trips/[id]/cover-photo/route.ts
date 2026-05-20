@@ -21,7 +21,9 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
 
   if (!data.results?.length) return NextResponse.json({ error: 'No photos found' }, { status: 404 });
 
-  const photo = data.results[Math.floor(Math.random() * data.results.length)];
+  const widePhotos = data.results.filter((p: any) => p.width / p.height >= 1.5);
+  const pool = widePhotos.length > 0 ? widePhotos : data.results;
+  const photo = pool[Math.floor(Math.random() * pool.length)];
 
   const updated = await Trip.findByIdAndUpdate(id, {
     coverPhotoUrl:    photo.urls.regular,

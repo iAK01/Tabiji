@@ -509,91 +509,72 @@ export default function TripPage() {
             </IconButton>
           </Toolbar>
 
-          {/* Hero name block — hidden on overview tab (info lives in photo hero) */}
-          {activeTab !== 0 && <Box sx={{ px: { xs: 2.5, sm: 3.5 }, pt: 0.5, pb: { xs: 2.5, sm: 3.5 }, display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
+          {/* Photo strip — all tabs except overview */}
+          {activeTab !== 0 && <Box sx={{ position: 'relative', height: { xs: 160, sm: 180, md: 200 }, overflow: 'hidden', bgcolor: D.navy }}>
 
-            {/* Left: destination label + name + meta */}
-            <Box sx={{ flex: 1, minWidth: 0 }}>
+            {/* Photo background */}
+            {trip.coverPhotoUrl && (
+              <Box sx={{
+                position: 'absolute', inset: 0,
+                backgroundImage: `url(${trip.coverPhotoUrl})`,
+                backgroundSize: 'cover',
+                backgroundPosition: 'center 40%',
+              }} />
+            )}
 
-              {/* Destination — subdued overline */}
+            {/* Gradient overlay */}
+            <Box sx={{
+              position: 'absolute', inset: 0,
+              background: trip.coverPhotoUrl
+                ? 'linear-gradient(to bottom, rgba(10,16,44,0.35) 0%, rgba(10,16,44,0.75) 60%, rgba(10,16,44,0.95) 100%)'
+                : `linear-gradient(135deg, ${D.navy} 0%, #2a3558 100%)`,
+            }} />
+
+            {/* Bottom-left: destination + name + meta */}
+            <Box sx={{
+              position: 'absolute', bottom: 0, left: 0, right: 0,
+              px: { xs: 2.5, sm: 3.5 }, pb: { xs: 1.75, sm: 2 },
+            }}>
               <Typography sx={{
-                fontFamily: D.body,
-                color: alpha('#fff', 0.45),
-                fontSize: '0.62rem',
-                fontWeight: 800,
-                letterSpacing: '0.24em',
-                textTransform: 'uppercase',
-                mb: 1,
+                fontFamily: D.body, fontSize: '0.6rem', fontWeight: 800,
+                letterSpacing: '0.22em', textTransform: 'uppercase',
+                color: 'rgba(255,255,255,0.45)', mb: 0.5,
+                textShadow: '0 1px 4px rgba(0,0,0,0.5)',
               }}>
                 {trip.destination?.city}{trip.destination?.country ? `, ${trip.destination.country}` : ''}
               </Typography>
 
-              {/* Trip name — Archivo Black, massive, tight */}
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0 }}>
-                {/* Terracotta rule — same accent as dashboard hero */}
-                <Box sx={{
-                  width: 4, alignSelf: 'stretch',
-                  backgroundColor: D.terra,
-                  borderRadius: 1,
-                  mr: { xs: 2, sm: 2.5 },
-                  flexShrink: 0,
-                }} />
-                <Typography sx={{
-                  fontFamily: D.display,
-                  color: 'white',
-                  fontSize: { xs: '2.6rem', sm: '3.8rem', md: '4.8rem' },
-                  lineHeight: 1.0,
-                  letterSpacing: '-0.03em',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: { xs: 'normal', sm: 'nowrap' },
-                }}>
-                  {trip.name}
-                </Typography>
-              </Box>
+              <Typography sx={{
+                fontFamily: D.display,
+                fontSize: { xs: '1.6rem', sm: '2.2rem', md: '2.8rem' },
+                color: 'white', lineHeight: 1, letterSpacing: '-0.02em',
+                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                textShadow: '0 2px 12px rgba(0,0,0,0.6)',
+                mb: 0.75,
+              }}>
+                {trip.name}
+              </Typography>
 
-              {/* Meta row — nights · type · days away */}
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mt: 1.75, ml: { xs: '28px', sm: '36px' } }}>
-                <Typography sx={{
-                  fontFamily: D.body,
-                  color: alpha('#fff', 0.45),
-                  fontSize: '0.72rem',
-                  fontWeight: 600,
-                  letterSpacing: '0.04em',
-                }}>
-                  {trip.nights} nights
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+                <Typography sx={{ fontFamily: D.body, fontSize: '0.7rem', fontWeight: 600, color: 'rgba(255,255,255,0.45)', letterSpacing: '0.04em' }}>
+                  {trip.nights} night{trip.nights === 1 ? '' : 's'}
                 </Typography>
-                <Box sx={{ width: 3, height: 3, borderRadius: '50%', backgroundColor: alpha('#fff', 0.2) }} />
-                <Typography sx={{
-                  fontFamily: D.body,
-                  color: alpha('#fff', 0.45),
-                  fontSize: '0.72rem',
-                  fontWeight: 600,
-                  textTransform: 'capitalize',
-                  letterSpacing: '0.04em',
-                }}>
+                <Box sx={{ width: 3, height: 3, borderRadius: '50%', bgcolor: 'rgba(255,255,255,0.2)' }} />
+                <Typography sx={{ fontFamily: D.body, fontSize: '0.7rem', fontWeight: 600, color: 'rgba(255,255,255,0.45)', textTransform: 'capitalize', letterSpacing: '0.04em' }}>
                   {trip.tripType}
                 </Typography>
                 {daysUntil !== null && daysUntil > 0 && !isActive && (
                   <>
-                    <Box sx={{ width: 3, height: 3, borderRadius: '50%', backgroundColor: alpha('#fff', 0.2) }} />
-                    <Typography sx={{
-                      fontFamily: D.display,
-                      color: D.terra,
-                      fontSize: '0.82rem',
-                      letterSpacing: '-0.01em',
-                    }}>
+                    <Box sx={{ width: 3, height: 3, borderRadius: '50%', bgcolor: 'rgba(255,255,255,0.2)' }} />
+                    <Typography sx={{ fontFamily: D.display, color: D.terra, fontSize: '0.78rem', letterSpacing: '-0.01em' }}>
                       {daysUntil === 1 ? 'Tomorrow' : `${daysUntil} days away`}
                     </Typography>
                   </>
                 )}
                 {isActive && (
                   <>
-                    <Box sx={{ width: 3, height: 3, borderRadius: '50%', backgroundColor: alpha('#fff', 0.2) }} />
-                    <Box sx={{
-                      backgroundColor: D.green, borderRadius: 10,
-                      px: 1, py: 0.2,
-                    }}>
+                    <Box sx={{ width: 3, height: 3, borderRadius: '50%', bgcolor: 'rgba(255,255,255,0.2)' }} />
+                    <Box sx={{ bgcolor: D.green, borderRadius: 10, px: 1, py: 0.2 }}>
                       <Typography sx={{ fontFamily: D.body, color: 'white', fontSize: '0.6rem', fontWeight: 800, letterSpacing: '0.12em', textTransform: 'uppercase' }}>
                         On trip
                       </Typography>
@@ -603,80 +584,35 @@ export default function TripPage() {
               </Box>
             </Box>
 
-            {/* Right: hero dashboard — weather + local time */}
+            {/* Top-right: weather + local time */}
             {(heroWeatherDay || localTime) && (
               <Box sx={{
-                display: { xs: 'none', sm: 'flex' },
-                flexDirection: 'column',
-                alignItems: 'flex-end',
-                justifyContent: 'space-between',
-                alignSelf: 'stretch',
-                flexShrink: 0,
-                gap: 2.5,
-                pl: { sm: 3, md: 5 },
-                ml: { sm: 2, md: 4 },
-                borderLeft: `1px solid ${alpha('#fff', 0.1)}`,
-                minWidth: { sm: 130, md: 170 },
+                position: 'absolute', top: 14, right: { xs: 16, sm: 24 },
+                display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 1.5,
               }}>
-
-                {/* Weather widget */}
                 {heroWeatherDay && (
                   <Box sx={{ textAlign: 'right' }}>
-                    <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 0.75, mb: 0.4 }}>
-                      {heroWeatherIcon(heroWeatherDay.condition, { fontSize: '1.6rem', color: alpha('#fff', 0.5) })}
-                      <Typography sx={{
-                        fontFamily: D.display,
-                        color: 'white',
-                        fontSize: { sm: '1.9rem', md: '2.5rem' },
-                        lineHeight: 1,
-                        letterSpacing: '-0.03em',
-                      }}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 0.5, mb: 0.3 }}>
+                      {heroWeatherIcon(heroWeatherDay.condition, { fontSize: '1.2rem', color: 'rgba(255,255,255,0.55)' })}
+                      <Typography sx={{ fontFamily: D.display, color: 'white', fontSize: '1.4rem', lineHeight: 1, letterSpacing: '-0.03em', textShadow: '0 1px 6px rgba(0,0,0,0.5)' }}>
                         {Math.round(heroWeatherDay.tempAvg)}°
                       </Typography>
                     </Box>
-                    <Typography sx={{
-                      fontFamily: D.body,
-                      color: alpha('#fff', 0.38),
-                      fontSize: '0.57rem',
-                      fontWeight: 700,
-                      letterSpacing: '0.16em',
-                      textTransform: 'uppercase',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                      maxWidth: 170,
-                    }}>
+                    <Typography sx={{ fontFamily: D.body, color: 'rgba(255,255,255,0.4)', fontSize: '0.55rem', fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', textShadow: '0 1px 4px rgba(0,0,0,0.5)' }}>
                       {heroWeatherDay.condition}
                     </Typography>
                   </Box>
                 )}
-
-                {/* Time widget */}
                 {localTime && (
                   <Box sx={{ textAlign: 'right' }}>
-                    <Typography sx={{
-                      fontFamily: D.display,
-                      color: 'white',
-                      fontSize: { sm: '1.5rem', md: '1.9rem' },
-                      lineHeight: 1,
-                      letterSpacing: '-0.02em',
-                      mb: 0.4,
-                    }}>
+                    <Typography sx={{ fontFamily: D.display, color: 'white', fontSize: '1.2rem', lineHeight: 1, letterSpacing: '-0.02em', mb: 0.3, textShadow: '0 1px 6px rgba(0,0,0,0.5)' }}>
                       {localTime}
                     </Typography>
-                    <Typography sx={{
-                      fontFamily: D.body,
-                      color: alpha('#fff', 0.38),
-                      fontSize: '0.57rem',
-                      fontWeight: 700,
-                      letterSpacing: '0.16em',
-                      textTransform: 'uppercase',
-                    }}>
+                    <Typography sx={{ fontFamily: D.body, color: 'rgba(255,255,255,0.4)', fontSize: '0.55rem', fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase' }}>
                       {heroTimeDiffLabel}
                     </Typography>
                   </Box>
                 )}
-
               </Box>
             )}
 
