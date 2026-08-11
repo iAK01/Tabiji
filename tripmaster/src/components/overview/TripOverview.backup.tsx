@@ -35,7 +35,6 @@ import NavigateButton           from '@/components/ui/NavigateButton';
 import DocumentViewer, { type ViewableFile } from '@/components/files/DocumentViewer';
 import PreTripAppsCard from '@/components/overview/PreTripAppsCard';
 import { saveTripCache, getTripCache } from '@/lib/offline/db';
-import { totalFreeMinutes, freeLabelText } from '@/components/itinerary/Itinerary.helpers';
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 
@@ -66,14 +65,6 @@ interface WeatherDay {
   windKph:      number;
 }
 
-interface GroundTransportLeg {
-  status:     'sorted' | 'gap' | 'no_data' | 'not_applicable';
-  firstStop?: { name: string; address?: string };
-  steps?:     { label: string; description: string; method?: string; searchTerms?: string | null; estimatedDuration?: string | null }[];
-  isMultiCity?: boolean;
-  sortedDetail?: string;
-}
-
 interface Props {
   trip: {
     _id:              string;
@@ -87,12 +78,6 @@ interface Props {
     endDate:          string;
     nights:           number;
     dismissedChecks?: string[];
-    groundTransport?: {
-      preDeparture?:  GroundTransportLeg;
-      arrivalLeg?:    GroundTransportLeg;
-      returnLeg?:     GroundTransportLeg;
-      homeCloseout?:  GroundTransportLeg;
-    } | null;
     weather?: {
       mode?:         'forecast' | 'historical' | 'current';
       summary?:      string;
@@ -141,17 +126,14 @@ const toDialDigits = (phone: string) => phone.replace(/\D/g, '');
 
 // ─── Shared atoms ─────────────────────────────────────────────────────────────
 
-const SectionTag = ({ children, color = D.muted, icon }: { children: React.ReactNode; color?: string; icon?: React.ReactNode }) => (
-  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
-    {icon && <Box sx={{ color, display: 'flex', alignItems: 'center', flexShrink: 0 }}>{icon}</Box>}
-    <Typography sx={{
-      fontFamily: D.body, fontSize: '0.72rem', fontWeight: 700,
-      letterSpacing: '0.10em', textTransform: 'uppercase',
-      color,
-    }}>
-      {children}
-    </Typography>
-  </Box>
+const SectionTag = ({ children, color = D.muted }: { children: React.ReactNode; color?: string }) => (
+  <Typography sx={{
+    fontFamily: D.body, fontSize: '0.6rem', fontWeight: 700,
+    letterSpacing: '0.12em', textTransform: 'uppercase',
+    color, display: 'block',
+  }}>
+    {children}
+  </Typography>
 );
 
 
@@ -431,86 +413,6 @@ export default function TripOverview({ trip, coverPhotoUrl, coverPhotoCredit, on
   const packPct       = items.length > 0 ? Math.round((packedItems / items.length) * 100) : 0;
   const preTravelItems = items.filter((i: any) => !i.packed && i.preTravelAction);
 
-  const allLogisticsItems = [...flights, ...accommodation, ...venues, ...nonFlights];
-  const confirmedLogisticsCount = allLogisticsItems.filter((i: any) => ['confirmed', 'booked'].includes(i.status)).length;
-
-  const groundTransportLegs = trip.groundTransport
-    ? ([
-        trip.groundTransport.preDeparture,
-        trip.groundTransport.arrivalLeg,
-        trip.groundTransport.returnLeg,
-        trip.groundTransport.homeCloseout,
-      ] as (GroundTransportLeg | undefined)[])
-        .filter((leg): leg is GroundTransportLeg => !!leg && leg.status !== 'no_data' && leg.status !== 'not_applicable')
-    : [];
-  const transportGaps   = groundTransportLegs.filter(l => l.status === 'gap').length;
-  const transportSorted = groundTransportLegs.filter(l => l.status === 'sorted').length;
-
-  const totalLogisticsCount    = allLogisticsItems.length + groundTransportLegs.length;
-  const resolvedLogisticsCount = confirmedLogisticsCount + transportSorted;
-  const logisticsPct           = totalLogisticsCount > 0 ? Math.round((resolvedLogisticsCount / totalLogisticsCount) * 100) : 0;
-  const pendingLogisticsCount  = (allLogisticsItems.length - confirmedLogisticsCount) + transportGaps;
-
-  const avgStops     = totalDays > 0 ? totalStops / totalDays : 0;
-  const scheduleDesc = avgStops >= 6 ? 'Packed schedule' : avgStops >= 4 ? 'Busy schedule' : avgStops >= 2 ? 'Balanced schedule' : 'Light schedule';
-
-  // Top 3 days with the most unscheduled time — same gap logic as the timeline chip
-  const freeDays: { dateLabel: string; freeLabel: string; mins: number }[] = (itinerary?.days ?? [])
-    .filter((d: any) => d.date && (d.stops?.length ?? 0) > 0)
-    .map((d: any) => ({
-      dateLabel: new Date(d.date.split('T')[0] + 'T12:00:00').toLocaleDateString('en-IE', { weekday: 'short', day: 'numeric', month: 'short' }),
-      freeLabel: freeLabelText(d.stops ?? []),
-      mins:      totalFreeMinutes(d.stops ?? []) as number,
-    }))
-    .sort((a: { mins: number }, b: { mins: number }) => b.mins - a.mins)
-    .slice(0, 3);
-
-  const pendingBookingItems = allLogisticsItems.filter((i: any) => !['confirmed', 'booked'].includes(i.status));
-
-  function parseDurMins(dur: string | null | undefined): number {
-    if (!dur) return 0;
-    const h = parseInt(dur.match(/(\d+)\s*h/)?.[1] ?? '0');
-    const m = parseInt(dur.match(/(\d+)\s*m/)?.[1] ?? '0');
-    return h * 60 + m;
-  }
-
-  function gapLabel(leg: GroundTransportLeg | undefined | null, fallback: string): string | null {
-    if (!leg || leg.status !== 'gap') return null;
-    // Procedural steps (customs clearance, schedule notes) have searchTerms: null — skip them.
-    const bookable = (leg.steps ?? []).filter(s => s.searchTerms);
-    if (!bookable.length) return leg.firstStop?.name ? `Get to ${leg.firstStop.name}` : fallback;
-    // For multi-city legs there are multiple bookable steps (airport rail + intercity train + last-mile taxi).
-    // The intercity hop is always the longest — sort by estimatedDuration and take the top one.
-    if (leg.isMultiCity && bookable.length > 1) {
-      const sorted = [...bookable].sort((a, b) => parseDurMins(b.estimatedDuration) - parseDurMins(a.estimatedDuration));
-      return sorted[0].label;
-    }
-    return bookable[0].label;
-  }
-
-  const groundGapLabels: string[] = [
-    gapLabel(trip.groundTransport?.preDeparture, 'Transfer to departure airport'),
-    gapLabel(trip.groundTransport?.arrivalLeg,   'Transfer from arrival airport'),
-    gapLabel(trip.groundTransport?.returnLeg,    'Return journey transport'),
-    gapLabel(trip.groundTransport?.homeCloseout, 'Transfer home from airport'),
-  ].filter((x): x is string => x !== null);
-  const pendingItemLabels: string[] = [
-    ...pendingBookingItems.map((item: any) => {
-      if (item.type === 'flight') {
-        const fn    = item.details?.flightNumber ?? '';
-        const from  = (item.departureLocation ?? '').split('—')[0].trim();
-        const to    = (item.arrivalLocation   ?? '').split('—')[0].trim();
-        const route = from && to ? `${from} → ${to}` : (from || to);
-        return [fn, route].filter(Boolean).join(' · ');
-      }
-      if (item.name) return item.name as string;
-      const from = item.departureLocation ?? '';
-      const to   = item.arrivalLocation   ?? '';
-      return from && to ? `${from} → ${to}` : (from || to || (item.type as string));
-    }),
-    ...groundGapLabels,
-  ];
-
   const packingStatus: 'ok' | 'warn' | 'empty' =
     items.length === 0 ? 'empty' :
     packPct === 100 ? 'ok' :
@@ -521,16 +423,6 @@ export default function TripOverview({ trip, coverPhotoUrl, coverPhotoCredit, on
   const currentWeatherDay = trip.weather?.currentWeather?.[0] ?? null;
   const weatherDay        = currentWeatherDay ?? trip.weather?.days?.[0] ?? null;
   const isLiveWeather     = !!currentWeatherDay;
-
-  const isHistorical = trip.weather?.mode === 'historical';
-  const weatherDays: WeatherDay[] = trip.weather?.days ?? [];
-  const displayHigh = isHistorical && weatherDays.length
-    ? Math.round(weatherDays.reduce((s, d) => s + d.tempMax, 0) / weatherDays.length)
-    : weatherDay?.tempMax ?? 0;
-  const displayLow = isHistorical && weatherDays.length
-    ? Math.round(weatherDays.reduce((s, d) => s + d.tempMin, 0) / weatherDays.length)
-    : weatherDay?.tempMin ?? 0;
-  const tripMonth = new Date(trip.startDate).toLocaleDateString('en-IE', { month: 'long' });
 
   // ── Resources ─────────────────────────────────────────────────────────────
   const contacts   = resources.filter(r => r.resourceType === 'contact');
@@ -735,394 +627,564 @@ export default function TripOverview({ trip, coverPhotoUrl, coverPhotoCredit, on
 
       {tabsSlot}
 
-      {/* ── Editorial overview ── */}
-      <Box sx={{ bgcolor: D.bg, pt: { xs: 3, md: 4 }, pb: 10 }}>
-        <Box sx={{ maxWidth: '1200px', mx: 'auto', px: { xs: 2.5, sm: 4 } }}>
+      {/* ── Cards sheet ── */}
+      <Box sx={{
+        bgcolor: D.bg,
+        borderRadius: 0,
+        mt: 0,
+        position: 'relative', zIndex: 1,
+        pt: { xs: 3, md: 4 },
+      }}>
+    <Box sx={{ maxWidth: '1200px', mx: 'auto', px: { xs: 2, sm: 3 }, display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(2, 1fr)' }, gap: { xs: 1.5, sm: 2 }, alignItems: 'start' }}>
 
-          {/* What's Next */}
-          {isActive && nextStop && (
-            <Paper elevation={0} sx={{
-              mb: 3, overflow: 'hidden',
-              border: '1.5px solid',
-              borderColor: isUrgent ? 'rgba(237,108,2,0.5)' : 'rgba(107,124,92,0.4)',
-              borderRadius: '12px',
-            }}>
-              <Box sx={{ height: 4, background: isUrgent ? 'linear-gradient(90deg, #ed6c02, #fbbf24)' : 'linear-gradient(90deg, #6B7C5C, #9aad89)' }} />
-              <Box sx={{ p: 2.5, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 2 }}>
-                <Box sx={{ minWidth: 0 }}>
-                  <SectionTag color={isUrgent ? '#ed6c02' : D.green}>
-                    {isUrgent ? `Starting in ${minsUntilNext} min` : `Next up · ${nextStartMins !== null ? formatTime(nextStartMins) : ''}`}
-                  </SectionTag>
-                  <Typography sx={{ fontFamily: D.display, fontSize: '1.4rem', color: D.navy, lineHeight: 1.1, letterSpacing: '-0.02em', mt: 0.5 }}>
-                    {nextStop.name}
+      {/* ── What's Next (active trips only) ── */}
+      {isActive && nextStop && (
+        <Paper elevation={0} sx={{
+          gridColumn: { md: '1 / -1' },
+          overflow: 'hidden',
+          border: '1.5px solid',
+          borderColor: isUrgent ? 'rgba(237,108,2,0.5)' : 'rgba(107,124,92,0.4)',
+          borderRadius: '12px',
+          position: 'relative',
+        }}>
+          {/* Urgency colour bar */}
+          <Box sx={{
+            height: 4,
+            background: isUrgent
+              ? 'linear-gradient(90deg, #ed6c02, #fbbf24)'
+              : 'linear-gradient(90deg, #6B7C5C, #9aad89)',
+          }} />
+
+          <Box sx={{ p: 2.5, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 2 }}>
+            <Box sx={{ minWidth: 0 }}>
+              <SectionTag color={isUrgent ? '#ed6c02' : D.green}>
+                {isUrgent
+                  ? `Starting in ${minsUntilNext} min`
+                  : `Next up · ${nextStartMins !== null ? formatTime(nextStartMins) : ''}`}
+              </SectionTag>
+              <Typography sx={{
+                fontFamily: D.display, fontSize: '1.4rem', color: D.navy,
+                lineHeight: 1.1, letterSpacing: '-0.02em', mt: 0.5,
+              }}>
+                {nextStop.name}
+              </Typography>
+              {nextStop.reference && (
+                <Box sx={{
+                  display: 'inline-flex', alignItems: 'center',
+                  mt: 0.75, px: 1.25, py: 0.4,
+                  borderRadius: '6px',
+                  backgroundColor: 'rgba(3,105,161,0.10)',
+                  border: '1.5px solid rgba(3,105,161,0.3)',
+                }}>
+                  <Typography sx={{
+                    fontFamily: D.body, fontSize: '0.9rem', fontWeight: 800,
+                    color: '#0369a1', letterSpacing: '0.03em', lineHeight: 1.3,
+                  }}>
+                    {nextStop.reference}
                   </Typography>
-                  {nextStop.reference && (
-                    <Box sx={{ display: 'inline-flex', alignItems: 'center', mt: 0.75, px: 1.25, py: 0.4, borderRadius: '6px', backgroundColor: 'rgba(3,105,161,0.10)', border: '1.5px solid rgba(3,105,161,0.3)' }}>
-                      <Typography sx={{ fontFamily: D.body, fontSize: '0.9rem', fontWeight: 800, color: '#0369a1', letterSpacing: '0.03em', lineHeight: 1.3 }}>
-                        {nextStop.reference}
-                      </Typography>
-                    </Box>
-                  )}
-                  {nextStop.address && (
-                    <Typography sx={{ fontFamily: D.body, fontSize: '0.78rem', color: D.muted, mt: 0.5 }}>{nextStop.address}</Typography>
-                  )}
-                  {nextStop.notes && (
-                    <Typography sx={{ fontFamily: D.body, fontSize: '0.75rem', color: D.muted, mt: 0.4, fontStyle: 'italic' }}>{nextStop.notes}</Typography>
-                  )}
                 </Box>
-                <NavigateButton
-                  destination={{ name: nextStop.name, address: nextStop.address, coordinates: nextStop.coordinates ?? null }}
-                  suggestedMode="walking" variant="button" label="Navigate"
-                  sx={{ flexShrink: 0 }}
-                />
+              )}
+              {nextStop.address && (
+                <Typography sx={{ fontFamily: D.body, fontSize: '0.78rem', color: D.muted, mt: 0.5 }}>
+                  {nextStop.address}
+                </Typography>
+              )}
+              {nextStop.notes && (
+                <Typography sx={{ fontFamily: D.body, fontSize: '0.75rem', color: D.muted, mt: 0.4, fontStyle: 'italic' }}>
+                  {nextStop.notes}
+                </Typography>
+              )}
+            </Box>
+            <NavigateButton
+              destination={{ name: nextStop.name, address: nextStop.address, coordinates: nextStop.coordinates ?? null }}
+              suggestedMode="walking" variant="button" label="Navigate"
+              sx={{ flexShrink: 0 }}
+            />
+          </Box>
+        </Paper>
+      )}
+
+      {isActive && !nextStop && (
+        <Paper elevation={0} sx={{
+          gridColumn: { md: '1 / -1' },
+          p: 2.5, border: '1.5px solid rgba(107,124,92,0.4)', borderRadius: '12px',
+          bgcolor: 'rgba(107,124,92,0.04)',
+        }}>
+          <Typography sx={{ fontFamily: D.display, fontSize: '0.9rem', color: D.green }}>
+            Nothing more scheduled today
+          </Typography>
+          <Typography sx={{ fontFamily: D.body, fontSize: '0.78rem', color: D.muted, mt: 0.4 }}>
+            Check the itinerary tab for tomorrow.
+          </Typography>
+        </Paper>
+      )}
+
+      {loading ? (
+        <Box sx={{ gridColumn: { md: '1 / -1' }, display: 'flex', justifyContent: 'center', py: 4 }}>
+          <CircularProgress size={26} />
+        </Box>
+      ) : (
+        <>
+          {/* ── LOGISTICS ── */}
+          {!dismissed.includes('logistics') && (
+            <Strip
+              icon={<FlightIcon sx={{ fontSize: 20 }} />}
+              label="Logistics"
+              tab={1}
+              onNavigate={onNavigate}
+              status={logisticsOverall}
+              sectionKey="logistics"
+            >
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+                {!dismissed.includes('flights') && (
+                  <StatusRow
+                    icon={<FlightIcon sx={{ fontSize: 14 }} />}
+                    label="Flights"
+                    level={flightsStatus}
+                    onDismiss={flightsStatus === 'empty' ? () => toggleDismiss('flights') : undefined}
+                    value={
+                      flights.length === 0 ? 'Not added' :
+                      flights.map((f: any) => f.details?.flightNumber || f.flightNumber || f.details?.airline || 'Flight').join(' · ')
+                      + (flights.every((f: any) => ['confirmed','booked'].includes(f.status)) ? ' · Booked' : ` · ${flights.filter((f: any) => ['confirmed','booked'].includes(f.status)).length}/${flights.length} booked`)
+                    }
+                  />
+                )}
+                {!dismissed.includes('hotel') && (
+                  <StatusRow
+                    icon={<HotelIcon sx={{ fontSize: 14 }} />}
+                    label="Hotel"
+                    level={accomStatus}
+                    onDismiss={accomStatus === 'empty' ? () => toggleDismiss('hotel') : undefined}
+                    value={
+                      accommodation.length === 0 ? 'Not added' :
+                      accommodation.map((a: any) => a.name).join(', ')
+                      + (accommodation.every((a: any) => ['confirmed','booked'].includes(a.status)) ? ' · Booked' : ' · Not confirmed')
+                    }
+                  />
+                )}
+                {!dismissed.includes('venues') && (
+                  <StatusRow
+                    icon={<TheaterComedyIcon sx={{ fontSize: 14 }} />}
+                    label="Venues"
+                    level={venueStatus}
+                    onDismiss={venueStatus === 'empty' ? () => toggleDismiss('venues') : undefined}
+                    value={
+                      venues.length === 0 ? 'None added' :
+                      venues.map((v: any) => v.name).join(', ')
+                      + (venues.every((v: any) => ['confirmed','booked'].includes(v.status)) ? ' · Booked' : ' · Not booked')
+                    }
+                  />
+                )}
+                {nonFlights.length > 0 && (
+                  <StatusRow
+                    icon={<DirectionsCarIcon sx={{ fontSize: 14 }} />}
+                    label="Transport"
+                    level={transportStatus}
+                    value={
+                      nonFlights.map((t: any) => {
+                        const l = t.details?.vehicle || t.details?.rentalCompany || t.type;
+                        return l.charAt(0).toUpperCase() + l.slice(1);
+                      }).join(' · ')
+                      + (nonFlights.every((t: any) => t.status === 'confirmed') ? ' · Confirmed' : ' · Not confirmed')
+                    }
+                  />
+                )}
               </Box>
-            </Paper>
+            </Strip>
           )}
 
-          {isActive && !nextStop && (
-            <Box sx={{ mb: 3, p: 2.5, border: '1.5px solid rgba(107,124,92,0.4)', borderRadius: '12px', bgcolor: 'rgba(107,124,92,0.04)' }}>
-              <Typography sx={{ fontFamily: D.display, fontSize: '0.9rem', color: D.green }}>Nothing more scheduled today</Typography>
-              <Typography sx={{ fontFamily: D.body, fontSize: '0.78rem', color: D.muted, mt: 0.4 }}>Check the itinerary tab for tomorrow.</Typography>
-            </Box>
-          )}
-
-          {loading ? (
-            <Box sx={{ display: 'flex', justifyContent: 'center', py: 6 }}>
-              <CircularProgress size={26} />
-            </Box>
-          ) : (
-            <Box sx={{
-              display: { xs: 'block', md: 'grid' },
-              gridTemplateColumns: { md: '1fr 1fr' },
-            }}>
-
-              {/* ── LOGISTICS ── */}
-              {!dismissed.includes('logistics') && (
-                <Box sx={{
-                  borderBottom: `1px solid ${D.rule}`,
-                  borderRight: { md: `1px solid ${D.rule}` },
-                  pr: { md: 6 },
-                }}>
-                  <Box
-                    onClick={() => onNavigate(1)}
-                    sx={{ py: { xs: 2.5, md: 3.5 }, display: 'flex', alignItems: 'center', gap: 2, cursor: 'pointer', transition: 'opacity 0.15s', '&:hover': { opacity: 0.7 } }}
-                  >
-                    <Box sx={{ flex: 1 }}>
-                      <SectionTag icon={<FlightIcon sx={{ fontSize: 14 }} />}>Logistics</SectionTag>
-                      {allLogisticsItems.length === 0 ? (
-                        <Typography sx={{ fontFamily: D.body, fontSize: '0.82rem', color: 'text.disabled', mt: 0.75 }}>Nothing added yet</Typography>
-                      ) : (
-                        <Box sx={{ mt: 0.75 }}>
-                          <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1.5 }}>
+          {/* ── ITINERARY ── */}
+          {!dismissed.includes('itinerary') && (
+            <Strip
+              icon={<MapIcon sx={{ fontSize: 20 }} />}
+              label="Itinerary"
+              tab={2}
+              onNavigate={onNavigate}
+              status={totalStops > 0 ? 'ok' : 'empty'}
+              onDismiss={totalStops === 0 ? () => toggleDismiss('itinerary') : undefined}
+              sectionKey="itinerary"
+            >
+              {totalStops === 0 ? (
+                <Typography sx={{ fontFamily: D.body, fontSize: '0.82rem', color: 'text.disabled' }}>
+                  No itinerary added yet
+                </Typography>
+              ) : isActive && itinerary?.days ? (
+                (() => {
+                  const todayStr   = new Date().toISOString().split('T')[0];
+                  const todayDay   = itinerary.days.find((d: any) => new Date(d.date).toISOString().split('T')[0] === todayStr);
+                  const todayStops = todayDay?.stops ?? [];
+                  const nowMins    = new Date().getHours() * 60 + new Date().getMinutes();
+                  const remaining  = todayStops.filter((s: any) => {
+                    const m = stopStartMinutes(s);
+                    return m === null || m >= nowMins;
+                  });
+                  return remaining.length > 0 ? (
+                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.75 }}>
+                      {remaining.slice(0, 3).map((s: any, idx: number) => {
+                        const mins = stopStartMinutes(s);
+                        return (
+                          <Box key={idx} sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
                             <Typography sx={{
-                              fontFamily: D.display, fontSize: { xs: '3rem', md: '4rem' },
-                              lineHeight: 1, letterSpacing: '-0.04em',
-                              color: logisticsPct === 100 ? '#22c55e' : logisticsPct >= 75 ? '#f59e0b' : D.navy,
+                              fontFamily: D.display, fontSize: '0.78rem', color: D.terra,
+                              width: 36, flexShrink: 0, lineHeight: 1,
                             }}>
-                              {logisticsPct}%
+                              {mins !== null ? formatTime(mins) : '—'}
                             </Typography>
-                            <Typography sx={{ fontFamily: D.body, fontSize: '0.8rem', color: D.muted }}>
-                              {pendingLogisticsCount > 0 ? `${pendingLogisticsCount} still to sort` : 'all confirmed'}
+                            <Typography sx={{
+                              fontFamily: D.body, fontSize: '0.84rem', fontWeight: 600,
+                              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: D.navy,
+                            }}>
+                              {s.name}
                             </Typography>
                           </Box>
-                          {pendingItemLabels.length > 0 && (
-                            <Box sx={{ mt: 1, display: 'flex', flexDirection: 'column', gap: 0.4 }}>
-                              {pendingItemLabels.map((label, i) => (
-                                <Typography key={i} sx={{ fontFamily: D.body, fontSize: '0.78rem', color: D.muted, lineHeight: 1.5 }}>
-                                  · {label}
-                                </Typography>
-                              ))}
-                            </Box>
-                          )}
-                        </Box>
-                      )}
-                    </Box>
-                    <ChevronRightIcon sx={{ fontSize: 20, color: 'rgba(29,38,66,0.2)', flexShrink: 0 }} />
-                  </Box>
-                </Box>
-              )}
-
-              {/* ── ITINERARY ── right col on desktop */}
-              {!dismissed.includes('itinerary') && (
-                <Box sx={{ borderBottom: `1px solid ${D.rule}`, pl: { md: 6 } }}>
-                  <Box
-                    onClick={() => onNavigate(2)}
-                    sx={{ py: { xs: 2.5, md: 3.5 }, display: 'flex', alignItems: 'flex-start', gap: 2, cursor: 'pointer', transition: 'opacity 0.15s', '&:hover': { opacity: 0.7 } }}
-                  >
-                    <Box sx={{ flex: 1 }}>
-                      <SectionTag icon={<MapIcon sx={{ fontSize: 14 }} />}>Itinerary</SectionTag>
-                      {totalStops === 0 ? (
-                        <Typography sx={{ fontFamily: D.body, fontSize: '0.82rem', color: 'text.disabled', mt: 0.75 }}>
-                          No itinerary added yet
+                        );
+                      })}
+                      {remaining.length > 3 && (
+                        <Typography sx={{ fontFamily: D.body, fontSize: '0.72rem', color: D.muted, mt: 0.25 }}>
+                          +{remaining.length - 3} more today
                         </Typography>
-                      ) : isActive && itinerary?.days ? (
-                        (() => {
-                          const todayStr   = new Date().toISOString().split('T')[0];
-                          const todayDay   = itinerary.days.find((d: any) => new Date(d.date).toISOString().split('T')[0] === todayStr);
-                          const todayStops = todayDay?.stops ?? [];
-                          const nowMins    = new Date().getHours() * 60 + new Date().getMinutes();
-                          const remaining  = todayStops.filter((s: any) => {
-                            const m = stopStartMinutes(s);
-                            return m === null || m >= nowMins;
-                          });
-                          return remaining.length > 0 ? (
-                            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.75, mt: 0.75 }}>
-                              {remaining.slice(0, 3).map((s: any, idx: number) => {
-                                const mins = stopStartMinutes(s);
-                                return (
-                                  <Box key={idx} sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-                                    <Typography sx={{ fontFamily: D.display, fontSize: '0.78rem', color: D.terra, width: 36, flexShrink: 0, lineHeight: 1 }}>
-                                      {mins !== null ? formatTime(mins) : '—'}
-                                    </Typography>
-                                    <Typography sx={{ fontFamily: D.body, fontSize: '0.84rem', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: D.navy }}>
-                                      {s.name}
-                                    </Typography>
-                                  </Box>
-                                );
-                              })}
-                              {remaining.length > 3 && (
-                                <Typography sx={{ fontFamily: D.body, fontSize: '0.72rem', color: D.muted }}>
-                                  +{remaining.length - 3} more today
-                                </Typography>
-                              )}
-                            </Box>
-                          ) : (
-                            <Typography sx={{ fontFamily: D.body, fontSize: '0.82rem', color: D.muted, mt: 0.75 }}>
-                              Nothing more scheduled today
-                            </Typography>
-                          );
-                        })()
-                      ) : (
-                        <Box sx={{ mt: 0.75 }}>
-                          <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1, flexWrap: 'wrap' }}>
-                            <Typography sx={{ fontFamily: D.display, fontSize: { xs: '2.2rem', md: '3rem' }, color: D.navy, letterSpacing: '-0.03em', lineHeight: 1 }}>
-                              {totalDays}
-                            </Typography>
-                            <Typography sx={{ fontFamily: D.body, fontSize: '0.78rem', color: D.muted }}>
-                              day{totalDays !== 1 ? 's' : ''}
-                            </Typography>
-                            <Typography sx={{ fontFamily: D.display, fontSize: { xs: '2.2rem', md: '3rem' }, color: D.navy, letterSpacing: '-0.03em', lineHeight: 1, ml: 1 }}>
-                              {totalStops}
-                            </Typography>
-                            <Typography sx={{ fontFamily: D.body, fontSize: '0.78rem', color: D.muted }}>
-                              stop{totalStops !== 1 ? 's' : ''}
-                            </Typography>
-                          </Box>
-                          <Typography sx={{ fontFamily: D.body, fontSize: '0.78rem', fontWeight: 600, color: D.muted, mt: 0.5, letterSpacing: '0.01em' }}>
-                            {scheduleDesc}
-                          </Typography>
-                          {freeDays.length > 0 && !isPast && (
-                            <Box sx={{ mt: 1 }}>
-                              {freeDays.map((fd, i) => (
-                                <Box key={i} sx={{ display: 'flex', alignItems: 'baseline', gap: 1, mt: 0.4 }}>
-                                  <Typography sx={{ fontFamily: D.body, fontSize: '0.78rem', color: D.navy, fontWeight: 600, minWidth: 100, flexShrink: 0 }}>
-                                    {fd.dateLabel}
-                                  </Typography>
-                                  <Typography sx={{ fontFamily: D.body, fontSize: '0.78rem', color: D.muted }}>
-                                    {fd.freeLabel}
-                                  </Typography>
-                                </Box>
-                              ))}
-                              <Typography
-                                component="div"
-                                onClick={(e: React.MouseEvent) => { e.stopPropagation(); onNavigate(4); }}
-                                sx={{ fontFamily: D.body, fontSize: '0.78rem', fontWeight: 700, color: D.terra, cursor: 'pointer', mt: 1 }}
-                              >
-                                Find something to do → Discover
-                              </Typography>
-                            </Box>
-                          )}
-                        </Box>
                       )}
                     </Box>
-                    <ChevronRightIcon sx={{ fontSize: 20, color: 'rgba(29,38,66,0.2)', flexShrink: 0, mt: 2.5 }} />
-                  </Box>
+                  ) : (
+                    <Typography sx={{ fontFamily: D.body, fontSize: '0.82rem', color: D.muted }}>
+                      Nothing more scheduled today
+                    </Typography>
+                  );
+                })()
+              ) : (
+                <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1 }}>
+                  <Typography sx={{ fontFamily: D.display, fontSize: '1.6rem', color: D.navy, letterSpacing: '-0.03em', lineHeight: 1 }}>
+                    {totalDays}
+                  </Typography>
+                  <Typography sx={{ fontFamily: D.body, fontSize: '0.78rem', color: D.muted }}>
+                    day{totalDays !== 1 ? 's' : ''} planned
+                  </Typography>
+                  <Typography sx={{ fontFamily: D.display, fontSize: '1.6rem', color: D.navy, letterSpacing: '-0.03em', lineHeight: 1, ml: 1 }}>
+                    {totalStops}
+                  </Typography>
+                  <Typography sx={{ fontFamily: D.body, fontSize: '0.78rem', color: D.muted }}>
+                    stop{totalStops !== 1 ? 's' : ''}
+                  </Typography>
                 </Box>
               )}
+            </Strip>
+          )}
 
-              {/* ── WEATHER ── full width on desktop */}
-              {trip.weather && weatherDay && !dismissed.includes('weather') && (
-                <Box sx={{
-                  gridColumn: { md: '1 / -1' },
-                  borderBottom: `1px solid ${D.rule}`,
-                  borderTop: { md: `1px solid ${D.rule}` },
-                }}>
-                  <Box
-                    onClick={() => onNavigate(5)}
-                    sx={{ py: { xs: 2.5, md: 3.5 }, cursor: 'pointer', transition: 'opacity 0.15s', '&:hover': { opacity: 0.7 } }}
-                  >
-                    <SectionTag icon={<WbSunnyIcon sx={{ fontSize: 14 }} />}>Weather</SectionTag>
-                    <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: { xs: 2, md: 4 }, mt: 1 }}>
-                      <Typography sx={{ fontSize: { xs: '2.2rem', md: '3.5rem' }, lineHeight: 1, flexShrink: 0 }}>
-                        {weatherDay.icon}
+          {/* ── WEATHER ── */}
+          {trip.weather && !dismissed.includes('weather') && (
+            <Strip
+              icon={<WbSunnyIcon sx={{ fontSize: 20 }} />}
+              label="Weather"
+              tab={5}
+              onNavigate={onNavigate}
+              status="ok"
+              sectionKey="weather"
+            >
+              {weatherDay ? (() => {
+                const isHistorical = trip.weather?.mode === 'historical';
+                const days = trip.weather?.days ?? [];
+                const avgHigh = isHistorical && days.length
+                  ? Math.round(days.reduce((s, d) => s + d.tempMax, 0) / days.length)
+                  : weatherDay.tempMax;
+                const avgLow = isHistorical && days.length
+                  ? Math.round(days.reduce((s, d) => s + d.tempMin, 0) / days.length)
+                  : weatherDay.tempMin;
+                const tripMonth = new Date(trip.startDate).toLocaleDateString('en-IE', { month: 'long' });
+
+                return (
+                  <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 2 }}>
+                    <Box sx={{ flexShrink: 0, textAlign: 'center' }}>
+                      <Typography sx={{ fontSize: '2rem', lineHeight: 1 }}>{weatherDay.icon}</Typography>
+                      <Typography sx={{ fontFamily: D.display, fontSize: '1.4rem', color: D.navy, lineHeight: 1, letterSpacing: '-0.03em', mt: 0.5 }}>
+                        {avgHigh}°
                       </Typography>
-                      <Box sx={{ flex: 1, minWidth: 0 }}>
-                        <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1.5, flexWrap: 'wrap' }}>
-                          <Typography sx={{
-                            fontFamily: D.display, fontSize: { xs: '2.8rem', md: '4.5rem' },
-                            lineHeight: 1, letterSpacing: '-0.04em', color: D.navy,
-                          }}>
-                            {Math.round(weatherDay.tempAvg)}°
-                          </Typography>
+                      <Typography sx={{ fontFamily: D.body, fontSize: '0.7rem', color: D.muted }}>
+                        {avgLow}° low
+                      </Typography>
+                    </Box>
+
+                    <Box sx={{ width: '1px', bgcolor: D.rule, alignSelf: 'stretch', mx: 0.5 }} />
+
+                    <Box sx={{ flex: 1, minWidth: 0 }}>
+                      {isHistorical && (
+                        <Typography sx={{ fontFamily: D.body, fontSize: '0.65rem', color: '#C9521B', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', mb: 0.3 }}>
+                          Historical avg · {tripMonth}
+                        </Typography>
+                      )}
+                      <Typography sx={{ fontFamily: D.display, fontSize: '0.95rem', color: D.navy, lineHeight: 1.2 }}>
+                        {isHistorical ? 'Typical conditions' : weatherDay.condition}
+                      </Typography>
+                      {trip.weather?.summary && (
+                        <Typography sx={{ fontFamily: D.body, fontSize: '0.75rem', color: D.muted, mt: 0.5 }}>
+                          {trip.weather.summary}
+                        </Typography>
+                      )}
+                      {trip.weather?.packingNotes?.[0] && (
+                        <Typography sx={{ fontFamily: D.body, fontSize: '0.75rem', color: D.green, fontWeight: 600, mt: 0.4 }}>
+                          {isHistorical
+                            ? trip.weather.packingNotes[0]
+                                .replace('Rain expected on', 'Historically rains on')
+                                .replace('One rainy day expected', 'Typically one rainy day')
+                            : trip.weather.packingNotes[0]}
+                        </Typography>
+                      )}
+                    </Box>
+                  </Box>
+                );
+              })() : trip.weather?.summary ? (
+                <Typography sx={{ fontFamily: D.body, fontSize: '0.82rem', color: D.muted }}>{trip.weather.summary}</Typography>
+              ) : (
+                <Typography sx={{ fontFamily: D.body, fontSize: '0.82rem', color: 'text.disabled' }}>No forecast data yet</Typography>
+              )}
+            </Strip>
+          )}
+
+          {/* ── PACKING ── */}
+          {!dismissed.includes('packing') && (
+            <Strip
+              icon={<BackpackIcon sx={{ fontSize: 20 }} />}
+              label="Packing"
+              tab={3}
+              onNavigate={onNavigate}
+              status={packingStatus}
+              onDismiss={items.length === 0 ? () => toggleDismiss('packing') : undefined}
+              sectionKey="packing"
+            >
+              {items.length === 0 ? (
+                <Typography sx={{ fontFamily: D.body, fontSize: '0.82rem', color: 'text.disabled' }}>
+                  No list generated yet — tap to create one
+                </Typography>
+              ) : (
+                <Box>
+                  <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1, mb: 1.5 }}>
+                    <Typography sx={{ fontFamily: D.display, fontSize: '1.6rem', color: packPct === 100 ? 'success.main' : D.navy, letterSpacing: '-0.03em', lineHeight: 1 }}>
+                      {packPct}%
+                    </Typography>
+                    <Typography sx={{ fontFamily: D.body, fontSize: '0.78rem', color: D.muted }}>
+                      packed · {packedItems} of {items.length} items
+                    </Typography>
+                  </Box>
+                  <LinearProgress variant="determinate" value={packPct} sx={{
+                    height: 5, borderRadius: 3, backgroundColor: D.rule,
+                    '& .MuiLinearProgress-bar': { borderRadius: 3, backgroundColor: packPct === 100 ? 'success.main' : '#8b5e6a' },
+                  }} />
+                  {preTravelItems.length > 0 && packPct < 100 && (() => {
+                    const toCharge = preTravelItems.filter((i: any) => i.preTravelNote?.toLowerCase().includes('charge'));
+                    const toAction = preTravelItems.filter((i: any) => !i.preTravelNote?.toLowerCase().includes('charge'));
+                    return (
+                      <Box sx={{ mt: 1.5, display: 'flex', flexDirection: 'column', gap: 1 }}>
+                        {toCharge.length > 0 && (
                           <Box>
-                            <Typography sx={{ fontFamily: D.display, fontSize: { xs: '0.9rem', md: '1.15rem' }, color: D.navy, lineHeight: 1.2 }}>
-                              {isHistorical ? 'Typical conditions' : weatherDay.condition}
+                            <Typography sx={{ fontFamily: D.body, fontSize: '0.68rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: '#b45309', mb: 0.25 }}>
+                              Charge before packing
                             </Typography>
-                            <Typography sx={{ fontFamily: D.body, fontSize: { xs: '0.72rem', md: '0.8rem' }, color: D.muted }}>
-                              {displayLow}° low · {displayHigh}° high{isHistorical && ` · Historical avg · ${tripMonth}`}
+                            <Typography sx={{ fontFamily: D.body, fontSize: '0.75rem', color: D.muted }}>
+                              {toCharge.map((i: any) => i.name).join(' · ')}
                             </Typography>
                           </Box>
-                        </Box>
-                        {trip.weather?.summary && (
-                          <Typography sx={{ fontFamily: D.body, fontSize: { xs: '0.8rem', md: '0.9rem' }, color: D.muted, mt: 1, lineHeight: 1.6 }}>
-                            {trip.weather.summary}
-                          </Typography>
                         )}
-                        {trip.weather?.packingNotes?.[0] && (
-                          <Typography sx={{ fontFamily: D.body, fontSize: { xs: '0.78rem', md: '0.88rem' }, color: D.green, fontWeight: 600, mt: 0.5 }}>
-                            {isHistorical
-                              ? trip.weather.packingNotes[0].replace('Rain expected on', 'Historically rains on').replace('One rainy day expected', 'Typically one rainy day')
-                              : trip.weather.packingNotes[0]}
-                          </Typography>
+                        {toAction.length > 0 && (
+                          <Box>
+                            <Typography sx={{ fontFamily: D.body, fontSize: '0.68rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: D.navy, mb: 0.25 }}>
+                              Before you go
+                            </Typography>
+                            <Typography sx={{ fontFamily: D.body, fontSize: '0.75rem', color: D.muted }}>
+                              {toAction.map((i: any) => i.name).join(' · ')}
+                            </Typography>
+                          </Box>
                         )}
                       </Box>
-                    </Box>
-                  </Box>
+                    );
+                  })()}
                 </Box>
               )}
+            </Strip>
+          )}
 
-              {/* ── PACKING ── left col on desktop */}
-              {!dismissed.includes('packing') && (
-                <Box sx={{
-                  borderBottom: `1px solid ${D.rule}`,
-                  borderRight: { md: `1px solid ${D.rule}` },
-                  pr: { md: 6 },
-                }}>
-                  <Box
-                    onClick={() => onNavigate(3)}
-                    sx={{ py: { xs: 2.5, md: 3.5 }, display: 'flex', alignItems: 'flex-start', gap: 2, cursor: 'pointer', transition: 'opacity 0.15s', '&:hover': { opacity: 0.7 } }}
-                  >
-                    <Box sx={{ flex: 1 }}>
-                      <SectionTag icon={<BackpackIcon sx={{ fontSize: 14 }} />}>Packing</SectionTag>
-                      {items.length === 0 ? (
-                        <Typography sx={{ fontFamily: D.body, fontSize: '0.82rem', color: 'text.disabled', mt: 0.75 }}>
-                          No list generated yet — tap to create one
+          {/* ── RESOURCES ── */}
+          {hasResources && !dismissed.includes('resources') && (
+            <Strip
+              icon={<FolderOpenIcon sx={{ fontSize: 20 }} />}
+              label="Resources"
+              tab={7}
+              onNavigate={onNavigate}
+              status={contacts.length > 0 ? 'ok' : 'empty'}
+              sectionKey="resources"
+            >
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+                {contacts.length > 0 && (
+                  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                    {contacts.map((c: any) => (
+                      <Box key={c._id} sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+                        <PersonIcon sx={{ fontSize: 14, color: 'text.disabled', flexShrink: 0 }} />
+                        <Typography sx={{ fontFamily: D.display, fontSize: '0.85rem', color: D.navy, mr: 0.5 }}>{c.name}</Typography>
+                        <Typography sx={{ fontFamily: D.body, fontSize: '0.72rem', color: D.muted, mr: 'auto', textTransform: 'capitalize' }}>
+                          {c.type?.replace(/_/g, ' ')}
                         </Typography>
-                      ) : (
-                        <Box sx={{ mt: 0.75 }}>
-                          <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1.5 }}>
-                            <Typography sx={{
-                              fontFamily: D.display, fontSize: { xs: '3rem', md: '4rem' },
-                              lineHeight: 1, letterSpacing: '-0.04em',
-                              color: packPct === 100 ? '#22c55e' : packingStatus === 'warn' ? '#f59e0b' : D.navy,
-                            }}>
-                              {packPct}%
-                            </Typography>
-                            <Typography sx={{ fontFamily: D.body, fontSize: '0.78rem', color: D.muted }}>
-                              {packedItems} of {items.length} items
-                            </Typography>
-                          </Box>
-                          <LinearProgress variant="determinate" value={packPct} sx={{
-                            mt: 1.5, height: 3, borderRadius: 2,
-                            backgroundColor: 'rgba(29,38,66,0.08)',
-                            '& .MuiLinearProgress-bar': { borderRadius: 2, backgroundColor: packPct === 100 ? '#22c55e' : D.navy },
-                          }} />
-                          {preTravelItems.length > 0 && packPct < 100 && (() => {
-                            const toCharge = preTravelItems.filter((i: any) => i.preTravelNote?.toLowerCase().includes('charge'));
-                            const toAction = preTravelItems.filter((i: any) => !i.preTravelNote?.toLowerCase().includes('charge'));
-                            return (
-                              <Box sx={{ mt: 2, display: 'flex', flexDirection: 'column', gap: 1.5 }}>
-                                {toCharge.length > 0 && (
-                                  <Box>
-                                    <Typography sx={{ fontFamily: D.body, fontSize: '0.65rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: '#b45309', mb: 0.4 }}>
-                                      Charge before packing
-                                    </Typography>
-                                    <Typography sx={{ fontFamily: D.body, fontSize: '0.82rem', color: D.muted, lineHeight: 1.7 }}>
-                                      {toCharge.map((i: any) => i.name).join('  ·  ')}
-                                    </Typography>
-                                  </Box>
-                                )}
-                                {toAction.length > 0 && (
-                                  <Box>
-                                    <Typography sx={{ fontFamily: D.body, fontSize: '0.65rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: D.muted, mb: 0.4 }}>
-                                      Before you go
-                                    </Typography>
-                                    <Typography sx={{ fontFamily: D.body, fontSize: '0.82rem', color: D.muted, lineHeight: 1.7 }}>
-                                      {toAction.map((i: any) => i.name).join('  ·  ')}
-                                    </Typography>
-                                  </Box>
-                                )}
-                              </Box>
-                            );
-                          })()}
+                        <Box sx={{ display: 'flex', gap: 0.5, flexShrink: 0, flexWrap: 'wrap' }}>
+                          {c.phone && (
+                            <Button component="a" href={`tel:${c.phone}`} size="small" startIcon={<PhoneIcon sx={{ fontSize: '0.85rem !important' }} />}
+                              variant="outlined" onClick={(e: React.MouseEvent) => e.stopPropagation()}
+                              sx={{ fontSize: '0.72rem', fontFamily: D.body, fontWeight: 700, py: 0.35, px: 0.9, minHeight: 28, borderColor: alpha(D.green, 0.4), color: D.green, '&:hover': { borderColor: D.green, backgroundColor: alpha(D.green, 0.06) } }}>
+                              Call
+                            </Button>
+                          )}
+                          {c.phone && (
+                            <Button component="a" href={`sms:${c.phone}`} size="small" startIcon={<SmsIcon sx={{ fontSize: '0.85rem !important' }} />}
+                              variant="outlined" onClick={(e: React.MouseEvent) => e.stopPropagation()}
+                              sx={{ fontSize: '0.72rem', fontFamily: D.body, fontWeight: 700, py: 0.35, px: 0.9, minHeight: 28, borderColor: alpha('#64748b', 0.4), color: '#64748b', '&:hover': { borderColor: '#64748b', backgroundColor: alpha('#64748b', 0.06) } }}>
+                              SMS
+                            </Button>
+                          )}
+                          {c.phone && (
+                            <Button component="a" href={`https://wa.me/${toDialDigits(c.phone)}`}
+                              target="_blank" rel="noopener noreferrer" size="small"
+                              startIcon={<WhatsAppIcon sx={{ fontSize: '0.85rem !important' }} />}
+                              variant="outlined" onClick={(e: React.MouseEvent) => e.stopPropagation()}
+                              sx={{ fontSize: '0.72rem', fontFamily: D.body, fontWeight: 700, py: 0.35, px: 0.9, minHeight: 28, borderColor: alpha('#25D366', 0.5), color: '#25D366', '&:hover': { borderColor: '#25D366', backgroundColor: alpha('#25D366', 0.06) } }}>
+                              WA
+                            </Button>
+                          )}
+                          {c.email && (
+                            <Button component="a" href={`mailto:${c.email}`} size="small" startIcon={<EmailIcon sx={{ fontSize: '0.85rem !important' }} />}
+                              variant="outlined" onClick={(e: React.MouseEvent) => e.stopPropagation()}
+                              sx={{ fontSize: '0.72rem', fontFamily: D.body, fontWeight: 700, py: 0.35, px: 0.9, minHeight: 28, borderColor: alpha('#0891b2', 0.4), color: '#0891b2', '&:hover': { borderColor: '#0891b2', backgroundColor: alpha('#0891b2', 0.06) } }}>
+                              Email
+                            </Button>
+                          )}
                         </Box>
-                      )}
-                    </Box>
-                    <ChevronRightIcon sx={{ fontSize: 20, color: 'rgba(29,38,66,0.2)', flexShrink: 0, mt: 2.5 }} />
+                      </Box>
+                    ))}
                   </Box>
-                </Box>
-              )}
+                )}
 
-              {/* ── RESOURCES ── right col on desktop */}
-              {hasResources && !dismissed.includes('resources') && (
-                <Box sx={{ borderBottom: `1px solid ${D.rule}`, pl: { md: 6 } }}>
-                  <Box
-                    onClick={() => onNavigate(7)}
-                    sx={{ py: { xs: 2, md: 3.5 }, display: 'flex', alignItems: 'center', gap: 2, cursor: 'pointer', transition: 'opacity 0.15s', '&:hover': { opacity: 0.7 } }}
-                  >
-                    <Box sx={{ flex: 1 }}>
-                      <SectionTag icon={<FolderOpenIcon sx={{ fontSize: 14 }} />}>Resources</SectionTag>
-                      <Typography sx={{ fontFamily: D.body, fontSize: { xs: '0.85rem', md: '1rem' }, color: D.muted, mt: 0.5 }}>
-                        {[
-                          docCount > 0 && `${docCount} doc${docCount !== 1 ? 's' : ''}`,
-                          contacts.length > 0 && `${contacts.length} contact${contacts.length !== 1 ? 's' : ''}`,
-                          keyLinks.length > 0 && `${keyLinks.length} link${keyLinks.length !== 1 ? 's' : ''}`,
-                          notes.length > 0 && `${notes.length} note${notes.length !== 1 ? 's' : ''}`,
-                        ].filter(Boolean).join('  ·  ')}
-                      </Typography>
-                    </Box>
-                    <ChevronRightIcon sx={{ fontSize: 20, color: 'rgba(29,38,66,0.2)', flexShrink: 0 }} />
+                {contacts.length > 0 && (keyLinks.length > 0 || docCount > 0 || notes.length > 0) && (
+                  <Divider sx={{ borderColor: D.rule }} />
+                )}
+
+                {keyLinks.length > 0 && (
+                  <Box sx={{ display: 'flex', gap: 0.75, flexWrap: 'wrap' }}>
+                    {keyLinks.map((l: any) => (
+                      <Chip
+                        key={l._id}
+                        icon={<LinkIcon sx={{ fontSize: '0.8rem !important' }} />}
+                        label={l.name}
+                        size="small"
+                        component="a"
+                        href={l.linkUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={(e: React.MouseEvent) => e.stopPropagation()}
+                        clickable
+                        sx={{ fontSize: '0.72rem', fontFamily: D.body, fontWeight: 600, height: 24 }}
+                      />
+                    ))}
                   </Box>
-                </Box>
-              )}
+                )}
 
-              {/* ── BEFORE YOU GO APPS ── full width */}
-              {['idea', 'planning', 'confirmed'].includes(trip.status) && daysUntil > 0 && trip.destination.countryCode && (
-                <Box sx={{ gridColumn: { md: '1 / -1' } }}>
-                  <PreTripAppsCard
-                    countryCode={trip.destination.countryCode}
-                    cityName={trip.destination.city}
-                  />
-                </Box>
-              )}
+                {/* ── Ticket / document quick-access cards ── */}
+                {ticketFiles.length > 0 && (
+                  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.75 }}>
+                    {ticketFiles.map((f: any) => {
+                      const TicketIcon = TICKET_ICONS[f.type] ?? FlightIcon;
+                      return (
+                        <Box
+                          key={f._id}
+                          onClick={() => setViewerFile({ _id: f._id, name: f.name, mimeType: f.mimeType, gcsUrl: f.gcsUrl })}
+                          sx={{
+                            display: 'flex', alignItems: 'center', gap: 1.25,
+                            px: 1.5, py: 1,
+                            borderRadius: '8px',
+                            border: '1px solid rgba(8,145,178,0.2)',
+                            backgroundColor: 'rgba(8,145,178,0.04)',
+                            cursor: 'pointer',
+                            transition: 'background-color 0.15s',
+                            '&:hover': { backgroundColor: 'rgba(8,145,178,0.09)' },
+                          }}
+                        >
+                          <TicketIcon sx={{ fontSize: 16, color: '#0891b2', flexShrink: 0 }} />
+                          <Typography sx={{
+                            fontFamily: D.body, fontWeight: 700, fontSize: '0.82rem',
+                            color: D.navy, flex: 1,
+                            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                          }}>
+                            {f.name}
+                          </Typography>
+                          <VisibilityIcon sx={{ fontSize: 14, color: '#0891b2', flexShrink: 0 }} />
+                        </Box>
+                      );
+                    })}
+                  </Box>
+                )}
 
-              {/* Dismissed row */}
-              {dismissed.length > 0 && (
-                <Box sx={{ gridColumn: { md: '1 / -1' }, display: 'flex', alignItems: 'center', gap: 1, pt: 3 }}>
-                  <Typography sx={{ fontFamily: D.body, fontSize: '0.72rem', color: D.muted, flexGrow: 1 }}>
-                    {dismissed.length} section{dismissed.length !== 1 ? 's' : ''} hidden
-                  </Typography>
-                  <Button
-                    size="small"
-                    startIcon={<UndoIcon sx={{ fontSize: '0.8rem !important' }} />}
-                    onClick={() => {
-                      setDismissed([]);
-                      fetch(`/api/trips/${trip._id}`, {
-                        method: 'PUT',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ dismissedChecks: [] }),
-                      });
-                    }}
-                    sx={{ fontFamily: D.body, fontSize: '0.72rem', color: D.muted, py: 0.25 }}
-                  >
-                    Restore all
-                  </Button>
+                <Box sx={{ display: 'flex', gap: 1.5, flexWrap: 'wrap' }}>
+                  {docCount > ticketFiles.length && (
+                    <Typography sx={{ fontFamily: D.body, fontSize: '0.78rem', color: D.muted }}>
+                      {docCount - ticketFiles.length} other document{docCount - ticketFiles.length !== 1 ? 's' : ''}
+                    </Typography>
+                  )}
+                  {notes.length > 0 && (
+                    <Typography sx={{ fontFamily: D.body, fontSize: '0.78rem', color: D.muted }}>
+                      {notes.length} note{notes.length !== 1 ? 's' : ''}
+                    </Typography>
+                  )}
                 </Box>
-              )}
+              </Box>
+            </Strip>
+          )}
 
+          {!hasResources && !dismissed.includes('resources') && (
+            <Strip
+              icon={<FolderOpenIcon sx={{ fontSize: 20 }} />}
+              label="Resources"
+              tab={7}
+              onNavigate={onNavigate}
+              status="empty"
+              onDismiss={() => toggleDismiss('resources')}
+              sectionKey="resources"
+            >
+              <Typography sx={{ fontFamily: D.body, fontSize: '0.82rem', color: 'text.disabled' }}>
+                No contacts, notes, links or documents yet
+              </Typography>
+            </Strip>
+          )}
+
+          {/* ── Before you go (pairs with Resources in the grid) ── */}
+          {['idea', 'planning', 'confirmed'].includes(trip.status) && daysUntil > 0 && trip.destination.countryCode && (
+            <PreTripAppsCard
+              countryCode={trip.destination.countryCode}
+              cityName={trip.destination.city}
+            />
+          )}
+
+          {/* ── Dismissed row ── */}
+          {dismissed.length > 0 && (
+            <Box sx={{ gridColumn: { md: '1 / -1' }, display: 'flex', alignItems: 'center', gap: 1, px: 0.5 }}>
+              <Typography sx={{ fontFamily: D.body, fontSize: '0.72rem', color: D.muted, flexGrow: 1 }}>
+                {dismissed.length} section{dismissed.length !== 1 ? 's' : ''} hidden
+              </Typography>
+              <Button
+                size="small"
+                startIcon={<UndoIcon sx={{ fontSize: '0.8rem !important' }} />}
+                onClick={() => {
+                  setDismissed([]);
+                  fetch(`/api/trips/${trip._id}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ dismissedChecks: [] }),
+                  });
+                }}
+                sx={{ fontFamily: D.body, fontSize: '0.72rem', color: D.muted, py: 0.25 }}
+              >
+                Restore all
+              </Button>
             </Box>
           )}
-        </Box>
+
+        </>
+      )}
+
+    </Box>
       </Box>
       <DocumentViewer file={viewerFile} onClose={() => setViewerFile(null)} />
     </>

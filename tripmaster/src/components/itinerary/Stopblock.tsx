@@ -34,9 +34,10 @@ interface Props {
   colIndex?:    number;
   totalCols?:   number;
   linkedFiles?: LinkedFile[];
+  startHour?:   number;
 }
 
-export function StopBlock({ stop, onDelete, onClick, onResize, pxPerMin, isMobile, colIndex = 0, totalCols = 1, linkedFiles = [] }: Props) {
+export function StopBlock({ stop, onDelete, onClick, onResize, pxPerMin, isMobile, colIndex = 0, totalCols = 1, linkedFiles = [], startHour = DAY_START_HOUR }: Props) {
   const startMin = stopStartMinutes(stop);
   if (startMin === null) return null;
 
@@ -63,7 +64,7 @@ export function StopBlock({ stop, onDelete, onClick, onResize, pxPerMin, isMobil
     ? Math.max(SNAP_MINS, duration + rawDeltaMin)
     : duration;
 
-  const liveTop    = minutesToPx(liveStartMin, pxPerMin);
+  const liveTop    = minutesToPx(liveStartMin, pxPerMin, startHour);
   const liveHeight = Math.max(liveDuration * pxPerMin, isMobile ? 40 : 32);
   const isResizing = resize !== null;
 

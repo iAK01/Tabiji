@@ -32,9 +32,9 @@ export function stopDuration(stop: Stop): number {
   return 60;
 }
 
-// Offset from DAY_START_HOUR in pixels
-export function minutesToPx(minutes: number, pxPerMin: number): number {
-  return (minutes - DAY_START_HOUR * 60) * pxPerMin;
+// Offset from startHour in pixels (defaults to DAY_START_HOUR)
+export function minutesToPx(minutes: number, pxPerMin: number, startHour = DAY_START_HOUR): number {
+  return (minutes - startHour * 60) * pxPerMin;
 }
 
 // Zero-padded HH:MM

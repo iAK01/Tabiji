@@ -21,7 +21,7 @@ import ExpandMoreIcon     from '@mui/icons-material/ExpandMore';
 import { saveTripCache, getTripCache, queueAction } from '@/lib/offline/db';
 import {
   DAY_START_HOUR, DAY_END_HOUR,
-  PX_PER_MIN_MOBILE, PX_PER_MIN_DESKTOP, TOTAL_MINS,
+  PX_PER_MIN_MOBILE, PX_PER_MIN_DESKTOP,
   SNAP_MINS, QUICK_ADD_TYPES, STOP_CONFIG, D,
 } from './Itinerary.config';
 import type { Day, Stop, KnownLocation } from './Itinerary.config';
@@ -47,7 +47,6 @@ export default function ItineraryTab({ tripId, startDate, endDate, fabTrigger, o
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
 
   const pxPerMin  = isMobile ? PX_PER_MIN_MOBILE : PX_PER_MIN_DESKTOP;
-  const timelineH = TOTAL_MINS * pxPerMin;
 
   // ── State ────────────────────────────────────────────────────────────────────
   const [days,           setDays]           = useState<Day[]>([]);
@@ -382,6 +381,21 @@ export default function ItineraryTab({ tripId, startDate, endDate, fabTrigger, o
   const visibleChipCount = isMobile ? 4 : 5;
   const visibleChips     = showAllChips ? QUICK_ADD_TYPES : QUICK_ADD_TYPES.slice(0, visibleChipCount);
 
+  // Per-day effective timeline bounds — expands upward for early flights, downward for late-night events
+  const stopMins = activeDay?.stops
+    .map(s => stopStartMinutes(s))
+    .filter((m): m is number => m !== null) ?? [];
+  const effectiveStartHour = stopMins.length
+    ? Math.min(DAY_START_HOUR, Math.floor(Math.min(...stopMins) / 60))
+    : DAY_START_HOUR;
+  const effectiveEndHour = activeDay?.stops.length
+    ? Math.max(DAY_END_HOUR, ...activeDay.stops.map(s => {
+        const m = stopStartMinutes(s);
+        return m !== null ? Math.ceil((m + stopDuration(s)) / 60) : 0;
+      }))
+    : DAY_END_HOUR;
+  const effectiveTimelineH = (effectiveEndHour - effectiveStartHour) * 60 * pxPerMin;
+
   // ── Render ────────────────────────────────────────────────────────────────────
   return (
     <Box>
@@ -662,14 +676,14 @@ export default function ItineraryTab({ tripId, startDate, endDate, fabTrigger, o
             modifiers={[restrictToVerticalAxis]}
             onDragEnd={handleDragEnd}
           >
-            <Box sx={{ display: 'flex', position: 'relative', height: timelineH + 32 }}>
+            <Box sx={{ display: 'flex', position: 'relative', height: effectiveTimelineH + 32 }}>
 
               {/* Hour ruler column */}
               <Box sx={{
                 flexShrink: 0, width: 58, position: 'relative',
                 borderRight: `1px solid ${D.rule}`, pt: 2,
               }}>
-                <HourRuler pxPerMin={pxPerMin} />
+                <HourRuler pxPerMin={pxPerMin} startHour={effectiveStartHour} endHour={effectiveEndHour} />
               </Box>
 
               {/* Timeline column */}
@@ -683,12 +697,12 @@ export default function ItineraryTab({ tripId, startDate, endDate, fabTrigger, o
                   if (isMobile) return;
                   const rect    = (e.currentTarget as HTMLElement).getBoundingClientRect();
                   const relY    = e.clientY - rect.top - 16;
-                  const mins    = Math.round(relY / pxPerMin / 15) * 15 + DAY_START_HOUR * 60;
-                  const clamped = Math.max(DAY_START_HOUR * 60, Math.min(DAY_END_HOUR * 60 - 30, mins));
+                  const mins    = Math.round(relY / pxPerMin / 15) * 15 + effectiveStartHour * 60;
+                  const clamped = Math.max(effectiveStartHour * 60, Math.min(effectiveEndHour * 60 - 30, mins));
                   openDrawer(formatTime(clamped));
                 }}
               >
-                <GridLines pxPerMin={pxPerMin} />
+                <GridLines pxPerMin={pxPerMin} startHour={effectiveStartHour} endHour={effectiveEndHour} />
 
                 {/* Current time indicator — only shown when viewing today */}
                 {(() => {
@@ -696,8 +710,8 @@ export default function ItineraryTab({ tripId, startDate, endDate, fabTrigger, o
                   const isToday  = activeDay && new Date(activeDay.date).toDateString() === todayStr;
                   if (!isToday) return null;
                   const now     = new Date();
-                  const nowMins = now.getHours() * 60 + now.getMinutes() - DAY_START_HOUR * 60;
-                  if (nowMins < 0 || nowMins > TOTAL_MINS) return null;
+                  const nowMins = now.getHours() * 60 + now.getMinutes() - effectiveStartHour * 60;
+                  if (nowMins < 0 || nowMins > effectiveTimelineH / pxPerMin) return null;
                   const top = nowMins * pxPerMin + 16;
                   return (
                     <Box
@@ -737,6 +751,7 @@ export default function ItineraryTab({ tripId, startDate, endDate, fabTrigger, o
                       onDiscover={i === largestIdx && slot.mins >= 120 ? () => setSuggestionSlot(slot) : undefined}
                       pxPerMin={pxPerMin}
                       isMobile={isMobile}
+                      startHour={effectiveStartHour}
                     />
                   ));
                 })()}
@@ -759,6 +774,7 @@ export default function ItineraryTab({ tripId, startDate, endDate, fabTrigger, o
                         isMobile={isMobile}
                         colIndex={cols[i].col}
                         totalCols={cols[i].totalCols}
+                        startHour={effectiveStartHour}
                         linkedFiles={
                           (stop._id && filesByStop.get(stop._id)?.length)
                             ? filesByStop.get(stop._id)!
@@ -767,7 +783,7 @@ export default function ItineraryTab({ tripId, startDate, endDate, fabTrigger, o
                             : []
                         }
                       />
-                      <TravelConnector stop={stop} pxPerMin={pxPerMin} />
+                      <TravelConnector stop={stop} pxPerMin={pxPerMin} startHour={effectiveStartHour} />
                     </Box>
                   ));
                 })()}

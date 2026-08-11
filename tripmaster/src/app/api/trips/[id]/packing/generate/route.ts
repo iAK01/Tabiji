@@ -67,15 +67,24 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
   const weatherContext = deriveWeatherContext(trip.weather?.days ?? null);
 
   // ── Assemble engine context ──────────────────────────────────────────────────
+  const passportCountryCode =
+    user.passport?.countryCode || user.homeLocation?.countryCode || '';
+
   const engineCtx: TripContext = {
-    weather:            weatherContext,
+    weather:             weatherContext,
     transportTypes,
     accommodationTypes,
     tripType,
     nights,
     sameCurrencyZone,
     passportStatus,
-    destCountryCode:    destCode || '',
+    destCountryCode:     destCode || '',
+    destCurrency:        destMeta?.currency        || '',
+    destCurrencySymbol:  destMeta?.currencySymbol  || '',
+    destCountryName:     trip.destination?.country || '',
+    destPlugType:        destMeta?.electricalPlug  || '',
+    originPlugType:      originMeta?.electricalPlug || '',
+    passportCountryCode,
   };
 
   const engineResult = runPackingEngine(engineCtx);

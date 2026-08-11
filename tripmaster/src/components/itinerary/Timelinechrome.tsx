@@ -12,18 +12,18 @@ import type { Stop } from './Itinerary.config';
 import { minutesToPx, stopStartMinutes, formatTime } from './Itinerary.helpers';
 
 // ─── Hour ruler ────────────────────────────────────────────────────────────────
-export function HourRuler({ pxPerMin }: { pxPerMin: number }) {
+export function HourRuler({ pxPerMin, startHour = DAY_START_HOUR, endHour = DAY_END_HOUR }: { pxPerMin: number; startHour?: number; endHour?: number }) {
   const hourH = 60 * pxPerMin;
   const hours = Array.from(
-    { length: DAY_END_HOUR - DAY_START_HOUR + 1 },
-    (_, i) => DAY_START_HOUR + i,
+    { length: endHour - startHour + 1 },
+    (_, i) => startHour + i,
   );
   return (
     <Box sx={{ position: 'relative', width: 58, flexShrink: 0, userSelect: 'none' }}>
       {hours.map(h => (
         <Box key={h} sx={{
           position: 'absolute',
-          top: (h - DAY_START_HOUR) * hourH - 10,
+          top: (h - startHour) * hourH - 10,
           right: 12,
         }}>
           <Typography sx={{
@@ -34,7 +34,7 @@ export function HourRuler({ pxPerMin }: { pxPerMin: number }) {
             fontFamily:         D.display,
             fontWeight:         900,
           }}>
-            {h === 24 ? '00:00' : `${String(h).padStart(2, '0')}:00`}
+            {`${String(h % 24).padStart(2, '0')}:00`}
           </Typography>
         </Box>
       ))}
@@ -43,9 +43,9 @@ export function HourRuler({ pxPerMin }: { pxPerMin: number }) {
 }
 
 // ─── Grid lines ────────────────────────────────────────────────────────────────
-export function GridLines({ pxPerMin }: { pxPerMin: number }) {
+export function GridLines({ pxPerMin, startHour = DAY_START_HOUR, endHour = DAY_END_HOUR }: { pxPerMin: number; startHour?: number; endHour?: number }) {
   const hourH = 60 * pxPerMin;
-  const hours = Array.from({ length: DAY_END_HOUR - DAY_START_HOUR }, (_, i) => i);
+  const hours = Array.from({ length: endHour - startHour }, (_, i) => i);
   return (
     <>
       {hours.map(i => (
@@ -66,17 +66,18 @@ export function GridLines({ pxPerMin }: { pxPerMin: number }) {
 
 // ─── Free time gap ─────────────────────────────────────────────────────────────
 export function FreeGap({
-  slot, onQuickAdd, onDiscover, pxPerMin, isMobile,
+  slot, onQuickAdd, onDiscover, pxPerMin, isMobile, startHour = DAY_START_HOUR,
 }: {
   slot:        { start: number; end: number; mins: number };
   onQuickAdd:  (time: string) => void;
   onDiscover?: () => void;
   pxPerMin:    number;
   isMobile:    boolean;
+  startHour?:  number;
 }) {
   if (slot.mins < 30) return null;
 
-  const top    = minutesToPx(slot.start, pxPerMin);
+  const top    = minutesToPx(slot.start, pxPerMin, startHour);
   const height = slot.mins * pxPerMin;
   const h      = Math.floor(slot.mins / 60);
   const m      = slot.mins % 60;
@@ -143,14 +144,14 @@ export function FreeGap({
 }
 
 // ─── Travel connector ──────────────────────────────────────────────────────────
-export function TravelConnector({ stop, pxPerMin }: { stop: Stop; pxPerMin: number }) {
+export function TravelConnector({ stop, pxPerMin, startHour = DAY_START_HOUR }: { stop: Stop; pxPerMin: number; startHour?: number }) {
   const t = stop.travelToNext;
   if (!t) return null;
 
   const start = stopStartMinutes(stop);
   if (start === null) return null;
 
-  const top = minutesToPx(start + (stop.duration ?? 60), pxPerMin);
+  const top = minutesToPx(start + (stop.duration ?? 60), pxPerMin, startHour);
 
   return (
     <Box sx={{

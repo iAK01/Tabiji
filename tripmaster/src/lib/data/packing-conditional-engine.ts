@@ -25,14 +25,20 @@ export interface WeatherContext {
 }
 
 export interface TripContext {
-  weather:            WeatherContext | null;
-  transportTypes:     string[];         // 'plane' | 'train' | 'car' | 'ferry' | 'bus'
-  accommodationTypes: string[];         // 'hotel' | 'airbnb' | 'hostel' | 'camping' | 'family'
-  tripType:           string;           // 'work' | 'leisure' | 'mixed'
-  nights:             number;
-  sameCurrencyZone:   boolean;          // origin and dest share same currency
-  passportStatus:     PassportStatus;
-  destCountryCode:    string;
+  weather:             WeatherContext | null;
+  transportTypes:      string[];         // 'plane' | 'train' | 'car' | 'ferry' | 'bus'
+  accommodationTypes:  string[];         // 'hotel' | 'airbnb' | 'hostel' | 'camping' | 'family'
+  tripType:            string;           // 'work' | 'leisure' | 'mixed'
+  nights:              number;
+  sameCurrencyZone:    boolean;          // origin and dest share same currency
+  passportStatus:      PassportStatus;
+  destCountryCode:     string;
+  destCurrency:        string;           // 'USD', 'EUR', 'THB' — empty if unknown
+  destCurrencySymbol:  string;           // '$', '€', '฿' — empty if unknown
+  destCountryName:     string;           // 'Thailand', 'United States' — empty if unknown
+  destPlugType:        string;           // 'A/B', 'G', 'C/F' — empty if unknown
+  originPlugType:      string;           // 'G' — empty if unknown
+  passportCountryCode: string;           // 'IE', 'FR' — empty if unknown
 }
 
 export type PassportStatus =
@@ -181,6 +187,40 @@ export function derivePassportStatus(
   return { state: 'ok', daysValidBeyondReturn };
 }
 
+// ─── EU visa-free lookup ──────────────────────────────────────────────────────
+
+const EU_MEMBER_STATES = new Set([
+  'AT','BE','BG','HR','CY','CZ','DK','EE','FI','FR','DE','GR',
+  'HU','IE','IT','LV','LT','LU','MT','NL','PL','PT','RO','SK','SI','ES','SE',
+]);
+
+const VISA_FREE_FOR_EU_PASSPORT = new Set([
+  // EU member states
+  'AT','BE','BG','HR','CY','CZ','DK','EE','FI','FR','DE','GR',
+  'HU','IE','IT','LV','LT','LU','MT','NL','PL','PT','RO','SK','SI','ES','SE',
+  // Non-EU Schengen
+  'CH','NO','IS','LI',
+  // English-speaking
+  'GB','US','CA','AU','NZ',
+  // Asia-Pacific
+  'JP','KR','SG','TH','MY','HK','TW','MV',
+  // Americas
+  'MX','BR','AR','CL','CO','PE',
+  // Africa / Middle East
+  'MA','TN','ZA','AE','IL','JO',
+  // Eastern Europe / Caucasus
+  'GE','AL','RS','ME','MK','BA','MD','UA','AM',
+]);
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function formatDaysBeyondReturn(days: number): string {
+  if (days >= 365) return 'Valid — well within expiry';
+  const months = Math.round(days / 30);
+  if (months >= 2) return `Valid for ${months} months beyond return`;
+  return `Valid for ${days} days beyond return`;
+}
+
 // ─── Main engine ──────────────────────────────────────────────────────────────
 
 export function runPackingEngine(ctx: TripContext): EngineResult {
@@ -194,13 +234,19 @@ export function runPackingEngine(ctx: TripContext): EngineResult {
   const { weather, transportTypes, accommodationTypes, tripType, nights } = ctx;
 
   // ── 1. CURRENCY ZONE ────────────────────────────────────────────────────────
-  // If travelling within the same currency zone (e.g. Ireland → Germany, both EUR):
-  // suppress the cash pre-travel action and update the advisory note.
   if (ctx.sameCurrencyZone) {
-    result.suppressPreTravel.push('Cash (local currency)');
-    result.itemOverrides['Cash (local currency)'] = {
-      advisoryNote:    'Same currency zone — no exchange needed. Carry some cash for small vendors and markets.',
-      conditionReason: 'Eurozone destination — exchange rate not applicable',
+    const symbol = ctx.destCurrencySymbol || ctx.destCurrency || 'same currency';
+    result.suppressPreTravel.push('Cash/Revolut (local currency)');
+    result.itemOverrides['Cash/Revolut (local currency)'] = {
+      advisoryNote:    `Same currency (${symbol}) — no exchange needed. Some cash handy for small vendors.`,
+      conditionReason: `${ctx.destCountryName || 'Destination'} uses the same currency`,
+    };
+  } else if (ctx.destCurrency) {
+    result.itemOverrides['Cash/Revolut (local currency)'] = {
+      advisoryNote:    `${ctx.destCountryName || 'Destination'} uses ${ctx.destCurrency} (${ctx.destCurrencySymbol})`,
+      preTravelAction: true,
+      preTravelNote:   `Convert to ${ctx.destCurrency} in Revolut, or get ${ctx.destCurrencySymbol} cash at the airport`,
+      conditionReason: `${ctx.destCountryName || 'Destination'} uses ${ctx.destCurrency}`,
     };
   }
 
@@ -213,10 +259,9 @@ export function runPackingEngine(ctx: TripContext): EngineResult {
       advisoryNote:    'Passport expiry not set in your profile',
     };
   } else if (ctx.passportStatus.state === 'ok') {
-    // Passport is fine — suppress the pre-travel action, just pack it
     result.suppressPreTravel.push('Passport');
     result.itemOverrides['Passport'] = {
-      advisoryNote: `Valid for ${ctx.passportStatus.daysValidBeyondReturn} days beyond return`,
+      advisoryNote: formatDaysBeyondReturn(ctx.passportStatus.daysValidBeyondReturn),
     };
   } else if (ctx.passportStatus.state === 'warn') {
     result.itemOverrides['Passport'] = {
@@ -229,6 +274,21 @@ export function runPackingEngine(ctx: TripContext): EngineResult {
       preTravelAction: true,
       preTravelNote:   ctx.passportStatus.message,
       essential:       true,
+    };
+  }
+
+  // ── 2.5. VISA ───────────────────────────────────────────────────────────────
+  // Suppress visa documents for EU passport holders travelling to known visa-free destinations.
+  if (
+    ctx.passportCountryCode &&
+    EU_MEMBER_STATES.has(ctx.passportCountryCode) &&
+    ctx.destCountryCode &&
+    VISA_FREE_FOR_EU_PASSPORT.has(ctx.destCountryCode)
+  ) {
+    result.suppressItems.push('Visa documents');
+  } else if (ctx.destCountryName) {
+    result.itemOverrides['Visa documents'] = {
+      advisoryNote: `Check if a visa is required for ${ctx.destCountryName}`,
     };
   }
 
@@ -355,6 +415,30 @@ export function runPackingEngine(ctx: TripContext): EngineResult {
     };
   }
 
+  // ── 4.5. ELECTRICAL ADAPTER ──────────────────────────────────────────────────
+  if (ctx.destPlugType && ctx.originPlugType) {
+    const destPlugs   = ctx.destPlugType.split('/');
+    const originPlugs = ctx.originPlugType.split('/');
+    const compatible  = originPlugs.some(p => destPlugs.includes(p));
+    const dest        = ctx.destCountryName || 'Destination';
+
+    if (compatible) {
+      result.suppressPreTravel.push('Universal travel adapter');
+      result.itemOverrides['Universal travel adapter'] = {
+        advisoryNote:    `${dest} uses Type ${ctx.destPlugType} — same as home, no adapter needed`,
+        conditionReason: 'Same plug type as home',
+      };
+    } else {
+      result.itemOverrides['Universal travel adapter'] = {
+        essential:       true,
+        advisoryNote:    `${dest} uses Type ${ctx.destPlugType} plugs — your devices need an adapter`,
+        preTravelAction: true,
+        preTravelNote:   `Pack a Type ${ctx.destPlugType} adapter — ${dest} sockets won't fit Type ${ctx.originPlugType} plugs`,
+        conditionReason: `${dest} uses Type ${ctx.destPlugType} plugs`,
+      };
+    }
+  }
+
   // ── 5. ACCOMMODATION ─────────────────────────────────────────────────────────
 
   if (accommodationTypes.includes('family')) {
@@ -412,12 +496,18 @@ export function runPackingEngine(ctx: TripContext): EngineResult {
   // ── 6. TRIP TYPE ─────────────────────────────────────────────────────────────
 
   if (tripType === 'work' || tripType === 'mixed') {
-    // Laptop bag check — ensure it's in the list
     result.itemOverrides['Laptop'] = {
       preTravelAction: true,
       preTravelNote:   'Charge fully before packing. Check charger and all adapters are packed too.',
     };
   }
+
+  // ── 7. PRESCRIPTION MEDICATION ───────────────────────────────────────────────
+  const dayCount = nights + 1;
+  result.itemOverrides['Prescription medication'] = {
+    advisoryNote:    `Pack enough for ${dayCount} days — carry in original packaging with prescription letter`,
+    conditionReason: `${dayCount}-day trip`,
+  };
 
   return result;
 }
