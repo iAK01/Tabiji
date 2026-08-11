@@ -170,41 +170,67 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
   const saveTransport = async () => {
     setSaving(true);
     const isEdit  = editTransportIdx !== null;
+    const justSavedLeg = transport;
+    // "Round trip?" was ticked on the leg that's *becoming* the outbound (reachedLeg was
+    // still null when they ticked it — nothing existed yet to reverse a route from). Now
+    // that it's saved, open the return leg automatically instead of making them click
+    // Add Transport a second time and hope the app remembers. Guarded on the just-saved
+    // leg actually reaching the trip's destination — ticking it on a connecting leg
+    // (Dublin→Frankfurt, final destination Warsaw) shouldn't reverse from Frankfurt.
+    const continueToReturn = !isEdit && isReturnLeg && !reachedLeg
+      && !!destinationReachedBy([justSavedLeg], trip);
     const updated = {
       ...(logistics ?? {}),
       transportation: isEdit
-        ? logistics.transportation.map((t: any, i: number) => i === editTransportIdx ? transport : t)
-        : [...(logistics?.transportation ?? []), transport],
+        ? logistics.transportation.map((t: any, i: number) => i === editTransportIdx ? justSavedLeg : t)
+        : [...(logistics?.transportation ?? []), justSavedLeg],
     };
     setLogistics(updated);
     await saveTripCache(tripId, { ...(await getTripCache(tripId)), logistics: updated });
 
-    if (!navigator.onLine) {
-      await queueAction({ type: isEdit ? 'EDIT_TRANSPORT' : 'ADD_TRANSPORT', tripId, payload: transport, index: editTransportIdx });
+    const openPrefilledReturn = () => {
+      const { top, details } = buildReturnFields(justSavedLeg, justSavedLeg.type);
+      setTransport({
+        ...BLANK_TRANSPORT,
+        type: justSavedLeg.type,
+        ...top,
+        details: {
+          ...BLANK_TRANSPORT.details,
+          cabin: justSavedLeg.type === 'flight' ? 'Economy' : '',
+          ...details,
+        },
+      });
+      setEditTransportIdx(null);
+      setIsReturnLeg(true);
+      // transportOpen stays true — the dialog carries straight on into the return leg
+    };
+    const closeAndReset = () => {
       setTransportOpen(false);
       setTransport({ ...BLANK_TRANSPORT, details: { ...BLANK_TRANSPORT.details } });
       setEditTransportIdx(null);
       setIsReturnLeg(false);
+    };
+
+    if (!navigator.onLine) {
+      await queueAction({ type: isEdit ? 'EDIT_TRANSPORT' : 'ADD_TRANSPORT', tripId, payload: justSavedLeg, index: editTransportIdx });
+      if (continueToReturn) openPrefilledReturn(); else closeAndReset();
       setSaving(false);
       return;
     }
 
     const url    = isEdit ? `/api/trips/${tripId}/logistics/transport/${editTransportIdx}` : `/api/trips/${tripId}/logistics/transport`;
     const method = isEdit ? 'PUT' : 'POST';
-    const res    = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(transport) });
+    const res    = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(justSavedLeg) });
     const data   = await res.json();
     setLogistics(data.logistics);
 
     // Gap detection — runs after every flight save
-    if (transport.type === 'flight') {
-      const gaps = detectTransportGaps(transport, data.logistics?.transportation ?? []);
+    if (justSavedLeg.type === 'flight') {
+      const gaps = detectTransportGaps(justSavedLeg, data.logistics?.transportation ?? []);
       if (gaps.length > 0) setGapPrompts(gaps);
     }
 
-    setTransportOpen(false);
-    setTransport({ ...BLANK_TRANSPORT, details: { ...BLANK_TRANSPORT.details } });
-    setEditTransportIdx(null);
-    setIsReturnLeg(false);
+    if (continueToReturn) openPrefilledReturn(); else closeAndReset();
     setSaving(false);
   };
 
@@ -380,51 +406,64 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
   const departureDateOnly = transport.departureTime ? transport.departureTime.split('T')[0] : '';
 
   // Has the trip's destination already been reached by something already saved?
-  // Only relevant when adding a fresh entry — editing an existing one has real data already.
+  // Null on the very first leg of a trip — there's nothing to reverse a route from yet.
   const reachedLeg = editTransportIdx === null
     ? destinationReachedBy(logistics?.transportation ?? [], trip)
     : null;
 
-  // Flipping "Return?" fills in what we can actually be sure of: the leg starts where
-  // the outbound journey last arrived, and — for flights, where the trip has a real
-  // origin airport code to anchor to — ends back at the trip's origin. Turning it off
-  // clears those two fields back out; nothing else is touched either way.
-  // Car hire displays its own pickup/dropoff fields (details.pickupLocation /
-  // dropoffLocation) instead of the top-level ones, so those get mirrored too.
+  // Everything a return leg can borrow from the leg it's reversing: the route flipped,
+  // and — since a round trip is almost always one booking — the same airline. Only
+  // flights carry an airline; only car hire displays pickup/dropoff instead of the
+  // top-level route fields, so that gets mirrored too.
+  const buildReturnFields = (sourceLeg: any, forType: string) => {
+    const originLabel = forType === 'flight' && trip.origin?.iataCode
+      ? `${trip.origin.iataCode} — ${trip.origin.city}`
+      : (trip.origin?.city ?? '');
+    const top: any = {
+      departureLocation:    sourceLeg.arrivalLocation ?? '',
+      departureCoordinates: sourceLeg.arrivalCoordinates ?? null,
+      arrivalLocation:      originLabel,
+      arrivalCoordinates:   null,
+    };
+    const details: any = {};
+    if (forType === 'flight') {
+      details.airline     = sourceLeg.details?.airline ?? '';
+      details.airlineIata = sourceLeg.details?.airlineIata ?? '';
+    }
+    if (forType === 'car_hire') {
+      details.pickupLocation     = sourceLeg.arrivalLocation ?? '';
+      details.pickupCoordinates  = sourceLeg.arrivalCoordinates ?? null;
+      details.dropoffLocation    = originLabel;
+      details.dropoffCoordinates = null;
+    }
+    return { top, details };
+  };
+
+  // Ticking "Round trip?" on the very first leg (reachedLeg is null — nothing exists to
+  // reverse yet) just remembers the intent; saveTransport() below picks it up once this
+  // leg is actually saved and auto-opens the return, pre-filled. Ticking it on a later
+  // leg (reachedLeg found) fills in immediately. Unticking only clears fields that were
+  // actually set by this toggle — never touches an airline etc. the user typed themselves
+  // while filling in an outbound leg that has nothing to do with a reversal yet.
   const applyReturnToggle = (checked: boolean) => {
     setIsReturnLeg(checked);
+    if (!reachedLeg) return;
     const isCarHire = transport.type === 'car_hire';
     if (!checked) {
       setTransport(p => ({
         ...p,
         departureLocation: '', departureCoordinates: null,
         arrivalLocation:   '', arrivalCoordinates:   null,
-        details: isCarHire ? {
+        details: {
           ...p.details,
-          pickupLocation: '', pickupCoordinates: null,
-          dropoffLocation: '', dropoffCoordinates: null,
-        } : p.details,
+          ...(transport.type === 'flight' ? { airline: '', airlineIata: '' } : {}),
+          ...(isCarHire ? { pickupLocation: '', pickupCoordinates: null, dropoffLocation: '', dropoffCoordinates: null } : {}),
+        },
       }));
       return;
     }
-    if (!reachedLeg) return;
-    const originLabel = transport.type === 'flight' && trip.origin?.iataCode
-      ? `${trip.origin.iataCode} — ${trip.origin.city}`
-      : (trip.origin?.city ?? '');
-    setTransport(p => ({
-      ...p,
-      departureLocation:    reachedLeg.arrivalLocation ?? '',
-      departureCoordinates: reachedLeg.arrivalCoordinates ?? null,
-      arrivalLocation:      originLabel,
-      arrivalCoordinates:   null,
-      details: isCarHire ? {
-        ...p.details,
-        pickupLocation:     reachedLeg.arrivalLocation ?? '',
-        pickupCoordinates:  reachedLeg.arrivalCoordinates ?? null,
-        dropoffLocation:    originLabel,
-        dropoffCoordinates: null,
-      } : p.details,
-    }));
+    const { top, details } = buildReturnFields(reachedLeg, transport.type);
+    setTransport(p => ({ ...p, ...top, details: { ...p.details, ...details } }));
   };
 
   // ── Transport form fields ─────────────────────────────────────────────────────
@@ -1037,11 +1076,11 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
                 ))}
               </Box>
             </Box>
-            {/* Only offered once the outbound journey has actually reached the trip's
-                destination — asking any earlier than that would be guessing. Parking has
-                no "arrival" concept (it's one booking spanning the whole trip), so it's
-                excluded — there's nothing sensible to fill in for it here. */}
-            {reachedLeg && transport.type !== 'parking' && (
+            {/* Asked upfront, same as any airline's own booking flow — a person knows
+                whether it's a round trip before they've entered a single leg of it.
+                Parking has no "arrival" concept (it's one booking spanning the whole
+                trip), so it's excluded — there's nothing sensible to fill in for it. */}
+            {editTransportIdx === null && transport.type !== 'parking' && (
               <FormControlLabel
                 control={
                   <Switch
@@ -1051,7 +1090,7 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
                 }
                 label={
                   <Typography variant="body2" sx={{ fontWeight: 600, fontFamily: D.body }}>
-                    Return?
+                    Round trip?
                   </Typography>
                 }
               />
