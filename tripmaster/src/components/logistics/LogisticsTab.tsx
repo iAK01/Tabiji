@@ -344,14 +344,22 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
 
   // ── Transport form helpers ──────────────────────────────────────────────────
   const setDetail = (key: string, val: any) =>
-    setTransport(p => ({ ...p, details: { ...p.details, [key]: val } }));
+    setTransport(p => {
+      const next = { ...p, details: { ...p.details, [key]: val } };
+      // A seat number is a strong signal the user has actually booked — nudge status
+      // forward as a suggestion, but never override a status they've already chosen.
+      if (key === 'seat' && typeof val === 'string' && val.trim() && p.status === 'not_booked') {
+        next.status = 'booked';
+      }
+      return next;
+    });
 
   // When changing transport type, reset all fields but preserve the status the user chose.
   // For car type, pre-fill departure from the user's home location.
   const changeType = (newType: TransportType) => {
     const base = {
       ...BLANK_TRANSPORT,
-      details: { ...BLANK_TRANSPORT.details },
+      details: { ...BLANK_TRANSPORT.details, cabin: newType === 'flight' ? 'Economy' : '' },
       type:   newType,
       status: transport.status,
     };
@@ -375,7 +383,19 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
 
         {type === 'flight' && (<>
           <AirlineSearch label="Airline" value={transport.details.airline}
-            onChange={a => { setDetail('airline', a.name); setDetail('airlineIata', a.iata); }} />
+            onChange={a => {
+              // Prefill the flight number with the airline's IATA code so the user only
+              // has to type the digits. If a previous code is already there, swap it out
+              // rather than stacking codes when the airline is changed.
+              const priorIata = transport.details.airlineIata;
+              const current   = transport.details.flightNumber.trim();
+              const rest = priorIata && current.startsWith(priorIata)
+                ? current.slice(priorIata.length).trim()
+                : current;
+              setDetail('airline', a.name);
+              setDetail('airlineIata', a.iata);
+              setDetail('flightNumber', a.iata ? (rest ? `${a.iata} ${rest}` : `${a.iata} `) : rest);
+            }} />
           <TextField label="Flight number" fullWidth placeholder="FR 328"
             value={transport.details.flightNumber}
             onChange={e => setDetail('flightNumber', e.target.value)} />
@@ -638,7 +658,11 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
           value={transport.departureTime}
           onChange={val => {
             // If new departure is after current arrival, clear arrival to avoid impossible range
-            const newArrival = transport.arrivalTime && val > transport.arrivalTime ? '' : transport.arrivalTime;
+            const clearedArrival = transport.arrivalTime && val > transport.arrivalTime ? '' : transport.arrivalTime;
+            // Most journeys arrive the same day they depart — suggest that as a starting
+            // point (same date & time) when arrival hasn't been given a real value yet.
+            // The user only needs to adjust the time; they can change the date too.
+            const newArrival = clearedArrival || val;
             setTransport(p => ({ ...p, departureTime: val, arrivalTime: newArrival }));
           }}
           minDate={toDateOnly(trip.startDate)}

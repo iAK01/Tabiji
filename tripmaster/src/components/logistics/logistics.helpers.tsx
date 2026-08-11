@@ -125,7 +125,7 @@ export const BLANK_TRANSPORT = {
     airlineIata:         '',
     flightNumber:        '',
     seat:                '',
-    cabin:               '',
+    cabin:               'Economy',
     operator:            '',
     railSubtype:         '',
     rentalCompany:       '',
