@@ -46,7 +46,7 @@ import {
   VENUE_TYPES, ACCOM_TYPES,
   BLANK_TRANSPORT, BLANK_ACCOM, BLANK_VENUE,
   toDateOnly, addDays,
-  detectTransportGaps, classifyDirection,
+  detectTransportGaps, classifyDirection, destinationReachedBy,
   type TransportType, type VenueType,
   type LogisticsTabProps, type MenuKind, type GapPromptItem,
 } from './logistics.helpers';
@@ -81,6 +81,7 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
   const [menuPosition,     setMenuPosition]     = useState<{ top: number; left: number } | null>(null);
   const [menuTarget,       setMenuTarget]       = useState<{ kind: MenuKind; index: number } | null>(null);
   const [editTransportIdx, setEditTransportIdx] = useState<number | null>(null);
+  const [isReturnLeg,      setIsReturnLeg]      = useState(false);
   const [editAccomIdx,     setEditAccomIdx]     = useState<number | null>(null);
   const [editVenueIdx,     setEditVenueIdx]     = useState<number | null>(null);
 
@@ -149,6 +150,7 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
     if (fabTrigger.action === 'transport') {
       setSection(0);
       setEditTransportIdx(null);
+      setIsReturnLeg(false);
       setTransport({ ...BLANK_TRANSPORT, details: { ...BLANK_TRANSPORT.details } });
       setTransportOpen(true);
     } else if (fabTrigger.action === 'accom') {
@@ -182,6 +184,7 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
       setTransportOpen(false);
       setTransport({ ...BLANK_TRANSPORT, details: { ...BLANK_TRANSPORT.details } });
       setEditTransportIdx(null);
+      setIsReturnLeg(false);
       setSaving(false);
       return;
     }
@@ -201,6 +204,7 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
     setTransportOpen(false);
     setTransport({ ...BLANK_TRANSPORT, details: { ...BLANK_TRANSPORT.details } });
     setEditTransportIdx(null);
+    setIsReturnLeg(false);
     setSaving(false);
   };
 
@@ -323,6 +327,7 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
       const t = logistics.transportation[index];
       setTransport({ ...BLANK_TRANSPORT, ...t, details: { ...BLANK_TRANSPORT.details, ...(t.details ?? {}) } });
       setEditTransportIdx(index);
+      setIsReturnLeg(false);
       setTransportOpen(true);
     } else if (kind === 'accom') {
       setAccom({ ...BLANK_ACCOM, ...logistics.accommodation[index] });
@@ -367,11 +372,60 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
       base.departureLocation    = homeLocation.address;
       base.departureCoordinates = homeLocation.coordinates;
     }
+    setIsReturnLeg(false);
     setTransport(base);
   };
 
   // Departure date only — drives the arrival picker's minDate and initialMonth
   const departureDateOnly = transport.departureTime ? transport.departureTime.split('T')[0] : '';
+
+  // Has the trip's destination already been reached by something already saved?
+  // Only relevant when adding a fresh entry — editing an existing one has real data already.
+  const reachedLeg = editTransportIdx === null
+    ? destinationReachedBy(logistics?.transportation ?? [], trip)
+    : null;
+
+  // Flipping "Return?" fills in what we can actually be sure of: the leg starts where
+  // the outbound journey last arrived, and — for flights, where the trip has a real
+  // origin airport code to anchor to — ends back at the trip's origin. Turning it off
+  // clears those two fields back out; nothing else is touched either way.
+  // Car hire displays its own pickup/dropoff fields (details.pickupLocation /
+  // dropoffLocation) instead of the top-level ones, so those get mirrored too.
+  const applyReturnToggle = (checked: boolean) => {
+    setIsReturnLeg(checked);
+    const isCarHire = transport.type === 'car_hire';
+    if (!checked) {
+      setTransport(p => ({
+        ...p,
+        departureLocation: '', departureCoordinates: null,
+        arrivalLocation:   '', arrivalCoordinates:   null,
+        details: isCarHire ? {
+          ...p.details,
+          pickupLocation: '', pickupCoordinates: null,
+          dropoffLocation: '', dropoffCoordinates: null,
+        } : p.details,
+      }));
+      return;
+    }
+    if (!reachedLeg) return;
+    const originLabel = transport.type === 'flight' && trip.origin?.iataCode
+      ? `${trip.origin.iataCode} — ${trip.origin.city}`
+      : (trip.origin?.city ?? '');
+    setTransport(p => ({
+      ...p,
+      departureLocation:    reachedLeg.arrivalLocation ?? '',
+      departureCoordinates: reachedLeg.arrivalCoordinates ?? null,
+      arrivalLocation:      originLabel,
+      arrivalCoordinates:   null,
+      details: isCarHire ? {
+        ...p.details,
+        pickupLocation:     reachedLeg.arrivalLocation ?? '',
+        pickupCoordinates:  reachedLeg.arrivalCoordinates ?? null,
+        dropoffLocation:    originLabel,
+        dropoffCoordinates: null,
+      } : p.details,
+    }));
+  };
 
   // ── Transport form fields ─────────────────────────────────────────────────────
   // Intentionally a plain function call {TransportFields()} — NOT rendered as <TransportFields />.
@@ -685,7 +739,10 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
             onChange={e => setTransport(p => ({ ...p, confirmationNumber: e.target.value }))} />
         )}
         <TextField label="Cost (€)" type="number" fullWidth value={transport.cost}
-          onChange={e => setTransport(p => ({ ...p, cost: e.target.value }))} />
+          onChange={e => setTransport(p => ({ ...p, cost: e.target.value }))}
+          helperText={isReturnLeg
+            ? 'Round trips are usually booked as one charge — leave this blank if you already logged it on the outbound leg.'
+            : undefined} />
         <FormControl fullWidth>
           <InputLabel>Status</InputLabel>
           <Select value={transport.status} label="Status"
@@ -980,6 +1037,25 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
                 ))}
               </Box>
             </Box>
+            {/* Only offered once the outbound journey has actually reached the trip's
+                destination — asking any earlier than that would be guessing. Parking has
+                no "arrival" concept (it's one booking spanning the whole trip), so it's
+                excluded — there's nothing sensible to fill in for it here. */}
+            {reachedLeg && transport.type !== 'parking' && (
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={isReturnLeg}
+                    onChange={e => applyReturnToggle(e.target.checked)}
+                  />
+                }
+                label={
+                  <Typography variant="body2" sx={{ fontWeight: 600, fontFamily: D.body }}>
+                    Return?
+                  </Typography>
+                }
+              />
+            )}
             {/* Type-specific + common fields — called as a function, NOT rendered as JSX */}
             {TransportFields()}
           </Box>
@@ -989,6 +1065,7 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
             onClick={() => {
               setTransportOpen(false);
               setEditTransportIdx(null);
+              setIsReturnLeg(false);
               setTransport({ ...BLANK_TRANSPORT, details: { ...BLANK_TRANSPORT.details } });
             }}
             fullWidth={mobile} size="large"
@@ -1269,6 +1346,7 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
                       ...gap.prefill,
                     });
                     setEditTransportIdx(null);
+                    setIsReturnLeg(false);
                     setSection(0);
                     setTransportOpen(true);
                   }}

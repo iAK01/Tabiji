@@ -357,6 +357,31 @@ export function classifyDirection(t: any, trip: { startDate: string; endDate: st
   return 'there';
 }
 
+// ─── Return-leg detection ──────────────────────────────────────────────────────
+// Has any saved transport item actually arrived at the trip's final destination?
+// Flights are matched by IATA code (reliable — trip.destination.iataCode is a real,
+// populated field). Other types have no equivalent code on the trip, so they fall
+// back to a city-name match against the arrival address — weaker, but it's the only
+// anchor the data model actually offers for ground transport.
+// Returns the matching transport item (so its arrival can seed the return leg's
+// departure), or null if the destination hasn't been reached yet.
+export function destinationReachedBy(
+  allTransport: any[],
+  trip: { destination?: { iataCode?: string; city?: string } },
+): any | null {
+  const destIata = (trip.destination?.iataCode ?? '').toUpperCase();
+  const destCity = (trip.destination?.city ?? '').toLowerCase();
+  for (const t of allTransport) {
+    const arr = (t.arrivalLocation ?? '').toString();
+    if (t.type === 'flight') {
+      if (destIata && extractIata(arr) === destIata) return t;
+    } else if (destCity && arr.toLowerCase().includes(destCity)) {
+      return t;
+    }
+  }
+  return null;
+}
+
 // ─── Shared prop interfaces ───────────────────────────────────────────────────
 export interface TripInfo {
   origin:      { city: string; iataCode?: string };
