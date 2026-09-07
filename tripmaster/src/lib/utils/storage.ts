@@ -31,3 +31,9 @@ export async function deleteFile(destination: string): Promise<void> {
     // File may not exist, ignore
   }
 }
+
+// Direct GCS read stream — used for server-side re-packaging (e.g. zipping several
+// receipts together) where round-tripping through the public URL would be wasteful.
+export function getFileStream(destination: string) {
+  return bucket.file(destination).createReadStream();
+}

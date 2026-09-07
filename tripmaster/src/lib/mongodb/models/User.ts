@@ -5,8 +5,15 @@ const UserSchema = new Schema({
   email: { type: String, unique: true, required: true },
   name: String,
   avatarUrl: String,
+  // Default "who's paying" company name — seeds new trips' companyName so it doesn't
+  // need re-entering every time; still overridable per trip via Edit Trip for users
+  // who invoice through more than one entity.
+  companyName: String,
 
   homeLocation: {
+    addressLine1: String,
+    addressLine2: String,
+    postcode: String,
     city: String,
     country: String,
     countryCode: String,

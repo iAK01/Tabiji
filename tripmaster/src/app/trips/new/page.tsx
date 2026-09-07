@@ -254,6 +254,7 @@ export default function NewTripPage() {
     name:                   '',
     tripType:               'leisure',
     purpose:                '',
+    companyName:            '',
     originCity:             '',
     originCountry:          '',
     originCountryCode:      '',
@@ -283,6 +284,7 @@ export default function NewTripPage() {
       if (!user) return;
       const updates: Partial<typeof form> = {};
       if (user.preferences?.defaultTripType) updates.tripType = user.preferences.defaultTripType;
+      if (user.companyName) updates.companyName = user.companyName;
       if (user.homeLocation?.city && user.homeLocation?.countryCode) {
         updates.originCity        = user.homeLocation.city;
         updates.originCountry     = user.homeLocation.country;
@@ -311,6 +313,7 @@ export default function NewTripPage() {
     setSaving(true);
     const payload = {
       name: form.name, tripType: form.tripType, purpose: form.purpose,
+      companyName: form.companyName || undefined,
       origin: {
         city: form.originCity, country: form.originCountry,
         countryCode: form.originCountryCode, iataCode: form.originIata || undefined,

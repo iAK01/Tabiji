@@ -29,6 +29,7 @@ import AddressSearch     from '@/components/ui/AddressSearch';
 import BookingLinks      from '@/components/logistics/BookingLinks';
 import type { ResolvedAddress } from '@/components/ui/AddressSearch';
 import { saveTripCache, getTripCache, queueAction } from '@/lib/offline/db';
+import { EXPENSE_PAYERS, getPayerLabel } from '@/lib/logistics/expenseConstants';
 import DocumentViewer from '@/components/files/DocumentViewer';
 import type { ViewableFile } from '@/components/files/DocumentViewer';
 
@@ -84,6 +85,15 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
   const [isReturnLeg,      setIsReturnLeg]      = useState(false);
   const [editAccomIdx,     setEditAccomIdx]     = useState<number | null>(null);
   const [editVenueIdx,     setEditVenueIdx]     = useState<number | null>(null);
+
+  // Reimbursable + payer — shared by whichever of the three booking dialogs is open
+  // (they're mutually exclusive). Transient: not persisted onto the transport/
+  // accommodation/venue document itself, only used to decide whether to create a
+  // linked TripExpense on save, so the expense stays the single source of truth for
+  // its own amount rather than duplicating it onto the logistics item too.
+  const [reimbursable, setReimbursable] = useState(false);
+  const [payer,        setPayer]        = useState('tbc');
+  const isWorkTrip = trip.tripType === 'work' || trip.tripType === 'mixed';
 
   // Gap detection prompts — fires after saving a flight when ground transport is missing
   const [gapPrompts, setGapPrompts] = useState<GapPromptItem[]>([]);
@@ -209,10 +219,22 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
       setTransport({ ...BLANK_TRANSPORT, details: { ...BLANK_TRANSPORT.details } });
       setEditTransportIdx(null);
       setIsReturnLeg(false);
+      setReimbursable(false);
+      setPayer('tbc');
     };
+
+    const transportLabel = justSavedLeg.departureLocation && justSavedLeg.arrivalLocation
+      ? `${justSavedLeg.departureLocation} → ${justSavedLeg.arrivalLocation}`
+      : (TRANSPORT_TYPES.find(t => t.value === justSavedLeg.type)?.label ?? justSavedLeg.type);
+    const transportEntryId = String(isEdit ? editTransportIdx : updated.transportation.length - 1);
 
     if (!navigator.onLine) {
       await queueAction({ type: isEdit ? 'EDIT_TRANSPORT' : 'ADD_TRANSPORT', tripId, payload: justSavedLeg, index: editTransportIdx });
+      await createLinkedExpense({
+        date: (justSavedLeg.departureTime || '').split('T')[0], amount: justSavedLeg.cost,
+        category: justSavedLeg.type,
+        label: transportLabel, collection: 'transport', entryId: transportEntryId,
+      });
       if (continueToReturn) openPrefilledReturn(); else closeAndReset();
       setSaving(false);
       return;
@@ -230,6 +252,12 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
       if (gaps.length > 0) setGapPrompts(gaps);
     }
 
+    await createLinkedExpense({
+      date: (justSavedLeg.departureTime || '').split('T')[0], amount: justSavedLeg.cost,
+      category: justSavedLeg.type,
+      label: transportLabel, collection: 'transport', entryId: transportEntryId,
+    });
+
     if (continueToReturn) openPrefilledReturn(); else closeAndReset();
     setSaving(false);
   };
@@ -246,11 +274,19 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
     setLogistics(updated);
     await saveTripCache(tripId, { ...(await getTripCache(tripId)), logistics: updated });
 
+    const accomEntryId = String(isEdit ? editAccomIdx : updated.accommodation.length - 1);
+
     if (!navigator.onLine) {
       await queueAction({ type: isEdit ? 'EDIT_ACCOM' : 'ADD_ACCOM', tripId, payload: accom, index: editAccomIdx });
+      await createLinkedExpense({
+        date: accom.checkIn, amount: accom.cost, category: accom.type,
+        label: accom.name || 'Accommodation', collection: 'accommodation', entryId: accomEntryId,
+      });
       setAccomOpen(false);
       setAccom({ ...BLANK_ACCOM });
       setEditAccomIdx(null);
+      setReimbursable(false);
+      setPayer('tbc');
       setSaving(false);
       return;
     }
@@ -260,9 +296,15 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
     const res    = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(accom) });
     const data   = await res.json();
     setLogistics(data.logistics);
+    await createLinkedExpense({
+      date: accom.checkIn, amount: accom.cost, category: accom.type,
+      label: accom.name || 'Accommodation', collection: 'accommodation', entryId: accomEntryId,
+    });
     setAccomOpen(false);
     setAccom({ ...BLANK_ACCOM });
     setEditAccomIdx(null);
+    setReimbursable(false);
+    setPayer('tbc');
     setSaving(false);
   };
 
@@ -278,11 +320,19 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
     setLogistics(updated);
     await saveTripCache(tripId, { ...(await getTripCache(tripId)), logistics: updated });
 
+    const venueEntryId = String(isEdit ? editVenueIdx : updated.venues.length - 1);
+
     if (!navigator.onLine) {
       await queueAction({ type: isEdit ? 'EDIT_VENUE' : 'ADD_VENUE', tripId, payload: venue, index: editVenueIdx });
+      await createLinkedExpense({
+        date: venue.date, amount: venue.cost, category: venue.type,
+        label: venue.name || 'Venue', collection: 'venue', entryId: venueEntryId,
+      });
       setVenueOpen(false);
       setVenue({ ...BLANK_VENUE });
       setEditVenueIdx(null);
+      setReimbursable(false);
+      setPayer('tbc');
       setSaving(false);
       return;
     }
@@ -292,9 +342,15 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
     const res    = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(venue) });
     const data   = await res.json();
     setLogistics(data.logistics);
+    await createLinkedExpense({
+      date: venue.date, amount: venue.cost, category: venue.type,
+      label: venue.name || 'Venue', collection: 'venue', entryId: venueEntryId,
+    });
     setVenueOpen(false);
     setVenue({ ...BLANK_VENUE });
     setEditVenueIdx(null);
+    setReimbursable(false);
+    setPayer('tbc');
     setSaving(false);
   };
 
@@ -372,6 +428,40 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
     dt ? new Date(dt).toLocaleString('en-IE', { dateStyle: 'medium', timeStyle: 'short' }) : '';
   const fmtDate = (d: string) =>
     d ? new Date(d).toLocaleDateString('en-IE', { dateStyle: 'medium' }) : '';
+
+  // "Reimbursable?" on a booking form shunts it straight to Expenses — the expense
+  // record is the single source of truth for its own amount, nothing gets duplicated
+  // onto the transport/accommodation/venue document itself. Offline-safe: queues
+  // through the same fixed ADD_EXPENSE path mobile capture uses, rather than silently
+  // dropping it the way an untracked offline save would.
+  const createLinkedExpense = async (opts: {
+    date: string; amount: string; category: string; label: string; collection: string; entryId: string;
+  }) => {
+    if (!reimbursable || !opts.amount || parseFloat(opts.amount) <= 0) return;
+    const payload = {
+      date: opts.date || new Date().toISOString().split('T')[0],
+      category: opts.category, amount: opts.amount, currency: 'EUR',
+      gratuity: '', notes: '', payer, status: 'captured',
+      linkedTo: { collection: opts.collection, entryId: opts.entryId, label: opts.label },
+    };
+    if (!navigator.onLine) {
+      await queueAction({ type: 'ADD_EXPENSE', tripId, payload, receiptBlob: null, receiptName: null, receiptType: null });
+      return;
+    }
+    const fd = new FormData();
+    fd.append('date', payload.date);
+    fd.append('category', payload.category);
+    fd.append('amount', payload.amount);
+    fd.append('currency', payload.currency);
+    fd.append('payer', payload.payer);
+    fd.append('status', payload.status);
+    fd.append('linkedTo', JSON.stringify(payload.linkedTo));
+    try {
+      await fetch(`/api/trips/${tripId}/expenses`, { method: 'POST', body: fd });
+    } catch {
+      // Best-effort — a failed expense link shouldn't block or roll back the logistics save.
+    }
+  };
 
   // ── Transport form helpers ──────────────────────────────────────────────────
   const setDetail = (key: string, val: any) =>
@@ -782,6 +872,20 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
           helperText={isReturnLeg
             ? 'Round trips are usually booked as one charge — leave this blank if you already logged it on the outbound leg.'
             : undefined} />
+        {isWorkTrip && (<>
+          <FormControlLabel
+            control={<Switch checked={reimbursable} onChange={e => setReimbursable(e.target.checked)} />}
+            label={<Typography variant="body2" sx={{ fontWeight: 600, fontFamily: D.body }}>Reimbursable?</Typography>}
+          />
+          {reimbursable && (
+            <FormControl fullWidth>
+              <InputLabel>Payer</InputLabel>
+              <Select value={payer} label="Payer" onChange={e => setPayer(e.target.value)}>
+                {EXPENSE_PAYERS.map(p => <MenuItem key={p.value} value={p.value}>{getPayerLabel(p.value, trip)}</MenuItem>)}
+              </Select>
+            </FormControl>
+          )}
+        </>)}
         <FormControl fullWidth>
           <InputLabel>Status</InputLabel>
           <Select value={transport.status} label="Status"
@@ -1105,6 +1209,8 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
               setTransportOpen(false);
               setEditTransportIdx(null);
               setIsReturnLeg(false);
+              setReimbursable(false);
+              setPayer('tbc');
               setTransport({ ...BLANK_TRANSPORT, details: { ...BLANK_TRANSPORT.details } });
             }}
             fullWidth={mobile} size="large"
@@ -1195,6 +1301,20 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
               onChange={e => setAccom(p => ({ ...p, confirmationNumber: e.target.value }))} />
             <TextField label="Cost (€)" type="number" fullWidth value={accom.cost}
               onChange={e => setAccom(p => ({ ...p, cost: e.target.value }))} />
+            {isWorkTrip && accom.type !== 'friends_family' && (<>
+              <FormControlLabel
+                control={<Switch checked={reimbursable} onChange={e => setReimbursable(e.target.checked)} />}
+                label={<Typography variant="body2" sx={{ fontWeight: 600, fontFamily: D.body }}>Reimbursable?</Typography>}
+              />
+              {reimbursable && (
+                <FormControl fullWidth>
+                  <InputLabel>Payer</InputLabel>
+                  <Select value={payer} label="Payer" onChange={e => setPayer(e.target.value)}>
+                    {EXPENSE_PAYERS.map(p => <MenuItem key={p.value} value={p.value}>{getPayerLabel(p.value, trip)}</MenuItem>)}
+                  </Select>
+                </FormControl>
+              )}
+            </>)}
             <FormControl fullWidth>
               <InputLabel>Status</InputLabel>
               <Select value={accom.status} label="Status"
@@ -1210,7 +1330,7 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 3, gap: 1, flexDirection: { xs: 'column-reverse', sm: 'row' } }}>
           <Button
-            onClick={() => { setAccomOpen(false); setEditAccomIdx(null); setAccom({ ...BLANK_ACCOM }); }}
+            onClick={() => { setAccomOpen(false); setEditAccomIdx(null); setAccom({ ...BLANK_ACCOM }); setReimbursable(false); setPayer('tbc'); }}
             fullWidth={mobile} size="large"
             sx={{ fontFamily: D.body }}
           >
@@ -1296,6 +1416,20 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
               onChange={e => setVenue(p => ({ ...p, confirmationNumber: e.target.value }))} />
             <TextField label="Cost (€)" type="number" fullWidth value={venue.cost}
               onChange={e => setVenue(p => ({ ...p, cost: e.target.value }))} />
+            {isWorkTrip && (<>
+              <FormControlLabel
+                control={<Switch checked={reimbursable} onChange={e => setReimbursable(e.target.checked)} />}
+                label={<Typography variant="body2" sx={{ fontWeight: 600, fontFamily: D.body }}>Reimbursable?</Typography>}
+              />
+              {reimbursable && (
+                <FormControl fullWidth>
+                  <InputLabel>Payer</InputLabel>
+                  <Select value={payer} label="Payer" onChange={e => setPayer(e.target.value)}>
+                    {EXPENSE_PAYERS.map(p => <MenuItem key={p.value} value={p.value}>{getPayerLabel(p.value, trip)}</MenuItem>)}
+                  </Select>
+                </FormControl>
+              )}
+            </>)}
             <TextField label="Website (optional)" fullWidth placeholder="https://3arena.ie"
               value={venue.website} onChange={e => setVenue(p => ({ ...p, website: e.target.value }))} />
             <FormControl fullWidth>
@@ -1313,7 +1447,7 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 3, gap: 1, flexDirection: { xs: 'column-reverse', sm: 'row' } }}>
           <Button
-            onClick={() => { setVenueOpen(false); setEditVenueIdx(null); setVenue({ ...BLANK_VENUE }); }}
+            onClick={() => { setVenueOpen(false); setEditVenueIdx(null); setVenue({ ...BLANK_VENUE }); setReimbursable(false); setPayer('tbc'); }}
             fullWidth={mobile} size="large"
             sx={{ fontFamily: D.body }}
           >

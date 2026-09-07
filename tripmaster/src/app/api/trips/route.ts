@@ -4,6 +4,7 @@ import connectDB from "@/lib/mongodb/connection";
 import Trip from "@/lib/mongodb/models/Trip";
 import TripLogistics from "@/lib/mongodb/models/TripLogistics";
 import User from "@/lib/mongodb/models/User";
+import { getLogisticsFacts } from "@/lib/logistics/facts";
 
 async function geocodeLocation(city: string, country: string): Promise<{ lat: number; lng: number } | null> {
   const token = process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN;
@@ -37,16 +38,16 @@ export async function GET() {
   const tripsWithReadiness = trips.map(trip => {
     const plain = trip.toObject();
     const log   = logisticsMap.get(String(trip._id));
-    const transportation = log?.transportation ?? [];
-    const accommodation  = log?.accommodation  ?? [];
-    const venues         = log?.venues         ?? [];
+    // Same shared logic the trip Overview uses — a trip can't be "transport confirmed"
+    // on the dashboard while still missing its return leg on its own Overview screen.
+    const facts = getLogisticsFacts(log, plain, plain.dismissedChecks ?? []);
     plain.readiness = {
-      transportCount:         transportation.length,
-      transportConfirmed:     transportation.length > 0 && transportation.every((t: any) => t.status === "confirmed" || t.status === "booked"),
-      transportAnyConfirmed:  transportation.some((t: any) => t.status === "confirmed" || t.status === "booked"),
-      accommodationCount:     accommodation.length,
-      accommodationConfirmed: accommodation.length > 0 && accommodation.every((a: any) => a.status === "confirmed" || a.status === "booked"),
-      venueCount:             venues.length,
+      transportCount:         facts.transport.count,
+      transportConfirmed:     facts.transport.allConfirmed,
+      transportAnyConfirmed:  facts.transport.anyConfirmed,
+      accommodationCount:     facts.accommodation.count,
+      accommodationConfirmed: facts.accommodation.allConfirmed,
+      venueCount:             facts.venues.count,
     };
     return plain;
   });

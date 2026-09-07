@@ -38,8 +38,10 @@ import IntelligenceTab     from '@/components/intelligence/IntelligenceTab';
 import WeatherTab          from '@/components/weather/WeatherTab';
 import TripOverview        from '@/components/overview/TripOverview';
 import FilesTab            from '@/components/files/FilesTab';
+import ExpensesTab         from '@/components/expenses/ExpensesTab';
 import OnTripScreen        from '@/components/trips/OnTripScreen';
 import ReceiptIcon         from '@mui/icons-material/Receipt';
+import CameraAltIcon       from '@mui/icons-material/CameraAlt';
 import ThunderstormIcon    from '@mui/icons-material/Thunderstorm';
 import AcUnitIcon          from '@mui/icons-material/AcUnit';
 import UmbrellaIcon        from '@mui/icons-material/Umbrella';
@@ -48,6 +50,7 @@ import GrainIcon           from '@mui/icons-material/Grain';
 
 import dynamic             from 'next/dynamic';
 import { saveTripCache, getTripCache, queueAction } from '@/lib/offline/db';
+import { useFlushQueueOnReconnect } from '@/lib/offline/useFlushQueue';
 import { autoCacheTripFiles } from '@/lib/offline/fileCache';
 import { COUNTRY_LIST }    from '@/lib/data/countries';
 import AirportSearch       from '@/components/ui/AirportSearch';
@@ -140,6 +143,10 @@ interface Trip {
   coverPhotoThumb?:  string;
   coverPhotoCredit?: string;
   dismissedChecks?:  string[];
+  companyName?:      string;
+  promoterName?:     string;
+  clientName?:       string;
+  thirdPartyName?:   string;
   weather?: {
     summary?:       string;
     packingNotes?:  string[];
@@ -164,6 +171,11 @@ const TAB_CONFIG = [
   { label: 'Map',       Icon: MapIcon },
   { label: 'Resources', Icon: FolderOpenIcon },
 ];
+// Appended, not inserted, so no existing tab index ever shifts — this tab only
+// exists for work/mixed trips (see isWorkTrip / tabConfig below).
+const EXPENSES_TAB_INDEX = 8;
+const EXPENSES_TAB = { label: 'Expenses', Icon: ReceiptIcon };
+const isWorkTrip = (tripType?: string) => tripType === 'work' || tripType === 'mixed';
 
 export type FabTrigger = { action: string; seq: number };
 type FabActionConfig = { label: string; icon: React.ReactNode; action: string };
@@ -172,6 +184,7 @@ const ACTION_TAB_MAP: Record<string, number> = {
   transport: 1, accom: 1, venue: 1,
   stop: 2, item: 3,
   note: 7, todo: 7, link: 7, contact: 7, file: 7,
+  expense_capture: EXPENSES_TAB_INDEX,
 };
 
 const TAB_FAB_ACTIONS: Record<number, FabActionConfig[]> = {
@@ -201,6 +214,9 @@ const TAB_FAB_ACTIONS: Record<number, FabActionConfig[]> = {
     { label: 'Contact',       icon: <PersonAddIcon />,      action: 'contact'   },
     { label: 'File',          icon: <UploadFileIcon />,     action: 'file'      },
   ],
+  [EXPENSES_TAB_INDEX]: [
+    { label: 'Capture expense', icon: <CameraAltIcon />, action: 'expense_capture' },
+  ],
 };
 
 // ─── Hero dashboard helpers ───────────────────────────────────────────────────
@@ -223,6 +239,8 @@ export default function TripPage() {
   const theme    = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
 
+  useFlushQueueOnReconnect();
+
   const [trip,      setTrip]      = useState<Trip | null>(null);
   const [activeTab, setActiveTab] = useState(0);
   const [editOpen,  setEditOpen]  = useState(false);
@@ -230,6 +248,7 @@ export default function TripPage() {
     name: '', tripType: '', purpose: '', startDate: '', endDate: '', status: '',
     originCity: '', originCountry: '', originCountryCode: '', originIata: '',
     destinationCity: '', destinationCountry: '', destinationCountryCode: '', destinationIata: '',
+    companyName: '', promoterName: '', clientName: '', thirdPartyName: '',
   });
 
   const [fabTrigger, setFabTrigger] = useState<FabTrigger | null>(null);
@@ -243,6 +262,15 @@ export default function TripPage() {
   const [deleting,           setDeleting]           = useState(false);
   const [deleteError,        setDeleteError]        = useState('');
   const [localTime,          setLocalTime]          = useState('');
+
+  // Profile's default company name — falls back into any trip that doesn't have its
+  // own companyName set (older trips, or trips created before the profile had one).
+  const [profileCompanyName, setProfileCompanyName] = useState('');
+  useEffect(() => {
+    fetch('/api/user/profile').then(r => r.json()).then(data => {
+      if (data.user?.companyName) setProfileCompanyName(data.user.companyName);
+    }).catch(() => {});
+  }, []);
 
   useEffect(() => {
     async function loadTrip() {
@@ -305,6 +333,10 @@ export default function TripPage() {
       destinationCountry:     (trip.destination as any)?.country ?? '',
       destinationCountryCode: (trip.destination as any)?.countryCode ?? '',
       destinationIata:        (trip.destination as any)?.iataCode ?? '',
+      companyName:     trip.companyName || profileCompanyName,
+      promoterName:    trip.promoterName    ?? '',
+      clientName:      trip.clientName      ?? '',
+      thirdPartyName:  trip.thirdPartyName  ?? '',
     });
     setEditOpen(true);
   };
@@ -335,10 +367,6 @@ export default function TripPage() {
 
     if (!navigator.onLine) {
       await queueAction({ type: 'UPDATE_TRIP', tripId: trip._id, payload });
-      if ('serviceWorker' in navigator && 'SyncManager' in window) {
-        const reg = await navigator.serviceWorker.ready;
-        await (reg as any).sync.register('tabiji-sync');
-      }
       setTrip({ ...trip, ...payload });
       setEditOpen(false);
       return;
@@ -355,17 +383,24 @@ export default function TripPage() {
   };
 
   const getTripFabActions = (tripType: string): Record<number, FabActionConfig[]> => {
-    const expenseAction: FabActionConfig = {
+    // 'expense' (external link to the existing admin system) and 'expense_capture'
+    // (the in-app quick-capture flow) are two different things and coexist deliberately.
+    const logExpenseAction: FabActionConfig = {
       label: 'Log expense', icon: <ReceiptIcon />, action: 'expense',
     };
-    const isWork = tripType === 'work' || tripType === 'mixed';
-    return {
-      0: [...TAB_FAB_ACTIONS[0], ...(isWork ? [expenseAction] : [])],
-      1: [...TAB_FAB_ACTIONS[1], ...(isWork ? [expenseAction] : [])],
+    const captureExpenseAction: FabActionConfig = {
+      label: 'Capture expense', icon: <CameraAltIcon />, action: 'expense_capture',
+    };
+    const isWork = isWorkTrip(tripType);
+    const result: Record<number, FabActionConfig[]> = {
+      0: [...TAB_FAB_ACTIONS[0], ...(isWork ? [logExpenseAction, captureExpenseAction] : [])],
+      1: [...TAB_FAB_ACTIONS[1], ...(isWork ? [logExpenseAction, captureExpenseAction] : [])],
       2: TAB_FAB_ACTIONS[2],
       3: TAB_FAB_ACTIONS[3],
       7: TAB_FAB_ACTIONS[7],
     };
+    if (isWork) result[EXPENSES_TAB_INDEX] = TAB_FAB_ACTIONS[EXPENSES_TAB_INDEX] ?? [];
+    return result;
   };
 
 
@@ -418,6 +453,14 @@ export default function TripPage() {
   };
 
   if (!trip) return null;
+
+  // Appended only for work/mixed trips — never renumbers tabs 0-7.
+  const tabConfig = isWorkTrip(trip.tripType) ? [...TAB_CONFIG, EXPENSES_TAB] : TAB_CONFIG;
+
+  // Same profile fallback as the Edit Trip pre-fill, applied here too so Expenses/
+  // Logistics show the real company name immediately — not just after someone has
+  // opened Edit Trip and saved once.
+  const tripWithDefaults = { ...trip, companyName: trip.companyName || profileCompanyName };
 
   const daysUntil = trip.startDate
     ? Math.ceil((new Date(trip.startDate).getTime() - Date.now()) / 86400000)
@@ -554,7 +597,7 @@ export default function TripPage() {
                 textShadow: '0 3px 20px rgba(0,0,0,0.7)',
                 mb: 0.75,
               }}>
-                {TAB_CONFIG[activeTab]?.label}
+                {tabConfig[activeTab]?.label}
               </Typography>
 
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
@@ -660,7 +703,7 @@ export default function TripPage() {
                   },
                 }}
               >
-                {TAB_CONFIG.map(({ label, Icon }) => (
+                {tabConfig.map(({ label, Icon }) => (
                   <Tab key={label} label={label} icon={<Icon />} iconPosition="top" />
                 ))}
               </Tabs>
@@ -724,7 +767,7 @@ export default function TripPage() {
                           },
                         }}
                       >
-                        {TAB_CONFIG.map(({ label, Icon }) => (
+                        {tabConfig.map(({ label, Icon }) => (
                           <Tab key={label} label={label} icon={<Icon />} iconPosition="top" />
                         ))}
                       </Tabs>
@@ -741,7 +784,7 @@ export default function TripPage() {
               ref={trip.status === 'active' ? tabContentRef : undefined}
               sx={{ scrollMarginTop: '66px' }}
             >
-              {activeTab === 1 && <LogisticsTab tripId={trip._id} trip={trip} fabTrigger={fabTrigger} />}
+              {activeTab === 1 && <LogisticsTab tripId={trip._id} trip={tripWithDefaults} fabTrigger={fabTrigger} />}
               {activeTab === 2 && <ItineraryTab tripId={trip._id} startDate={trip.startDate} endDate={trip.endDate} fabTrigger={fabTrigger} onSwitchToDiscover={() => setActiveTab(4)} />}
               {activeTab === 3 && <PackingTab tripId={trip._id} tripType={trip.tripType} nights={trip.nights} startDate={trip.startDate} fabTrigger={fabTrigger} />}
               {activeTab === 4 && <IntelligenceTab tripId={trip._id} />}
@@ -755,6 +798,9 @@ export default function TripPage() {
               )}
               {activeTab === 6 && <MapTab tripId={trip._id} trip={trip} />}
               {activeTab === 7 && <FilesTab tripId={trip._id} fabTrigger={fabTrigger} />}
+              {activeTab === EXPENSES_TAB_INDEX && isWorkTrip(trip.tripType) && (
+                <ExpensesTab tripId={trip._id} trip={tripWithDefaults} fabTrigger={fabTrigger} />
+              )}
             </Box>
           </Container>
         )}
@@ -907,6 +953,38 @@ export default function TripPage() {
                   <MenuItem value="mixed"   sx={{ fontFamily: D.body }}>Mixed</MenuItem>
                 </Select>
               </FormControl>
+              {isWorkTrip(editForm.tripType) && (<>
+                <Typography sx={{
+                  fontFamily: D.body, fontSize: '0.7rem', fontWeight: 700, textTransform: 'uppercase',
+                  letterSpacing: '0.08em', color: 'text.secondary', mt: 0.5,
+                }}>
+                  Who's paying
+                </Typography>
+                <TextField label="Company name" value={editForm.companyName}
+                  onChange={e => setEditForm(p => ({ ...p, companyName: e.target.value }))}
+                  fullWidth placeholder="e.g. Improvised Music Company"
+                  InputProps={{ sx: { fontFamily: D.body } }}
+                  InputLabelProps={{ sx: { fontFamily: D.body } }}
+                />
+                <TextField label="Promoter name" value={editForm.promoterName}
+                  onChange={e => setEditForm(p => ({ ...p, promoterName: e.target.value }))}
+                  fullWidth placeholder="e.g. Blue Note Festival"
+                  InputProps={{ sx: { fontFamily: D.body } }}
+                  InputLabelProps={{ sx: { fontFamily: D.body } }}
+                />
+                <TextField label="Client name" value={editForm.clientName}
+                  onChange={e => setEditForm(p => ({ ...p, clientName: e.target.value }))}
+                  fullWidth placeholder="e.g. XYZ Corp"
+                  InputProps={{ sx: { fontFamily: D.body } }}
+                  InputLabelProps={{ sx: { fontFamily: D.body } }}
+                />
+                <TextField label="Third-party name" value={editForm.thirdPartyName}
+                  onChange={e => setEditForm(p => ({ ...p, thirdPartyName: e.target.value }))}
+                  fullWidth
+                  InputProps={{ sx: { fontFamily: D.body } }}
+                  InputLabelProps={{ sx: { fontFamily: D.body } }}
+                />
+              </>)}
               <TextField label="Purpose / notes" value={editForm.purpose}
                 onChange={e => setEditForm(p => ({ ...p, purpose: e.target.value }))}
                 fullWidth multiline rows={2}

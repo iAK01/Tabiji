@@ -35,7 +35,8 @@ import { useEffect, useState } from 'react';
 import DocumentViewer, { type ViewableFile } from '@/components/files/DocumentViewer';
 import AttachFileIcon from '@mui/icons-material/AttachFile';
 import TripCalendar from '@/components/calendar/TripCalendar';
-import { saveTripList, getTripList, getQueue, clearQueue } from '@/lib/offline/db';
+import { saveTripList, getTripList } from '@/lib/offline/db';
+import { useFlushQueueOnReconnect } from '@/lib/offline/useFlushQueue';
 import TripReadinessPanel from '@/components/dashboard/TripReadinessPanel';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -531,25 +532,7 @@ export default function Dashboard() {
     loadRightNow();
   }, [trips]);
 
-  useEffect(() => {
-    async function syncQueue() {
-      if (!navigator.onLine) return;
-      const queued = await getQueue();
-      for (const item of queued) {
-        if (item.type === 'CREATE_TRIP') {
-          await fetch('/api/trips', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(item.body),
-          });
-        }
-      }
-      if (queued.length > 0) await clearQueue();
-    }
-    window.addEventListener('online', syncQueue);
-    syncQueue();
-    return () => window.removeEventListener('online', syncQueue);
-  }, []);
+  useFlushQueueOnReconnect();
 
   const activeTrip   = trips.find(t => t.status === 'active') ?? null;
   const visibleTrips = filterTrips(trips, tab);

@@ -184,9 +184,19 @@ export async function POST(
   const file = formData.get('file') as File | null;
   if (!file) return NextResponse.json({ error: 'file is required' }, { status: 400 });
 
-  const ALLOWED_MIME = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp', 'image/heic'];
-  if (!ALLOWED_MIME.includes(file.type)) {
-    return NextResponse.json({ error: 'Only PDF and image files are accepted' }, { status: 400 });
+  const ALLOWED_MIME = [
+    'application/pdf',
+    'image/jpeg', 'image/png', 'image/webp', 'image/heic',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document', // .docx
+    'application/msword',                                                       // .doc
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',        // .xlsx
+    'application/vnd.ms-excel',                                                 // .xls
+    'text/csv', 'text/plain', 'text/markdown',
+  ];
+  // Some browsers report .csv as application/vnd.ms-excel or an empty type — fall back to the extension.
+  const extOk = /\.(pdf|jpe?g|png|webp|heic|docx?|xlsx?|csv|txt|md)$/i.test(file.name);
+  if (!ALLOWED_MIME.includes(file.type) && !extOk) {
+    return NextResponse.json({ error: 'Accepted: PDF, image, Word, Excel, CSV or text files' }, { status: 400 });
   }
   if (file.size > 20 * 1024 * 1024) {
     return NextResponse.json({ error: 'File exceeds 20MB limit' }, { status: 400 });

@@ -23,6 +23,15 @@ const TripSchema = new Schema({
   nights:    Number,
   tripType:  { type: String, enum: ['work', 'leisure', 'mixed'] },
   purpose:   String,
+  // Real names for who's on the other end of a reimbursable expense on this trip —
+  // often unknown when the trip is first created, filled in once known via Edit Trip.
+  // Surfaced in Expenses so "Promoter" reads as "Blue Note Festival" instead. Company
+  // is here too — not assumed constant across trips, some users invoice through
+  // different entities depending on the trip.
+  companyName:    String,
+  promoterName:   String,
+  clientName:     String,
+  thirdPartyName: String,
   coverPhotoUrl:    String,
   coverPhotoThumb:  String,
   coverPhotoCredit: String,

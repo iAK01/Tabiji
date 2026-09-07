@@ -3,12 +3,13 @@
 import { useState }        from 'react';
 import {
   Dialog, DialogTitle, DialogContent, DialogActions,
-  Box, Typography, Button, Checkbox, CircularProgress, Alert,
+  Box, Typography, Button, Checkbox, CircularProgress, LinearProgress, Alert,
 } from '@mui/material';
 import AutoFixHighIcon    from '@mui/icons-material/AutoFixHigh';
 import HotelIcon          from '@mui/icons-material/Hotel';
 import LocationOnIcon     from '@mui/icons-material/LocationOn';
 import CalendarTodayIcon  from '@mui/icons-material/CalendarToday';
+import DirectionsIcon     from '@mui/icons-material/Directions';
 
 const D = {
   green:   '#6B7C5C',
@@ -45,10 +46,23 @@ export interface ExtractedStop {
   notes?: string;
 }
 
+export interface ExtractedTransport {
+  type: string;
+  departureLocation?: string;
+  arrivalLocation?: string;
+  departureTime?: string | null;
+  arrivalTime?: string | null;
+  confirmationNumber?: string | null;
+  flightNumber?: string | null;
+  operator?: string | null;
+  notes?: string;
+}
+
 export interface ExtractedData {
   accommodation: ExtractedAccommodation[];
   venues: ExtractedVenue[];
   itineraryStops: ExtractedStop[];
+  transport: ExtractedTransport[];
 }
 
 interface Props {
@@ -75,6 +89,11 @@ function fmtTime(t?: string | null) {
 
 function fmtType(t: string) {
   return t.charAt(0).toUpperCase() + t.slice(1).replace(/_/g, ' ');
+}
+
+function transportLabel(t: ExtractedTransport) {
+  const route = [t.departureLocation, t.arrivalLocation].filter(Boolean).join(' → ');
+  return t.flightNumber || route || fmtType(t.type || 'transport');
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
@@ -144,24 +163,30 @@ export default function SmartExtractModal({ open, onClose, tripId, data, filenam
   const allAccomm = data.accommodation    ?? [];
   const allVenues = data.venues           ?? [];
   const allStops  = data.itineraryStops   ?? [];
+  const allTrans  = data.transport        ?? [];
 
   const [selAccomm, setSelAccomm] = useState<boolean[]>(() => allAccomm.map(() => true));
   const [selVenues, setSelVenues] = useState<boolean[]>(() => allVenues.map(() => true));
   const [selStops,  setSelStops]  = useState<boolean[]>(() => allStops.map(() => true));
+  const [selTrans,  setSelTrans]  = useState<boolean[]>(() => allTrans.map(() => true));
   const [importing, setImporting] = useState(false);
+  const [progress,  setProgress]  = useState(0);
   const [done,      setDone]      = useState<{ ok: number; failed: string[] } | null>(null);
 
   const selectedCount =
     selAccomm.filter(Boolean).length +
     selVenues.filter(Boolean).length +
-    selStops.filter(Boolean).length;
+    selStops.filter(Boolean).length +
+    selTrans.filter(Boolean).length;
 
-  const isEmpty = allAccomm.length === 0 && allVenues.length === 0 && allStops.length === 0;
+  const isEmpty = allAccomm.length === 0 && allVenues.length === 0 && allStops.length === 0 && allTrans.length === 0;
 
   async function handleImport() {
     setImporting(true);
+    setProgress(0);
     let ok = 0;
     const failed: string[] = [];
+    const step = () => setProgress(p => p + 1);
 
     for (let i = 0; i < allAccomm.length; i++) {
       if (!selAccomm[i]) continue;
@@ -174,6 +199,7 @@ export default function SmartExtractModal({ open, onClose, tripId, data, filenam
         });
         res.ok ? ok++ : failed.push(a.name);
       } catch { failed.push(a.name); }
+      step();
     }
 
     for (let i = 0; i < allVenues.length; i++) {
@@ -187,6 +213,7 @@ export default function SmartExtractModal({ open, onClose, tripId, data, filenam
         });
         res.ok ? ok++ : failed.push(v.name);
       } catch { failed.push(v.name); }
+      step();
     }
 
     // Ensure itinerary is initialised before adding stops
@@ -216,6 +243,35 @@ export default function SmartExtractModal({ open, onClose, tripId, data, filenam
         });
         res.ok ? ok++ : failed.push(s.name);
       } catch { failed.push(s.name); }
+      step();
+    }
+
+    for (let i = 0; i < allTrans.length; i++) {
+      if (!selTrans[i]) continue;
+      const t = allTrans[i];
+      const label = transportLabel(t);
+      try {
+        const res = await fetch(`/api/trips/${tripId}/logistics/transport`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            type:               t.type || 'flight',
+            status:             'confirmed',
+            departureLocation:  t.departureLocation ?? '',
+            arrivalLocation:    t.arrivalLocation   ?? '',
+            departureTime:      t.departureTime     ?? '',
+            arrivalTime:        t.arrivalTime       ?? '',
+            confirmationNumber: t.confirmationNumber ?? '',
+            notes:              t.notes ?? '',
+            details: {
+              flightNumber: t.flightNumber ?? '',
+              operator:     t.operator ?? '',
+            },
+          }),
+        });
+        res.ok ? ok++ : failed.push(label);
+      } catch { failed.push(label); }
+      step();
     }
 
     setImporting(false);
@@ -250,14 +306,16 @@ export default function SmartExtractModal({ open, onClose, tripId, data, filenam
             severity={done.failed.length === 0 ? 'success' : 'warning'}
             sx={{ fontFamily: D.body, fontSize: '0.85rem' }}
           >
-            {done.ok} item{done.ok !== 1 ? 's' : ''} imported successfully.
+            {done.ok > 0
+              ? <>Added {done.ok} item{done.ok !== 1 ? 's' : ''} to your trip — check the Logistics and Itinerary tabs.</>
+              : <>Nothing was added.</>}
             {done.failed.length > 0 && (
-              <> Could not add: {done.failed.join(', ')}. These may fall outside the trip dates.</>
+              <> Couldn’t add: {done.failed.join(', ')}. These may fall outside the trip dates.</>
             )}
           </Alert>
         ) : isEmpty ? (
           <Alert severity="warning" sx={{ fontFamily: D.body, fontSize: '0.85rem' }}>
-            No structured data was found in this document.
+            Nothing to import — no hotels, venues, schedule or transport were found.
           </Alert>
         ) : (
           <>
@@ -311,9 +369,38 @@ export default function SmartExtractModal({ open, onClose, tripId, data, filenam
                 ))}
               </Section>
             )}
+
+            {allTrans.length > 0 && (
+              <Section title={`Transport · ${allTrans.length}`} icon={<DirectionsIcon sx={{ fontSize: 15 }} />} color={D.navy}>
+                {allTrans.map((t, i) => (
+                  <CheckItem
+                    key={i}
+                    checked={selTrans[i]}
+                    onChange={val => setSelTrans(p => { const n = [...p]; n[i] = val; return n; })}
+                    primary={transportLabel(t)}
+                    secondary={[fmtType(t.type), fmtDate(t.departureTime?.split('T')[0]), fmtTime(t.departureTime)].filter(Boolean).join(' · ')}
+                    note={[t.confirmationNumber ? `Ref ${t.confirmationNumber}` : '', t.operator, t.notes].filter(Boolean).join(' · ')}
+                  />
+                ))}
+              </Section>
+            )}
           </>
         )}
       </DialogContent>
+
+      {importing && (
+        <Box sx={{ px: 3, pb: 1 }}>
+          <LinearProgress
+            variant={selectedCount ? 'determinate' : 'indeterminate'}
+            value={selectedCount ? Math.round((progress / selectedCount) * 100) : undefined}
+            sx={{ borderRadius: 1, height: 5, backgroundColor: 'rgba(107,124,92,0.15)',
+              '& .MuiLinearProgress-bar': { backgroundColor: D.green } }}
+          />
+          <Typography sx={{ fontFamily: D.body, fontSize: '0.75rem', color: 'text.secondary', mt: 0.75 }}>
+            Adding {Math.min(progress + 1, selectedCount)} of {selectedCount}…
+          </Typography>
+        </Box>
+      )}
 
       <DialogActions sx={{ px: 3, pb: 2.5, gap: 1 }}>
         <Button
@@ -336,7 +423,7 @@ export default function SmartExtractModal({ open, onClose, tripId, data, filenam
               '&.Mui-disabled': { backgroundColor: 'rgba(107,124,92,0.3)' },
             }}
           >
-            {importing ? 'Importing…' : `Import ${selectedCount} item${selectedCount !== 1 ? 's' : ''}`}
+            {importing ? 'Adding…' : `Import ${selectedCount} item${selectedCount !== 1 ? 's' : ''}`}
           </Button>
         )}
       </DialogActions>

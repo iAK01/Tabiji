@@ -44,9 +44,13 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   const trip = await Trip.findOne({ _id: id, userId: user._id, deleted: false });
   if (!trip) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
-  // Check cache
+  // Check cache — but never trust a cached forecast that predates the user
+  // having a home location set. Otherwise a trip opened before the profile
+  // had a home address stays stuck with no home comparison until the TTL
+  // happens to lapse, even though the profile has since been fixed.
   const cached = trip.weather;
-  if (cached?.fetchedAt) {
+  const staleMissingHomeComparison = !!user.homeLocation?.city && !cached?.homeComparison;
+  if (cached?.fetchedAt && !staleMissingHomeComparison) {
     const age = Date.now() - new Date(cached.fetchedAt).getTime();
     const ttl = cached.mode === 'historical' ? HISTORICAL_TTL_MS : FORECAST_TTL_MS;
     if (age < ttl) return NextResponse.json({ weather: cached, cached: true });

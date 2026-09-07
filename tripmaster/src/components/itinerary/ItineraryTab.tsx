@@ -27,7 +27,7 @@ import {
 import type { Day, Stop, KnownLocation } from './Itinerary.config';
 import {
   stopStartMinutes, stopDuration, formatTime,
-  freeSlots, totalFreeMinutes, freeLabelText, computeStopColumns,
+  freeSlots, freeLabelText, computeStopColumns,
 } from './Itinerary.helpers';
 import { HourRuler, GridLines, FreeGap, TravelConnector } from './Timelinechrome';
 import { StopBlock }            from './Stopblock';
@@ -42,7 +42,7 @@ interface Props {
   onSwitchToDiscover?: () => void;
 }
 
-export default function ItineraryTab({ tripId, startDate, endDate, fabTrigger, onSwitchToDiscover }: Props) {
+export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover }: Props) {
   const theme    = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
 
@@ -67,8 +67,12 @@ export default function ItineraryTab({ tripId, startDate, endDate, fabTrigger, o
   const nowLineRef = useRef<HTMLDivElement>(null);
 
   // ── Auto-select today when days load ─────────────────────────────────────────
+  // Only on the initial load — must not re-fire every time `days` changes (e.g. after
+  // adding a stop), or the active day tab snaps back to today mid-edit.
+  const hasAutoSelectedRef = useRef(false);
   useEffect(() => {
-    if (days.length === 0) return;
+    if (days.length === 0 || hasAutoSelectedRef.current) return;
+    hasAutoSelectedRef.current = true;
     const todayStr = new Date().toDateString();
     const idx = days.findIndex(d => new Date(d.date).toDateString() === todayStr);
     if (idx !== -1) setActiveDayIdx(idx);

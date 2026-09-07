@@ -36,6 +36,8 @@ import DocumentViewer, { type ViewableFile } from '@/components/files/DocumentVi
 import PreTripAppsCard from '@/components/overview/PreTripAppsCard';
 import { saveTripCache, getTripCache } from '@/lib/offline/db';
 import { totalFreeMinutes, freeLabelText } from '@/components/itinerary/Itinerary.helpers';
+import { getLogisticsFacts } from '@/lib/logistics/facts';
+import { getTransportLabel } from '@/components/logistics/logistics.helpers';
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 
@@ -154,130 +156,6 @@ const SectionTag = ({ children, color = D.muted, icon }: { children: React.React
   </Box>
 );
 
-
-function statusDot(level: 'ok' | 'warn' | 'empty') {
-  if (level === 'ok')   return <CheckCircleIcon sx={{ fontSize: 14, color: 'success.main', flexShrink: 0 }} />;
-  if (level === 'warn') return <WarningAmberIcon sx={{ fontSize: 14, color: 'warning.main', flexShrink: 0 }} />;
-  return <RadioButtonUncheckedIcon sx={{ fontSize: 14, color: 'text.disabled', flexShrink: 0 }} />;
-}
-
-// ─── Strip wrapper ────────────────────────────────────────────────────────────
-
-function Strip({
-  icon, label, tab, onNavigate, status, onDismiss, children, sectionKey,
-}: {
-  icon:       React.ReactNode;
-  label:      string;
-  tab:        number;
-  onNavigate: (tab: number) => void;
-  status?:    'ok' | 'warn' | 'empty';
-  onDismiss?: () => void;
-  children:   React.ReactNode;
-  sectionKey: keyof typeof SECTION_COLOURS;
-}) {
-  const colours = SECTION_COLOURS[sectionKey];
-  return (
-    <Paper elevation={0} sx={{
-      overflow: 'hidden',
-      border: '1.5px solid',
-      borderColor: status === 'warn' ? 'rgba(237,108,2,0.4)' : D.rule,
-      borderRadius: '12px',
-    }}>
-      {/* Header */}
-      <Box
-        onClick={() => onNavigate(tab)}
-        sx={{
-          px: 2.5, py: 1.5,
-          display: 'flex', alignItems: 'center', gap: 1.5,
-          backgroundColor: colours.header,
-          cursor: 'pointer', userSelect: 'none',
-          transition: 'filter 0.15s ease',
-          '&:hover': { filter: 'brightness(1.12)' },
-        }}
-      >
-        <Box sx={{ color: 'rgba(255,255,255,0.6)', display: 'flex', alignItems: 'center', flexShrink: 0 }}>
-          {icon}
-        </Box>
-
-        <Typography sx={{
-          flexGrow: 1,
-          fontFamily: D.display,
-          fontSize: '1.2rem',
-          letterSpacing: '0.08em',
-          textTransform: 'uppercase',
-          color: 'white',
-        }}>
-          {label}
-        </Typography>
-
-        {status === 'ok' && (
-          <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: '#4ade80', flexShrink: 0 }} />
-        )}
-        {status === 'warn' && (
-          <WarningAmberIcon sx={{ fontSize: 16, color: '#fbbf24', flexShrink: 0 }} />
-        )}
-        {status === 'empty' && onDismiss && (
-          <Tooltip title="Not needed for this trip">
-            <IconButton
-              size="small"
-              onClick={e => { e.stopPropagation(); onDismiss(); }}
-              sx={{ p: 0.5, color: 'rgba(255,255,255,0.35)', '&:hover': { color: '#f87171', backgroundColor: 'rgba(248,113,113,0.1)' } }}
-            >
-              <BlockIcon sx={{ fontSize: 15 }} />
-            </IconButton>
-          </Tooltip>
-        )}
-        <ChevronRightIcon sx={{ fontSize: 18, color: 'rgba(255,255,255,0.35)', flexShrink: 0 }} />
-      </Box>
-
-      {/* Content */}
-      <Box sx={{ px: 2.5, py: 2, backgroundColor: colours.tint }}>
-        {children}
-      </Box>
-    </Paper>
-  );
-}
-
-// ─── Status row ───────────────────────────────────────────────────────────────
-
-function StatusRow({ icon, label, value, level, onDismiss }: {
-  icon:       React.ReactNode;
-  label:      string;
-  value:      string;
-  level:      'ok' | 'warn' | 'empty';
-  onDismiss?: () => void;
-}) {
-  return (
-    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, py: 0.6 }}>
-      <Box sx={{ color: 'text.disabled', display: 'flex', flexShrink: 0 }}>{icon}</Box>
-      <Typography sx={{
-        fontFamily: D.body, fontSize: '0.78rem', color: 'text.secondary',
-        minWidth: { xs: 72, sm: 90 }, flexShrink: 0, fontWeight: 600,
-      }}>
-        {label}
-      </Typography>
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.6, minWidth: 0, flexGrow: 1 }}>
-        {statusDot(level)}
-        <Typography sx={{
-          fontFamily: D.body, fontSize: '0.82rem', fontWeight: 700,
-          color: level === 'ok' ? 'success.main' : level === 'warn' ? 'warning.dark' : 'text.disabled',
-          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-        }}>
-          {value}
-        </Typography>
-      </Box>
-      {level === 'empty' && onDismiss && (
-        <Tooltip title="Not needed for this trip">
-          <IconButton size="small" onClick={e => { e.stopPropagation(); onDismiss(); }}
-            sx={{ p: 0.25, flexShrink: 0, color: 'text.disabled', '&:hover': { color: 'error.main' } }}>
-            <BlockIcon sx={{ fontSize: 13 }} />
-          </IconButton>
-        </Tooltip>
-      )}
-    </Box>
-  );
-}
-
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 const TICKET_TYPES = new Set([
@@ -389,37 +267,21 @@ export default function TripOverview({ trip, coverPhotoUrl, coverPhotoCredit, on
   const isUrgent = minsUntilNext !== null && minsUntilNext <= 30;
 
   // ── Logistics ─────────────────────────────────────────────────────────────
-  const flights       = logistics?.transportation?.filter((t: any) => t.type === 'flight') ?? [];
-  const nonFlights    = logistics?.transportation?.filter((t: any) => t.type !== 'flight') ?? [];
-  const accommodation = logistics?.accommodation ?? [];
-  const venues        = logistics?.venues ?? [];
-
-  const flightsStatus: 'ok' | 'warn' | 'empty' =
-    flights.length === 0 ? 'empty' :
-    flights.every((f: any) => ['confirmed', 'booked'].includes(f.status)) ? 'ok' : 'warn';
-
-  const accomStatus: 'ok' | 'warn' | 'empty' =
-    accommodation.length === 0 ? 'empty' :
-    accommodation.every((a: any) => ['confirmed', 'booked'].includes(a.status)) ? 'ok' : 'warn';
-
-  const venueStatus: 'ok' | 'warn' | 'empty' =
-    venues.length === 0 ? 'empty' :
-    venues.every((v: any) => ['confirmed', 'booked'].includes(v.status)) ? 'ok' : 'warn';
-
-  const transportStatus: 'ok' | 'warn' | 'empty' =
-    nonFlights.length === 0 ? 'empty' :
-    nonFlights.every((t: any) => ['confirmed', 'booked'].includes(t.status)) ? 'ok' : 'warn';
-
-  const logisticsOverall: 'ok' | 'warn' | 'empty' = (() => {
-    const active = [
-      !dismissed.includes('flights') ? flightsStatus : null,
-      !dismissed.includes('hotel')   ? accomStatus    : null,
-      !dismissed.includes('venues')  ? venueStatus    : null,
-    ].filter(Boolean) as ('ok' | 'warn' | 'empty')[];
-    if (active.some(s => s === 'warn'))  return 'warn';
-    if (active.every(s => s === 'ok'))   return 'ok';
-    return 'empty';
-  })();
+  // Single shared source of truth — the same function the dashboard's readiness
+  // panel uses, so the two screens can never disagree about what's outstanding.
+  const facts = getLogisticsFacts(logistics, trip, dismissed);
+  const outstandingLabels: string[] = [
+    ...(facts.transport.hasOutbound ? [] : ['Outbound travel']),
+    ...(facts.transport.hasReturn   ? [] : ['Return travel']),
+    ...facts.transport.unconfirmed.map((t: any) => getTransportLabel(t)),
+    ...(facts.accommodation.nightsMissing > 0
+      ? [`${facts.accommodation.nightsMissing} night${facts.accommodation.nightsMissing === 1 ? '' : 's'} accommodation`]
+      : []),
+    ...facts.accommodation.unconfirmed.map((a: any) => a.name || 'Accommodation'),
+    ...facts.venues.unconfirmed.map((v: any) => v.name || 'Venue'),
+    ...facts.groundGaps,
+  ];
+  const outstandingCount = outstandingLabels.length;
 
   // ── Itinerary ─────────────────────────────────────────────────────────────
   const totalStops = itinerary?.days?.reduce((acc: number, d: any) => acc + (d.stops?.length ?? 0), 0) ?? 0;
@@ -430,26 +292,6 @@ export default function TripOverview({ trip, coverPhotoUrl, coverPhotoCredit, on
   const packedItems   = items.filter((i: any) => i.packed).length;
   const packPct       = items.length > 0 ? Math.round((packedItems / items.length) * 100) : 0;
   const preTravelItems = items.filter((i: any) => !i.packed && i.preTravelAction);
-
-  const allLogisticsItems = [...flights, ...accommodation, ...venues, ...nonFlights];
-  const confirmedLogisticsCount = allLogisticsItems.filter((i: any) => ['confirmed', 'booked'].includes(i.status)).length;
-
-  const groundTransportLegs = trip.groundTransport
-    ? ([
-        trip.groundTransport.preDeparture,
-        trip.groundTransport.arrivalLeg,
-        trip.groundTransport.returnLeg,
-        trip.groundTransport.homeCloseout,
-      ] as (GroundTransportLeg | undefined)[])
-        .filter((leg): leg is GroundTransportLeg => !!leg && leg.status !== 'no_data' && leg.status !== 'not_applicable')
-    : [];
-  const transportGaps   = groundTransportLegs.filter(l => l.status === 'gap').length;
-  const transportSorted = groundTransportLegs.filter(l => l.status === 'sorted').length;
-
-  const totalLogisticsCount    = allLogisticsItems.length + groundTransportLegs.length;
-  const resolvedLogisticsCount = confirmedLogisticsCount + transportSorted;
-  const logisticsPct           = totalLogisticsCount > 0 ? Math.round((resolvedLogisticsCount / totalLogisticsCount) * 100) : 0;
-  const pendingLogisticsCount  = (allLogisticsItems.length - confirmedLogisticsCount) + transportGaps;
 
   const avgStops     = totalDays > 0 ? totalStops / totalDays : 0;
   const scheduleDesc = avgStops >= 6 ? 'Packed schedule' : avgStops >= 4 ? 'Busy schedule' : avgStops >= 2 ? 'Balanced schedule' : 'Light schedule';
@@ -464,52 +306,6 @@ export default function TripOverview({ trip, coverPhotoUrl, coverPhotoCredit, on
     }))
     .sort((a: { mins: number }, b: { mins: number }) => b.mins - a.mins)
     .slice(0, 3);
-
-  const pendingBookingItems = allLogisticsItems.filter((i: any) => !['confirmed', 'booked'].includes(i.status));
-
-  function parseDurMins(dur: string | null | undefined): number {
-    if (!dur) return 0;
-    const h = parseInt(dur.match(/(\d+)\s*h/)?.[1] ?? '0');
-    const m = parseInt(dur.match(/(\d+)\s*m/)?.[1] ?? '0');
-    return h * 60 + m;
-  }
-
-  function gapLabel(leg: GroundTransportLeg | undefined | null, fallback: string): string | null {
-    if (!leg || leg.status !== 'gap') return null;
-    // Procedural steps (customs clearance, schedule notes) have searchTerms: null — skip them.
-    const bookable = (leg.steps ?? []).filter(s => s.searchTerms);
-    if (!bookable.length) return leg.firstStop?.name ? `Get to ${leg.firstStop.name}` : fallback;
-    // For multi-city legs there are multiple bookable steps (airport rail + intercity train + last-mile taxi).
-    // The intercity hop is always the longest — sort by estimatedDuration and take the top one.
-    if (leg.isMultiCity && bookable.length > 1) {
-      const sorted = [...bookable].sort((a, b) => parseDurMins(b.estimatedDuration) - parseDurMins(a.estimatedDuration));
-      return sorted[0].label;
-    }
-    return bookable[0].label;
-  }
-
-  const groundGapLabels: string[] = [
-    gapLabel(trip.groundTransport?.preDeparture, 'Transfer to departure airport'),
-    gapLabel(trip.groundTransport?.arrivalLeg,   'Transfer from arrival airport'),
-    gapLabel(trip.groundTransport?.returnLeg,    'Return journey transport'),
-    gapLabel(trip.groundTransport?.homeCloseout, 'Transfer home from airport'),
-  ].filter((x): x is string => x !== null);
-  const pendingItemLabels: string[] = [
-    ...pendingBookingItems.map((item: any) => {
-      if (item.type === 'flight') {
-        const fn    = item.details?.flightNumber ?? '';
-        const from  = (item.departureLocation ?? '').split('—')[0].trim();
-        const to    = (item.arrivalLocation   ?? '').split('—')[0].trim();
-        const route = from && to ? `${from} → ${to}` : (from || to);
-        return [fn, route].filter(Boolean).join(' · ');
-      }
-      if (item.name) return item.name as string;
-      const from = item.departureLocation ?? '';
-      const to   = item.arrivalLocation   ?? '';
-      return from && to ? `${from} → ${to}` : (from || to || (item.type as string));
-    }),
-    ...groundGapLabels,
-  ];
 
   const packingStatus: 'ok' | 'warn' | 'empty' =
     items.length === 0 ? 'empty' :
@@ -809,33 +605,31 @@ export default function TripOverview({ trip, coverPhotoUrl, coverPhotoCredit, on
                   >
                     <Box sx={{ flex: 1 }}>
                       <SectionTag icon={<FlightIcon sx={{ fontSize: 14 }} />}>Logistics</SectionTag>
-                      {allLogisticsItems.length === 0 ? (
-                        <Typography sx={{ fontFamily: D.body, fontSize: '0.82rem', color: 'text.disabled', mt: 0.75 }}>Nothing added yet</Typography>
-                      ) : (
-                        <Box sx={{ mt: 0.75 }}>
-                          <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1.5 }}>
-                            <Typography sx={{
-                              fontFamily: D.display, fontSize: { xs: '3rem', md: '4rem' },
-                              lineHeight: 1, letterSpacing: '-0.04em',
-                              color: logisticsPct === 100 ? '#22c55e' : logisticsPct >= 75 ? '#f59e0b' : D.navy,
-                            }}>
-                              {logisticsPct}%
-                            </Typography>
-                            <Typography sx={{ fontFamily: D.body, fontSize: '0.8rem', color: D.muted }}>
-                              {pendingLogisticsCount > 0 ? `${pendingLogisticsCount} still to sort` : 'all confirmed'}
-                            </Typography>
+                      <Box sx={{ mt: 0.75 }}>
+                        <Typography sx={{
+                          fontFamily: D.display, fontSize: { xs: '3rem', md: '4rem' },
+                          lineHeight: 1, letterSpacing: '-0.04em',
+                          color: outstandingCount === 0 ? '#22c55e' : (daysUntil >= 0 && daysUntil <= 14) ? '#f59e0b' : D.navy,
+                        }}>
+                          {outstandingCount === 0 ? 'Sorted' : outstandingCount}
+                        </Typography>
+                        <Typography sx={{
+                          fontFamily: D.body, fontSize: '0.62rem', fontWeight: 700,
+                          letterSpacing: '0.14em', textTransform: 'uppercase',
+                          color: D.muted, mt: 0.5,
+                        }}>
+                          {outstandingCount === 0 ? 'All confirmed' : `Thing${outstandingCount === 1 ? '' : 's'} to sort`}
+                        </Typography>
+                        {outstandingLabels.length > 0 && (
+                          <Box sx={{ mt: 1.25, display: 'flex', flexDirection: 'column', gap: 0.4 }}>
+                            {outstandingLabels.map((label, i) => (
+                              <Typography key={i} sx={{ fontFamily: D.body, fontSize: '0.78rem', color: D.muted, lineHeight: 1.5 }}>
+                                · {label}
+                              </Typography>
+                            ))}
                           </Box>
-                          {pendingItemLabels.length > 0 && (
-                            <Box sx={{ mt: 1, display: 'flex', flexDirection: 'column', gap: 0.4 }}>
-                              {pendingItemLabels.map((label, i) => (
-                                <Typography key={i} sx={{ fontFamily: D.body, fontSize: '0.78rem', color: D.muted, lineHeight: 1.5 }}>
-                                  · {label}
-                                </Typography>
-                              ))}
-                            </Box>
-                          )}
-                        </Box>
-                      )}
+                        )}
+                      </Box>
                     </Box>
                     <ChevronRightIcon sx={{ fontSize: 20, color: 'rgba(29,38,66,0.2)', flexShrink: 0 }} />
                   </Box>

@@ -22,7 +22,9 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   const user = await User.findOne({ email: session.user.email });
   const trip = await Trip.findOne({ _id: id, userId: user._id, deleted: false });
   if (!trip) return NextResponse.json({ error: 'Not found' }, { status: 404 });
-  return NextResponse.json({ trip });
+  const tripObj = trip.toObject();
+  if (!tripObj.companyName && user?.companyName) tripObj.companyName = user.companyName;
+  return NextResponse.json({ trip: tripObj });
 }
 
 export async function PUT(req: Request, { params }: { params: Promise<{ id: string }> }) {

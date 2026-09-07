@@ -26,6 +26,7 @@ export async function PUT(req: Request) {
     {
       $set: {
         name: body.name,
+        companyName: body.companyName,
         homeLocation: body.homeLocation,       // coordinates included from client-side geocoding
         preferredAirport: body.preferredAirport ?? null,
         fallbackAirport:  body.fallbackAirport  ?? null,

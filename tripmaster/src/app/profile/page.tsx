@@ -58,7 +58,7 @@ interface HomeLocation {
 }
 
 interface UserProfile {
-  name: string; email: string;
+  name: string; email: string; companyName: string;
   homeLocation: HomeLocation;
   preferredAirport: { iata: string; name: string; city: string; country: string } | null;
   fallbackAirport:  { iata: string; name: string; city: string; country: string } | null;
@@ -68,7 +68,7 @@ interface UserProfile {
 }
 
 const emptyProfile: UserProfile = {
-  name: '', email: '',
+  name: '', email: '', companyName: '',
   homeLocation: {
     addressLine1: '', addressLine2: '', city: '', postcode: '',
     country: '', countryCode: '', coordinates: null,
@@ -441,6 +441,11 @@ export default function ProfilePage() {
               <Typography sx={{ fontSize: '0.88rem', color: D.muted, fontFamily: D.body, mt: 0.25 }}>
                 {profile.email}
               </Typography>
+              {profile.companyName && (
+                <Typography sx={{ fontSize: '0.88rem', color: D.muted, fontFamily: D.body, mt: 0.25 }}>
+                  {profile.companyName}
+                </Typography>
+              )}
             </SectionCard>
 
             <PushNotificationSetup />
@@ -601,13 +606,23 @@ export default function ProfilePage() {
 
             {/* Personal */}
             <SectionCard icon={PersonIcon} title="Personal" ghost={PersonIcon}>
-              <TextField
-                label="Full name"
-                value={form.name}
-                onChange={e => setForm(p => ({ ...p, name: e.target.value }))}
-                fullWidth
-                sx={{ '& input': { fontFamily: D.body } }}
-              />
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                <TextField
+                  label="Full name"
+                  value={form.name}
+                  onChange={e => setForm(p => ({ ...p, name: e.target.value }))}
+                  fullWidth
+                  sx={{ '& input': { fontFamily: D.body } }}
+                />
+                <TextField
+                  label="Company name"
+                  value={form.companyName}
+                  onChange={e => setForm(p => ({ ...p, companyName: e.target.value }))}
+                  fullWidth placeholder="e.g. Improvised Music Company"
+                  helperText="Used as the default 'Company' payer on new work trips — still editable per trip"
+                  sx={{ '& input': { fontFamily: D.body } }}
+                />
+              </Box>
             </SectionCard>
 
             {/* Home Location */}

@@ -20,6 +20,13 @@ import RestaurantIcon      from '@mui/icons-material/Restaurant';
 import SportsSoccerIcon    from '@mui/icons-material/SportsSoccer';
 import AttractionIcon      from '@mui/icons-material/AccountBalance';
 
+// IATA / direction logic now lives in the shared, framework-agnostic module so the
+// dashboard's server-side readiness computation can use the exact same logic as this
+// (client-only) file. Re-exported here so existing imports of these three from
+// './logistics.helpers' keep working unchanged.
+import { extractIata, classifyDirection, destinationReachedBy } from '@/lib/logistics/facts';
+export { extractIata, classifyDirection, destinationReachedBy };
+
 // ─── Design tokens ────────────────────────────────────────────────────────────
 export const D = {
   green:   '#6B7C5C',
@@ -264,11 +271,6 @@ export interface GapPromptItem {
   };
 }
 
-// Extract the IATA code from a stored location string, e.g. "DUB — Dublin" → "DUB"
-export function extractIata(location: string): string {
-  return (location ?? '').split('—')[0].trim().split(' ')[0].trim().toUpperCase();
-}
-
 export function detectTransportGaps(
   savedFlight: typeof BLANK_TRANSPORT,
   allTransport: any[],
@@ -332,62 +334,17 @@ export function detectTransportGaps(
   return gaps;
 }
 
-// ─── Direction classifier ─────────────────────────────────────────────────────
-// Returns 'there' if the transport item belongs to the outbound leg, 'back' for return.
-// Flights: matched by IATA code in departure location string.
-// Everything else: date-based split at trip midpoint.
-export function classifyDirection(t: any, trip: { startDate: string; endDate: string; origin?: { iataCode?: string }; destination?: { iataCode?: string } }): 'there' | 'back' {
-  const originIata = (trip.origin?.iataCode ?? '').toUpperCase();
-  const destIata   = (trip.destination?.iataCode ?? '').toUpperCase();
-
-  if (t.type === 'flight') {
-    const depLoc = (t.departureLocation ?? '').toUpperCase();
-    if (originIata && depLoc.includes(originIata)) return 'there';
-    if (destIata   && depLoc.includes(destIata))   return 'back';
-  }
-
-  if (t.departureTime) {
-    const start = new Date(toDateOnly(trip.startDate) + 'T00:00:00').getTime();
-    const end   = new Date(toDateOnly(trip.endDate)   + 'T23:59:59').getTime();
-    const mid   = (start + end) / 2;
-    const dep   = new Date(t.departureTime).getTime();
-    return dep <= mid ? 'there' : 'back';
-  }
-
-  return 'there';
-}
-
-// ─── Return-leg detection ──────────────────────────────────────────────────────
-// Has any saved transport item actually arrived at the trip's final destination?
-// Flights are matched by IATA code (reliable — trip.destination.iataCode is a real,
-// populated field). Other types have no equivalent code on the trip, so they fall
-// back to a city-name match against the arrival address — weaker, but it's the only
-// anchor the data model actually offers for ground transport.
-// Returns the matching transport item (so its arrival can seed the return leg's
-// departure), or null if the destination hasn't been reached yet.
-export function destinationReachedBy(
-  allTransport: any[],
-  trip: { destination?: { iataCode?: string; city?: string } },
-): any | null {
-  const destIata = (trip.destination?.iataCode ?? '').toUpperCase();
-  const destCity = (trip.destination?.city ?? '').toLowerCase();
-  for (const t of allTransport) {
-    const arr = (t.arrivalLocation ?? '').toString();
-    if (t.type === 'flight') {
-      if (destIata && extractIata(arr) === destIata) return t;
-    } else if (destCity && arr.toLowerCase().includes(destCity)) {
-      return t;
-    }
-  }
-  return null;
-}
-
 // ─── Shared prop interfaces ───────────────────────────────────────────────────
 export interface TripInfo {
   origin:      { city: string; iataCode?: string };
   destination: { city: string; iataCode?: string };
   startDate:   string;
   endDate:     string;
+  tripType?:   string;
+  companyName?:    string;
+  promoterName?:   string;
+  clientName?:     string;
+  thirdPartyName?: string;
 }
 
 export interface LogisticsTabProps {

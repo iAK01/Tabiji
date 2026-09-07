@@ -57,10 +57,154 @@ import CloseIcon              from '@mui/icons-material/Close';
 import VisibilityIcon         from '@mui/icons-material/Visibility';
 import WifiOffIcon            from '@mui/icons-material/WifiOff';
 import AutoFixHighIcon        from '@mui/icons-material/AutoFixHigh';
+import ContentPasteGoIcon     from '@mui/icons-material/ContentPasteGo';
 import DocumentViewer, { type ViewableFile } from './DocumentViewer';
-import SmartExtractModal, { type ExtractedData } from './SmartExtractModal';
+import SmartExtractModal from './SmartExtractModal';
+import SmartExtractProgress from './SmartExtractProgress';
+import { useSmartExtract, type SmartExtractSource } from '@/lib/extract/useSmartExtract';
 import { isFileCached } from '@/lib/offline/fileCache';
 import { saveTripCache, getTripCache } from '@/lib/offline/db';
+
+// ─── Smart Extract ────────────────────────────────────────────────────────────
+// Mime types we can pull structured trip data out of (PDF + images natively,
+// Word / Excel / CSV / text via server-side conversion).
+const EXTRACTABLE_MIME = [
+  'application/pdf',
+  'image/jpeg', 'image/png', 'image/webp', 'image/gif',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/vnd.ms-excel',
+  'text/csv', 'text/plain',
+];
+
+const UPLOAD_ACCEPT =
+  'application/pdf,image/jpeg,image/png,image/webp,image/heic,' +
+  '.docx,.doc,.xlsx,.xls,.csv,.txt,.md,' +
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document,' +
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+
+function canExtract(file: { resourceType: string; mimeType?: string }): boolean {
+  if (file.resourceType === 'note') return true;
+  if (file.resourceType !== 'file') return false;
+  return !!file.mimeType && EXTRACTABLE_MIME.includes(file.mimeType);
+}
+
+/**
+ * Wraps a trigger element with the full Smart Extract lifecycle: on activate it
+ * shows a progress dialog immediately, then either an error (with Try again) or
+ * the <SmartExtractModal> review step. `source` is computed lazily so callers
+ * can read current form state on click.
+ */
+function SmartExtractControl({ tripId, source, children }: {
+  tripId:   string;
+  source:   () => SmartExtractSource;
+  children: (opts: { run: () => void; running: boolean }) => React.ReactNode;
+}) {
+  const { run, retry, reset, running, error, result, label } = useSmartExtract(tripId);
+  return (
+    <>
+      {children({ run: () => run(source()), running })}
+
+      <SmartExtractProgress
+        open={running || !!error}
+        running={running}
+        error={error}
+        label={label}
+        onRetry={retry}
+        onClose={reset}
+      />
+
+      {result && (
+        <SmartExtractModal open onClose={reset} tripId={tripId} data={result} filename={label} />
+      )}
+    </>
+  );
+}
+
+/**
+ * "Paste & extract" — type or paste any trip info (a schedule copied from a
+ * website, a confirmation email, notes) plus a one-line description, and pull
+ * the hotels / venues / schedule / transport out of it.
+ */
+function PasteExtractDialog({ tripId, open, onClose, initialText = '', initialContext = '' }: {
+  tripId: string; open: boolean; onClose: () => void; initialText?: string; initialContext?: string;
+}) {
+  const [text,    setText]    = useState(initialText);
+  const [context, setContext] = useState(initialContext);
+  const { run, retry, reset, running, error, result } = useSmartExtract(tripId);
+
+  useEffect(() => {
+    if (open) { setText(initialText); setContext(initialContext); reset(); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  const close = () => { reset(); onClose(); };
+
+  if (result) {
+    return (
+      <SmartExtractModal
+        open onClose={close} tripId={tripId} data={result}
+        filename={context.trim() || 'pasted text'}
+      />
+    );
+  }
+
+  return (
+    <>
+      <Dialog open={open} onClose={() => !running && onClose()} maxWidth="sm" fullWidth
+        PaperProps={{ sx: { backgroundColor: D.paper, borderRadius: 2.5 } }}>
+        <DialogTitle sx={{ fontFamily: D.display, fontSize: '1.4rem', letterSpacing: '-0.02em', color: D.navy }}>
+          Paste &amp; extract
+        </DialogTitle>
+        <DialogContent>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, pt: 1 }}>
+            <TextField
+              label="What is this? (optional)"
+              value={context}
+              onChange={e => setContext(e.target.value)}
+              disabled={running}
+              placeholder="e.g. Conference schedule from the EJN website"
+              fullWidth
+              InputProps={{ sx: { fontFamily: D.body } }} InputLabelProps={{ sx: { fontFamily: D.body } }}
+            />
+            <TextField
+              label="Paste the text"
+              value={text}
+              onChange={e => setText(e.target.value)}
+              disabled={running}
+              placeholder="Paste an itinerary, a list of sessions, a booking confirmation…"
+              fullWidth multiline rows={10} autoFocus
+              InputProps={{ sx: { fontFamily: D.body } }} InputLabelProps={{ sx: { fontFamily: D.body } }}
+            />
+          </Box>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2.5, gap: 1 }}>
+          <Button onClick={onClose} disabled={running} sx={{ fontFamily: D.body, fontWeight: 600 }}>Cancel</Button>
+          <Button
+            variant="contained"
+            onClick={() => run({ text, context, label: context.trim() || 'pasted text' })}
+            disabled={running || !text.trim()}
+            startIcon={running ? <CircularProgress size={15} color="inherit" /> : <AutoFixHighIcon />}
+            sx={{ fontFamily: D.body, fontWeight: 700, backgroundColor: D.green,
+              '&:hover': { backgroundColor: '#5a6b4e' }, '&.Mui-disabled': { backgroundColor: 'rgba(107,124,92,0.3)' } }}
+          >
+            {running ? 'Reading…' : 'Extract'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <SmartExtractProgress
+        open={running || !!error}
+        running={running}
+        error={error}
+        label={context.trim() || 'pasted text'}
+        onRetry={retry}
+        onClose={reset}
+      />
+    </>
+  );
+}
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 
@@ -348,7 +492,7 @@ function DropZone({ onFile }: { onFile: (f: File) => void }) {
       <input
         ref={inputRef}
         type="file"
-        accept="application/pdf,image/jpeg,image/png,image/webp,image/heic"
+        accept={UPLOAD_ACCEPT}
         style={{ display: 'none' }}
         onChange={e => { const f = e.target.files?.[0]; if (f) onFile(f); }}
       />
@@ -369,7 +513,7 @@ function DropZone({ onFile }: { onFile: (f: File) => void }) {
         display: 'block',
         letterSpacing: '0.04em',
       }}>
-        PDF · JPEG · PNG · WEBP · HEIC · Max 20MB
+        PDF · Image · Word · Excel · CSV · Text · Max 20MB
       </Typography>
     </Box>
   );
@@ -745,11 +889,13 @@ function ToDoCard({
 
 // ─── Note card ────────────────────────────────────────────────────────────────
 
-function NoteCard({ file, onDelete, onEdit }: { file: TripFile; onDelete: (id: string) => void; onEdit: (file: TripFile) => void }) {
+function NoteCard({ file, tripId, onDelete, onEdit }: { file: TripFile; tripId: string; onDelete: (id: string) => void; onEdit: (file: TripFile) => void }) {
   const [menuAnchor,  setMenuAnchor]  = useState<null | HTMLElement>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const color    = TYPE_COLOUR[file.type] ?? D.green;
   const typeMeta = NOTE_TYPES.find(t => t.value === file.type);
+  const hasBody  = !!(file.body ?? '').trim();
+  const extract  = useSmartExtract(tripId);
 
   return (
     <>
@@ -788,6 +934,18 @@ function NoteCard({ file, onDelete, onEdit }: { file: TripFile; onDelete: (id: s
 
       <Menu anchorEl={menuAnchor} open={Boolean(menuAnchor)} onClose={() => setMenuAnchor(null)}
         transformOrigin={{ horizontal: 'right', vertical: 'top' }} anchorOrigin={{ horizontal: 'right', vertical: 'bottom' }}>
+        {hasBody && (
+          <MenuItem
+            disabled={extract.running}
+            onClick={() => { setMenuAnchor(null); extract.run({ fileId: file._id, label: file.name || 'note' }); }}
+            sx={{ gap: 1.5, fontSize: '0.875rem', fontFamily: D.body }}
+          >
+            {extract.running
+              ? <CircularProgress size={16} sx={{ color: D.green }} />
+              : <AutoFixHighIcon fontSize="small" sx={{ color: D.green }} />}
+            Extract into trip
+          </MenuItem>
+        )}
         <MenuItem onClick={() => { setMenuAnchor(null); onEdit(file); }} sx={{ gap: 1.5, fontSize: '0.875rem', fontFamily: D.body }}>
           <EditIcon fontSize="small" /> Edit
         </MenuItem>
@@ -813,6 +971,22 @@ function NoteCard({ file, onDelete, onEdit }: { file: TripFile; onDelete: (id: s
             sx={{ fontFamily: D.body, fontWeight: 700 }}>Delete</Button>
         </DialogActions>
       </Dialog>
+
+      <SmartExtractProgress
+        open={extract.running || !!extract.error}
+        running={extract.running}
+        error={extract.error}
+        label={file.name || 'note'}
+        onRetry={extract.retry}
+        onClose={extract.reset}
+      />
+
+      {extract.result && (
+        <SmartExtractModal
+          open onClose={extract.reset} tripId={tripId}
+          data={extract.result} filename={file.name || 'note'}
+        />
+      )}
     </>
   );
 }
@@ -914,33 +1088,11 @@ function ResourceCard({ file, tripId, onDelete, onEdit }: { file: TripFile; trip
   const [confirmOpen,   setConfirmOpen]   = useState(false);
   const [viewerFile,    setViewerFile]    = useState<ViewableFile | null>(null);
   const [cached,        setCached]        = useState(false);
-  const [extracting,    setExtracting]    = useState(false);
-  const [extractResult, setExtractResult] = useState<ExtractedData | null>(null);
-  const [extractError,  setExtractError]  = useState<string | null>(null);
   const color     = TYPE_COLOUR[file.type] ?? '#6b7280';
   const isLink    = file.resourceType === 'link';
   const actionUrl = isLink ? file.linkUrl : file.gcsUrl;
   const canPreview = !isLink && !!file.gcsUrl;
-  const isEventBriefPdf = file.type === 'event_brief' && file.mimeType === 'application/pdf';
-
-  async function handleSmartExtract() {
-    setExtracting(true);
-    setExtractError(null);
-    try {
-      const res = await fetch(`/api/trips/${tripId}/analyze-document`, {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ gcsUrl: file.gcsUrl }),
-      });
-      if (!res.ok) throw new Error('Analysis failed');
-      const { extracted } = await res.json();
-      setExtractResult(extracted);
-    } catch {
-      setExtractError('Could not analyse document. Please try again.');
-    } finally {
-      setExtracting(false);
-    }
-  }
+  const extractable = canExtract(file);
 
   useEffect(() => {
     if (!canPreview) return;
@@ -997,18 +1149,25 @@ function ResourceCard({ file, tripId, onDelete, onEdit }: { file: TripFile; trip
           )}
         </Box>
 
-        {/* Smart Extract button — event brief PDFs only */}
-        {isEventBriefPdf && (
-          <IconButton
-            size="small"
-            onClick={handleSmartExtract}
-            disabled={extracting}
-            aria-label="Smart Extract"
-            title="Smart Extract — import venues, hotel and schedule automatically"
-            sx={{ color: D.green, '&:hover': { color: '#5a6b4e' }, '&.Mui-disabled': { color: 'rgba(107,124,92,0.35)' } }}
+        {/* Smart Extract — any readable file (PDF, image, Word, Excel, CSV, text) */}
+        {extractable && (
+          <SmartExtractControl
+            tripId={tripId}
+            source={() => ({ fileId: file._id, label: file.name })}
           >
-            {extracting ? <CircularProgress size={16} sx={{ color: D.green }} /> : <AutoFixHighIcon fontSize="small" />}
-          </IconButton>
+            {({ run, running }) => (
+              <IconButton
+                size="small"
+                onClick={run}
+                disabled={running}
+                aria-label="Smart Extract"
+                title="Smart Extract — pull hotels, venues, schedule and transport into your trip"
+                sx={{ color: D.green, '&:hover': { color: '#5a6b4e' }, '&.Mui-disabled': { color: 'rgba(107,124,92,0.35)' } }}
+              >
+                {running ? <CircularProgress size={16} sx={{ color: D.green }} /> : <AutoFixHighIcon fontSize="small" />}
+              </IconButton>
+            )}
+          </SmartExtractControl>
         )}
 
         {/* View button — primary action for files */}
@@ -1083,29 +1242,6 @@ function ResourceCard({ file, tripId, onDelete, onEdit }: { file: TripFile; trip
       </Dialog>
 
       <DocumentViewer file={viewerFile} onClose={() => setViewerFile(null)} />
-
-      {extractError && (
-        <Dialog open onClose={() => setExtractError(null)} maxWidth="xs" fullWidth
-          PaperProps={{ sx: { backgroundColor: D.paper, borderRadius: 2.5 } }}>
-          <DialogTitle sx={{ fontFamily: D.display, fontSize: '1rem', color: D.navy }}>Extract failed</DialogTitle>
-          <DialogContent>
-            <Typography sx={{ fontFamily: D.body, fontSize: '0.88rem', color: 'text.secondary' }}>{extractError}</Typography>
-          </DialogContent>
-          <DialogActions sx={{ px: 3, pb: 2.5 }}>
-            <Button onClick={() => setExtractError(null)} sx={{ fontFamily: D.body, fontWeight: 600 }}>OK</Button>
-          </DialogActions>
-        </Dialog>
-      )}
-
-      {extractResult && (
-        <SmartExtractModal
-          open
-          onClose={() => setExtractResult(null)}
-          tripId={tripId}
-          data={extractResult}
-          filename={file.name}
-        />
-      )}
     </>
   );
 }
@@ -1134,6 +1270,7 @@ export default function FilesTab({ tripId, fabTrigger }: FilesTabProps) {
   const [editingFile,            setEditingFile]            = useState<TripFile | null>(null);
   const [pendingAttachments,     setPendingAttachments]     = useState<PendingAttachment[]>([]);
   const [removedAttachmentPaths, setRemovedAttachmentPaths] = useState<string[]>([]);
+  const [pasteSeed,              setPasteSeed]              = useState<{ text: string; context: string } | null>(null);
 
   const dueDateRef = useRef<HTMLInputElement>(null);
   const dueTimeRef = useRef<HTMLInputElement>(null);
@@ -1470,6 +1607,11 @@ export default function FilesTab({ tripId, fabTrigger }: FilesTabProps) {
               '&:hover': { borderColor: 'rgba(44,62,80,0.45)', backgroundColor: 'rgba(44,62,80,0.04)' } }}>
             Add note
           </Button>
+          <Button variant="outlined" startIcon={<ContentPasteGoIcon />} onClick={() => setPasteSeed({ text: '', context: '' })}
+            sx={{ fontFamily: D.body, fontWeight: 700, borderColor: alpha(D.green, 0.4), color: D.green,
+              '&:hover': { borderColor: D.green, backgroundColor: alpha(D.green, 0.06) } }}>
+            Paste &amp; extract
+          </Button>
           <Button variant="contained" startIcon={<AddIcon />} onClick={() => openDialog('file')}
             sx={{ fontFamily: D.display, letterSpacing: '-0.01em', backgroundColor: D.navy, boxShadow: 'none',
               '&:hover': { backgroundColor: 'rgba(44,62,80,0.88)', boxShadow: 'none' } }}>
@@ -1578,7 +1720,7 @@ export default function FilesTab({ tripId, fabTrigger }: FilesTabProps) {
                   <Box key={file._id}>
                     {i > 0 && <Divider />}
                     {file.resourceType === 'note'
-                      ? <NoteCard    file={file} onDelete={handleDelete} onEdit={openEdit} />
+                      ? <NoteCard    file={file} tripId={tripId} onDelete={handleDelete} onEdit={openEdit} />
                       : file.resourceType === 'contact'
                       ? <ContactCard file={file} onDelete={handleDelete} onEdit={openEdit} />
                       : <ResourceCard file={file} tripId={tripId} onDelete={handleDelete} onEdit={openEdit} />
@@ -1720,6 +1862,17 @@ export default function FilesTab({ tripId, fabTrigger }: FilesTabProps) {
                   placeholder="What's on your mind?"
                   InputProps={{ sx: { fontFamily: D.body } }} InputLabelProps={{ sx: { fontFamily: D.body } }}
                 />
+                {noteForm.body.trim().length > 20 && (
+                  <Button
+                    onClick={() => setPasteSeed({ text: noteForm.body, context: noteForm.name })}
+                    disabled={uploading}
+                    startIcon={<AutoFixHighIcon />}
+                    sx={{ alignSelf: 'flex-start', fontFamily: D.body, fontWeight: 700, color: D.green,
+                      '&:hover': { backgroundColor: alpha(D.green, 0.06) } }}
+                  >
+                    Extract hotels, venues, schedule &amp; transport
+                  </Button>
+                )}
                 <AttachmentPicker
                   existing={editingFile?.attachments}
                   pending={pendingAttachments}
@@ -1888,6 +2041,14 @@ export default function FilesTab({ tripId, fabTrigger }: FilesTabProps) {
           </Button>
         </DialogActions>
       </Dialog>
+
+      <PasteExtractDialog
+        tripId={tripId}
+        open={!!pasteSeed}
+        onClose={() => setPasteSeed(null)}
+        initialText={pasteSeed?.text ?? ''}
+        initialContext={pasteSeed?.context ?? ''}
+      />
     </Box>
   );
 }

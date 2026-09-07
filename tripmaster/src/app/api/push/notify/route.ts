@@ -7,7 +7,9 @@ import Trip from '@/lib/mongodb/models/Trip';
 import TripItinerary from '@/lib/mongodb/models/TripItinerary';
 import TripLogistics from '@/lib/mongodb/models/TripLogistics';
 import TripFile from '@/lib/mongodb/models/TripFile';
+import TripExpense from '@/lib/mongodb/models/TripExpense';
 import PushNotificationLog from '@/lib/mongodb/models/PushNotificationLog';
+import { getProofSlots } from '@/lib/logistics/expenseProofs';
 
 webpush.setVapidDetails(
   process.env.VAPID_MAILTO!,
@@ -58,6 +60,28 @@ const DOC_LEAD: Record<string, number> = {
 };
 
 const WINDOW_MS = 10 * 60 * 1000;
+
+// ---- Reimbursable-expense proof reminders ------------------------------------
+// A boarding pass/train ticket doesn't exist until check-in, so these fire
+// *before* departure — right around when someone's sitting at the gate with
+// nothing else to do. Timed against the actual linked transport leg, not a
+// generic "sometime during your trip" nudge.
+const PROOF_LEAD_BEFORE_DEPARTURE: Record<string, number> = {
+  flight: 90 * 60 * 1000,
+  train:  30 * 60 * 1000,
+  bus:    30 * 60 * 1000,
+  ferry:  45 * 60 * 1000,
+};
+
+// A final hotel folio or rental invoice doesn't exist until checkout/drop-off,
+// so these fire *after* the relevant time instead — a "you should have this by
+// now, go grab it" nudge rather than a pre-departure one.
+const PROOF_LEAD_AFTER_END: Record<string, number> = {
+  car_hire: 2 * 60 * 60 * 1000,
+  hotel:    2 * 60 * 60 * 1000,
+  airbnb:   2 * 60 * 60 * 1000,
+  hostel:   2 * 60 * 60 * 1000,
+};
 
 const TYPE_EMOJI: Record<string, string> = {
   flight: 'Flight', train: 'Train', ferry: 'Ferry', bus: 'Bus',
@@ -114,6 +138,14 @@ function venueToLuxon(venue: any, tz: string): DateTime | null {
 
 function isInWindow(eventDt: DateTime, leadMs: number, nowMs: number): boolean {
   const triggerMs = eventDt.toMillis() - leadMs;
+  const diff      = nowMs - triggerMs;
+  return diff >= 0 && diff <= WINDOW_MS;
+}
+
+// Mirror of isInWindow, but the trigger is *after* the event (checkout, drop-off)
+// rather than before it — for proofs that only exist once something has ended.
+function isInWindowAfter(eventDt: DateTime, leadMs: number, nowMs: number): boolean {
+  const triggerMs = eventDt.toMillis() + leadMs;
   const diff      = nowMs - triggerMs;
   return diff >= 0 && diff <= WINDOW_MS;
 }
@@ -322,10 +354,11 @@ export async function POST(req: Request) {
     const drivingNavApp    = user.preferences?.navigationApps?.driving  ?? 'google_maps';
     const transitNavApp    = user.preferences?.navigationApps?.transit  ?? 'google_maps';
 
-    const [itinerary, logistics, files] = await Promise.all([
+    const [itinerary, logistics, files, tripExpenses] = await Promise.all([
       TripItinerary.findOne({ tripId }),
       TripLogistics.findOne({ tripId }),
       TripFile.find({ tripId }),
+      TripExpense.find({ tripId }),
     ]);
 
     const allFiles: any[] = files ?? [];
@@ -384,6 +417,45 @@ export async function POST(req: Request) {
         }, invalidEndpoints);
         if (sent) totalSent++;
       }
+
+      // ── REIMBURSABLE PROOF REMINDER ──────────────────────────────────────
+      // Only fires if this leg is actually linked to a reimbursable expense
+      // (created via the "Reimbursable?" toggle) and the relevant proof isn't
+      // already uploaded — no point nagging about something already done.
+      const linkedExpense = tripExpenses.find(
+        (e: any) => e.linkedTo?.collection === 'transport' && e.linkedTo?.entryId === String(i),
+      );
+      if (linkedExpense) {
+        const afterSlots = getProofSlots(t.type).filter(s => s.phase === 'after' && s.required);
+        for (const slot of afterSlots) {
+          const already = (linkedExpense.proofs ?? []).some((p: any) => p.key === slot.key);
+          if (already) continue;
+
+          // flight/train/bus/ferry: proof only exists once you're checking in,
+          // so remind before departure. car_hire's final invoice only exists at
+          // drop-off, so that one's timed off arrivalTime and fires after.
+          const beforeLead = PROOF_LEAD_BEFORE_DEPARTURE[t.type];
+          const afterLead  = PROOF_LEAD_AFTER_END[t.type];
+
+          let due = false;
+          let anchorDt = eventDt;
+          if (beforeLead !== undefined) {
+            due = isInWindow(eventDt, beforeLead, nowMs);
+          } else if (afterLead !== undefined && t.arrivalTime) {
+            const dropOffDt = parseInZone(t.arrivalTime, tz);
+            if (dropOffDt) { anchorDt = dropOffDt; due = isInWindowAfter(dropOffDt, afterLead, nowMs); }
+          }
+          if (!due) continue;
+
+          const sent = await logAndSend(userId, tripId, `transport-proof-${i}-${slot.key}`, `${t.type}_proof_${slot.key}`, subs, {
+            title: `Don't forget: ${slot.label}`,
+            body:  `${label}\n${beforeLead !== undefined ? `Departs ${depTime}` : `Due back ${anchorDt.toFormat('HH:mm')}`} — upload it before you lose it`,
+            url:   `/trips/${tripId}?tab=8`,
+            tag:   `transport-proof-${i}-${slot.key}`,
+          }, invalidEndpoints);
+          if (sent) totalSent++;
+        }
+      }
     }
 
     // =========================================================================
@@ -392,6 +464,38 @@ export async function POST(req: Request) {
 
     for (let i = 0; i < (logistics?.accommodation ?? []).length; i++) {
       const a = logistics.accommodation[i];
+
+      // ── REIMBURSABLE PROOF REMINDER (final invoice, at checkout) ─────────
+      // checkIn/checkOut are date-only fields (no time captured), so this
+      // anchors to a reasonable default checkout time rather than midnight —
+      // independent of the check-in-day gate below, since checkout is a
+      // different day.
+      const afterLead = PROOF_LEAD_AFTER_END[a.type];
+      if (a.checkOut && afterLead !== undefined) {
+        const checkoutDt = parseInZone(`${a.checkOut.split('T')[0]}T11:00`, tz);
+        if (checkoutDt) {
+          const linkedExpense = tripExpenses.find(
+            (e: any) => e.linkedTo?.collection === 'accommodation' && e.linkedTo?.entryId === String(i),
+          );
+          if (linkedExpense) {
+            const afterSlots = getProofSlots(a.type).filter(s => s.phase === 'after' && s.required);
+            for (const slot of afterSlots) {
+              const already = (linkedExpense.proofs ?? []).some((p: any) => p.key === slot.key);
+              if (already) continue;
+              if (!isInWindowAfter(checkoutDt, afterLead, nowMs)) continue;
+
+              const sent = await logAndSend(userId, tripId, `accom-proof-${i}-${slot.key}`, `${a.type}_proof_${slot.key}`, subs, {
+                title: `Don't forget: ${slot.label}`,
+                body:  `${a.name || 'Accommodation'} — upload it before you lose it`,
+                url:   `/trips/${tripId}?tab=8`,
+                tag:   `accom-proof-${i}-${slot.key}`,
+              }, invalidEndpoints);
+              if (sent) totalSent++;
+            }
+          }
+        }
+      }
+
       if (!a.checkIn) continue;
 
       const eventDt = parseInZone(a.checkIn, tz);

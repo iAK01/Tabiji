@@ -1,9 +1,18 @@
 import { NextResponse } from 'next/server';
 import { DateTime } from 'luxon';
+import webpush from 'web-push';
 import connectDB from '@/lib/mongodb/connection';
 import Trip from '@/lib/mongodb/models/Trip';
 import User from '@/lib/mongodb/models/User';
+import TripExpense from '@/lib/mongodb/models/TripExpense';
+import PushNotificationLog from '@/lib/mongodb/models/PushNotificationLog';
 import { fetchTripWeather } from '@/lib/weather';
+
+webpush.setVapidDetails(
+  process.env.VAPID_MAILTO!,
+  process.env.VAPID_PUBLIC_KEY!,
+  process.env.VAPID_PRIVATE_KEY!
+);
 
 // ---- POST /api/push/trip-status ---------------------------------------------
 //
@@ -71,6 +80,16 @@ export async function POST(req: Request) {
   // completed mid-trip on short same-day journeys.
   const completeThreshold = now.minus({ hours: 48 }).toJSDate();
 
+  // Fetched before updating (not a blind updateMany) so the trips that just
+  // completed are on hand for the expense-reconciliation nudge below — this is
+  // the same active→completed transition that already exists; the only change
+  // here is knowing *which* trips it applied to, for a reason to check on them.
+  const justCompletedTrips = await Trip.find({
+    status:  'active',
+    deleted: false,
+    endDate: { $lt: completeThreshold },
+  });
+
   const completeResult = await Trip.updateMany(
     {
       status:  'active',
@@ -79,6 +98,56 @@ export async function POST(req: Request) {
     },
     { $set: { status: 'completed' } }
   );
+
+  // ── 2b. Expense reconciliation nudge ──────────────────────────────────────
+  // Work/mixed trips only, and only if there's actually something outstanding
+  // (anything not yet 'paid') — one-shot per trip via PushNotificationLog, same
+  // dedup pattern push/notify already uses for every other reminder type.
+  let expenseNudgesSent = 0;
+  for (const trip of justCompletedTrips) {
+    const isWork = trip.tripType === 'work' || trip.tripType === 'mixed';
+    if (!isWork) continue;
+
+    const outstanding = await TripExpense.countDocuments({
+      tripId: trip._id, status: { $ne: 'paid' },
+    });
+    if (outstanding === 0) continue;
+
+    const user = await User.findById(trip.userId).select('pushSubscriptions');
+    if (!user?.pushSubscriptions?.length) continue;
+
+    const key  = 'expense-reconciliation';
+    const type = 'expense_reconciliation';
+    const tripId = trip._id.toString();
+    const userId = trip.userId.toString();
+
+    const alreadySent = await PushNotificationLog.findOne({ userId, tripId, key, notificationType: type });
+    if (alreadySent) continue;
+
+    const payload = {
+      title: `${trip.name}: expenses to sort`,
+      body:  `${outstanding} expense${outstanding === 1 ? '' : 's'} still need${outstanding === 1 ? 's' : ''} reviewing and submitting.`,
+      url:   `/trips/${tripId}`,
+    };
+    const str = JSON.stringify(payload);
+    const invalidEndpoints: string[] = [];
+    let sent = 0;
+    for (const sub of user.pushSubscriptions) {
+      try {
+        await webpush.sendNotification(sub, str);
+        sent++;
+      } catch (err: any) {
+        if (err?.statusCode === 410 || err?.statusCode === 404) invalidEndpoints.push(sub.endpoint);
+      }
+    }
+    if (invalidEndpoints.length) {
+      await User.findByIdAndUpdate(trip.userId, { $pull: { pushSubscriptions: { endpoint: { $in: invalidEndpoints } } } });
+    }
+    if (sent > 0) {
+      await PushNotificationLog.create({ userId, tripId, key, notificationType: type });
+      expenseNudgesSent++;
+    }
+  }
 
   const activated = activateResult.modifiedCount;
   const completed = completeResult.modifiedCount;
@@ -100,8 +169,13 @@ export async function POST(req: Request) {
   let weatherSkipped   = 0;
 
   for (const trip of nearTrips) {
-    // Skip if cache is still fresh
-    if (trip.weather?.fetchedAt) {
+    const user = await User.findById(trip.userId).select('homeLocation');
+
+    // Skip if cache is still fresh — unless it predates the user having a
+    // home location set, in which case it's missing the home comparison and
+    // needs recomputing regardless of age.
+    const staleMissingHomeComparison = !!user?.homeLocation?.city && !trip.weather?.homeComparison;
+    if (trip.weather?.fetchedAt && !staleMissingHomeComparison) {
       const age = Date.now() - new Date(trip.weather.fetchedAt).getTime();
       if (age < WEATHER_TTL_MS) {
         weatherSkipped++;
@@ -110,7 +184,6 @@ export async function POST(req: Request) {
     }
 
     try {
-      const user = await User.findById(trip.userId).select('homeLocation');
       const homeCoords = await resolveHomeCoords(user?.homeLocation);
 
       const weather = await fetchTripWeather(
@@ -133,7 +206,7 @@ export async function POST(req: Request) {
   console.log(
     `[trip-status] activated=${activated} completed=${completed} ` +
     `weather_refreshed=${weatherRefreshed} weather_skipped=${weatherSkipped} ` +
-    `at=${now.toISO()}`
+    `expense_nudges_sent=${expenseNudgesSent} at=${now.toISO()}`
   );
 
   return NextResponse.json({
@@ -141,6 +214,7 @@ export async function POST(req: Request) {
     completed,
     weatherRefreshed,
     weatherSkipped,
+    expenseNudgesSent,
     checkedAt: now.toISO(),
   });
 }

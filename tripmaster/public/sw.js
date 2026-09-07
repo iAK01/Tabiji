@@ -69,50 +69,15 @@ self.addEventListener('fetch', (event) => {
   );
 });
 
-// ── BACKGROUND SYNC ─────────────────────────────
-self.addEventListener('sync', (event) => {
-  if (event.tag === 'tabiji-sync') {
-    event.waitUntil(processQueue());
-  }
-});
-
-async function processQueue() {
-  const db = await new Promise((resolve, reject) => {
-    const request = indexedDB.open('tabiji-offline', 1);
-
-    request.onupgradeneeded = () => {
-      const db = request.result;
-      if (!db.objectStoreNames.contains('queue')) {
-        db.createObjectStore('queue', { autoIncrement: true });
-      }
-    };
-
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-  });
-
-  const tx = db.transaction('queue', 'readwrite');
-  const store = tx.objectStore('queue');
-  const getAllReq = store.getAll();
-
-  const actions = await new Promise((resolve) => {
-    getAllReq.onsuccess = () => resolve(getAllReq.result);
-  });
-
-  for (const action of actions) {
-    try {
-      await fetch(`/api/trips/${action.tripId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(action.payload),
-      });
-    } catch {
-      return;
-    }
-  }
-
-  store.clear();
-}
+// Background Sync ('sync' event / processQueue) intentionally removed — it opened
+// IndexedDB at a hardcoded version 1 while the app's real DB is at version 4, which
+// throws a VersionError on every invocation (per the IndexedDB spec, opening at a
+// lower version than the existing database always fails), so it never actually ran.
+// It also only knew how to replay one action shape (a raw PUT to /api/trips/:id).
+// Queue replay now happens in-app via flushQueue() (src/lib/offline/db.ts), triggered
+// on page load and on the browser's 'online' event — universal (works on iOS Safari,
+// which doesn't support Background Sync at all) and correctly dispatches every
+// queued action type instead of just one.
 
 // ── PUSH ─────────────────────────────────────────
 self.addEventListener('push', (event) => {
