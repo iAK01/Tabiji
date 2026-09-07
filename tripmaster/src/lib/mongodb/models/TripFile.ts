@@ -16,6 +16,8 @@ const TripFileSchema = new Schema({
       'hotel_confirmation',
       'car_hire',
       'event_brief',
+      'ticket',
+      'reservation',
       'visa',
       'insurance',
       'passport',

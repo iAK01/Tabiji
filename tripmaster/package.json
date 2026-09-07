@@ -20,6 +20,7 @@
     "@mui/x-date-pickers": "^8.27.2",
     "archiver": "^8.0.0",
     "dayjs": "^1.11.19",
+    "ical-generator": "^11.1.1",
     "idb": "^8.0.3",
     "luxon": "^3.7.2",
     "mammoth": "^1.12.2",

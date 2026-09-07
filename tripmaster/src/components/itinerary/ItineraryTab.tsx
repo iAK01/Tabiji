@@ -18,6 +18,8 @@ import RouteIcon          from '@mui/icons-material/Route';
 import DirectionsWalkIcon from '@mui/icons-material/DirectionsWalk';
 import LockIcon           from '@mui/icons-material/Lock';
 import ExpandMoreIcon     from '@mui/icons-material/ExpandMore';
+import CalendarMonthIcon  from '@mui/icons-material/CalendarMonth';
+import ExportCalendarDialog from '@/components/calendar/ExportCalendarDialog';
 import { saveTripCache, getTripCache, queueAction } from '@/lib/offline/db';
 import {
   DAY_START_HOUR, DAY_END_HOUR,
@@ -63,6 +65,7 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover }:
     editStop?: Stop;
   }>({ open: false, time: '09:00', type: 'activity' });
   const [suggestionSlot, setSuggestionSlot] = useState<{ start: number; mins: number } | null>(null);
+  const [exportOpen,     setExportOpen]     = useState(false);
 
   const nowLineRef = useRef<HTMLDivElement>(null);
 
@@ -446,6 +449,28 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover }:
               {calculating ? 'Calculating…' : 'Calculate A-to-B'}
             </Button>
           )}
+          {isMobile ? (
+            <Tooltip title="Export to calendar">
+              <span>
+                <IconButton
+                  onClick={() => setExportOpen(true)}
+                  size="medium"
+                  sx={{ border: `1.5px solid ${D.rule}`, borderRadius: 1.5, minWidth: 44, minHeight: 44, color: D.muted }}
+                >
+                  <CalendarMonthIcon fontSize="small" />
+                </IconButton>
+              </span>
+            </Tooltip>
+          ) : (
+            <Button
+              variant="outlined" size="small"
+              onClick={() => setExportOpen(true)}
+              startIcon={<CalendarMonthIcon />}
+              sx={{ fontFamily: D.body, fontWeight: 700 }}
+            >
+              Export
+            </Button>
+          )}
           <Button
             variant="contained"
             size={isMobile ? 'medium' : 'small'}
@@ -462,6 +487,8 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover }:
           </Button>
         </Box>
       </Box>
+
+      <ExportCalendarDialog tripId={tripId} open={exportOpen} onClose={() => setExportOpen(false)} />
 
       {/* ── Day selector — full-width grid ── */}
       <Box sx={{

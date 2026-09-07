@@ -98,6 +98,10 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
   // Gap detection prompts — fires after saving a flight when ground transport is missing
   const [gapPrompts, setGapPrompts] = useState<GapPromptItem[]>([]);
 
+  // Backfill missing addresses/coordinates for venues & accommodation
+  const [geocoding, setGeocoding] = useState(false);
+  const [geoNote,   setGeoNote]   = useState<string | null>(null);
+
   const [filesById,  setFilesById]  = useState<Map<string, any[]>>(new Map());
   const [viewerFile, setViewerFile] = useState<ViewableFile | null>(null);
 
@@ -131,6 +135,37 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
     }
     loadLogistics();
   }, [tripId]);
+
+  // ── Backfill missing venue / accommodation locations ──────────────────────
+  const missingLocations = [
+    ...(logistics?.venues ?? []),
+    ...(logistics?.accommodation ?? []),
+  ].filter((x: any) => x?.name && !x?.coordinates?.lat).length;
+
+  async function findMissingLocations() {
+    setGeocoding(true);
+    setGeoNote(null);
+    try {
+      const res  = await fetch(`/api/trips/${tripId}/logistics/geocode-missing`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || 'Location lookup failed');
+
+      const fresh = await fetch(`/api/trips/${tripId}/logistics`).then(r => r.json());
+      setLogistics(fresh.logistics);
+      const cached = await getTripCache(tripId);
+      await saveTripCache(tripId, { ...(cached ?? {}), logistics: fresh.logistics });
+
+      setGeoNote(
+        data.fixed === 0
+          ? 'No addresses could be matched. Add them by editing each place.'
+          : `Located ${data.fixed} place${data.fixed === 1 ? '' : 's'}.${data.stillMissing ? ` ${data.stillMissing} still need an address — edit those to add it.` : ''}`,
+      );
+    } catch (e: any) {
+      setGeoNote(e?.message ?? 'Location lookup failed');
+    } finally {
+      setGeocoding(false);
+    }
+  }
 
   // ── Load home location + fallback airport from user profile ────────────────
   useEffect(() => {
@@ -935,6 +970,31 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
         <Tab label="Venues"        icon={<EventIcon />}       iconPosition="top" />
         <Tab label="Documents"     icon={<DescriptionIcon />} iconPosition="top" />
       </Tabs>
+
+      {/* ── Missing-location repair ── */}
+      {(section === 1 || section === 2) && (missingLocations > 0 || geoNote) && (
+        <Alert
+          severity={geoNote && !geoNote.startsWith('Located') ? 'warning' : 'info'}
+          sx={{ mb: 2, fontFamily: D.body, alignItems: 'center' }}
+          onClose={geoNote && missingLocations === 0 ? () => setGeoNote(null) : undefined}
+          action={
+            missingLocations > 0 ? (
+              <Button
+                size="small"
+                onClick={findMissingLocations}
+                disabled={geocoding}
+                sx={{ fontFamily: D.body, fontWeight: 700 }}
+              >
+                {geocoding ? 'Looking…' : 'Find locations'}
+              </Button>
+            ) : undefined
+          }
+        >
+          {geoNote
+            ? geoNote
+            : `${missingLocations} place${missingLocations === 1 ? ' has' : 's have'} no map location — navigation won’t work until it’s set.`}
+        </Alert>
+      )}
 
       {/* ── Transport ── */}
       {section === 0 && (() => {

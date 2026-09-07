@@ -153,8 +153,10 @@ export async function PUT(
 }
 
 // ─── PATCH /api/trips/[id]/files/[fileId] ─────────────────────────────────────
-// Lightweight toggle for todo completion — does not require a full form payload.
-// Body: { completed: boolean }
+// Lightweight partial update — no full form payload.
+//   todos:  { completed: boolean }
+//   files:  { type?: string, linkedTo?: {collection,entryId,label} | null }
+//           (used by Smart Extract to classify a file and link it to what it created)
 export async function PATCH(
   req: Request,
   { params }: { params: Promise<{ id: string; fileId: string }> }
@@ -170,17 +172,28 @@ export async function PATCH(
   const doc = await TripFile.findOne({ _id: fileId, tripId: id, userId: user._id });
   if (!doc) return NextResponse.json({ error: 'File not found' }, { status: 404 });
 
-  if (doc.resourceType !== 'todo') {
-    return NextResponse.json({ error: 'PATCH is only supported for todos' }, { status: 400 });
+  const body = await req.json();
+
+  if (doc.resourceType === 'todo') {
+    const completed = typeof body.completed === 'boolean' ? body.completed : !doc.completed;
+    const file = await TripFile.findByIdAndUpdate(
+      fileId,
+      { completed, completedAt: completed ? new Date() : null },
+      { new: true },
+    );
+    return NextResponse.json({ file });
   }
 
-  const body = await req.json();
-  const completed = typeof body.completed === 'boolean' ? body.completed : !doc.completed;
+  const updates: Record<string, any> = {};
+  if (typeof body.type === 'string' && body.type) updates.type = body.type;
+  if (body.linkedTo !== undefined) {
+    updates.linkedTo = body.linkedTo && body.linkedTo.collection ? body.linkedTo : null;
+  }
+  if (typeof body.notes === 'string') updates.notes = body.notes;
 
-  const updates: Record<string, any> = {
-    completed,
-    completedAt: completed ? new Date() : null,
-  };
+  if (!Object.keys(updates).length) {
+    return NextResponse.json({ error: 'Nothing to update' }, { status: 400 });
+  }
 
   const file = await TripFile.findByIdAndUpdate(fileId, updates, { new: true });
   return NextResponse.json({ file });

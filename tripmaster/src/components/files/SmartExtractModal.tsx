@@ -20,29 +20,40 @@ const D = {
   body:    '"Archivo", "Inter", sans-serif',
 } as const;
 
-export interface ExtractedAccommodation {
+interface Located {
+  address?: string;
+  coordinates?: { lat: number; lng: number } | null;
+  addressUnverified?: boolean;
+}
+
+export interface ExtractedAccommodation extends Located {
   type: string;
   name: string;
-  address?: string;
+  checkIn?: string | null;
+  checkOut?: string | null;
+  checkInTime?: string | null;
+  checkOutTime?: string | null;
+  confirmationNumber?: string | null;
+  /** Server-computed: check-in time once flights are accounted for. Display only. */
+  checkInHint?: string;
+  resolvedCheckInTime?: string;
   notes?: string;
 }
 
-export interface ExtractedVenue {
+export interface ExtractedVenue extends Located {
   type: string;
   name: string;
-  address?: string;
   date?: string | null;
   time?: string | null;
   notes?: string;
 }
 
-export interface ExtractedStop {
+export interface ExtractedStop extends Located {
   name: string;
   type: string;
   date: string;
   scheduledStart: string;
   duration: number;
-  address?: string;
   notes?: string;
 }
 
@@ -65,12 +76,37 @@ export interface ExtractedData {
   transport: ExtractedTransport[];
 }
 
+export interface DocClassification {
+  documentType: string;
+  summary:      string;
+}
+
+// Maps a classified document type → the human label shown in the Files tab.
+export const DOC_TYPE_LABEL: Record<string, string> = {
+  boarding_pass:      'Boarding pass',
+  train_ticket:       'Train / rail ticket',
+  hotel_confirmation: 'Accommodation confirmation',
+  car_hire:           'Car hire',
+  event_brief:        'Event brief / schedule',
+  ticket:             'Event ticket',
+  reservation:        'Reservation',
+  visa:               'Visa',
+  insurance:          'Insurance',
+  passport:           'Passport copy',
+  other:              'Other',
+};
+
 interface Props {
   open:     boolean;
   onClose:  () => void;
   tripId:   string;
   data:     ExtractedData;
   filename: string;
+  /** When set, the modal can classify + link this file to whatever it creates. */
+  fileId?:          string;
+  fileCurrentType?: string;
+  classification?:  DocClassification | null;
+  onFileUpdated?:   (file: any) => void;
 }
 
 function fmtDate(d?: string | null) {
@@ -116,9 +152,9 @@ function Section({ title, icon, color, children }: {
   );
 }
 
-function CheckItem({ checked, onChange, primary, secondary, note }: {
+function CheckItem({ checked, onChange, primary, secondary, note, highlight }: {
   checked: boolean; onChange: (v: boolean) => void;
-  primary: string; secondary?: string; note?: string;
+  primary: string; secondary?: string; note?: string; highlight?: string;
 }) {
   return (
     <Box
@@ -147,6 +183,11 @@ function CheckItem({ checked, onChange, primary, secondary, note }: {
             {secondary}
           </Typography>
         )}
+        {highlight && (
+          <Typography sx={{ fontFamily: D.body, fontWeight: 700, fontSize: '0.74rem', color: D.green, lineHeight: 1.4, mt: 0.25 }}>
+            {highlight}
+          </Typography>
+        )}
         {note && (
           <Typography sx={{ fontFamily: D.body, fontSize: '0.72rem', color: 'text.disabled', lineHeight: 1.4 }}>
             {note}
@@ -159,7 +200,10 @@ function CheckItem({ checked, onChange, primary, secondary, note }: {
 
 // ─── Main modal ───────────────────────────────────────────────────────────────
 
-export default function SmartExtractModal({ open, onClose, tripId, data, filename }: Props) {
+export default function SmartExtractModal({
+  open, onClose, tripId, data, filename,
+  fileId, fileCurrentType, classification, onFileUpdated,
+}: Props) {
   const allAccomm = data.accommodation    ?? [];
   const allVenues = data.venues           ?? [];
   const allStops  = data.itineraryStops   ?? [];
@@ -171,7 +215,15 @@ export default function SmartExtractModal({ open, onClose, tripId, data, filenam
   const [selTrans,  setSelTrans]  = useState<boolean[]>(() => allTrans.map(() => true));
   const [importing, setImporting] = useState(false);
   const [progress,  setProgress]  = useState(0);
-  const [done,      setDone]      = useState<{ ok: number; failed: string[] } | null>(null);
+  const [done,      setDone]      = useState<{ ok: number; failed: string[]; filed?: boolean } | null>(null);
+
+  // File classification + linking (only when opened from a file card / upload)
+  const suggestedType = classification?.documentType && classification.documentType !== 'other'
+    ? classification.documentType
+    : null;
+  const canSetType = !!fileId && !!suggestedType && suggestedType !== fileCurrentType;
+  const [setType,  setSetType]  = useState(canSetType);
+  const [linkFile, setLinkFile] = useState(!!fileId);
 
   const selectedCount =
     selAccomm.filter(Boolean).length +
@@ -188,6 +240,9 @@ export default function SmartExtractModal({ open, onClose, tripId, data, filenam
     const failed: string[] = [];
     const step = () => setProgress(p => p + 1);
 
+    // Track the last successful create per category so we can link the file to it.
+    let accomLog: any = null, venueLog: any = null, transLog: any = null;
+
     for (let i = 0; i < allAccomm.length; i++) {
       if (!selAccomm[i]) continue;
       const a = allAccomm[i];
@@ -195,9 +250,17 @@ export default function SmartExtractModal({ open, onClose, tripId, data, filenam
         const res = await fetch(`/api/trips/${tripId}/logistics/accommodation`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ type: a.type || 'hotel', name: a.name, address: a.address ?? '', notes: a.notes ?? '', status: 'confirmed' }),
+          body: JSON.stringify({
+            type: a.type || 'hotel', name: a.name,
+            address: a.address ?? '', coordinates: a.coordinates ?? null,
+            checkIn: a.checkIn ?? '', checkOut: a.checkOut ?? '',
+            checkInTime: a.checkInTime ?? '', checkOutTime: a.checkOutTime ?? '',
+            confirmationNumber: a.confirmationNumber ?? '',
+            notes: a.notes ?? '', status: 'confirmed',
+          }),
         });
-        res.ok ? ok++ : failed.push(a.name);
+        if (res.ok) { ok++; accomLog = (await res.json().catch(() => ({}))).logistics ?? accomLog; }
+        else failed.push(a.name);
       } catch { failed.push(a.name); }
       step();
     }
@@ -209,9 +272,10 @@ export default function SmartExtractModal({ open, onClose, tripId, data, filenam
         const res = await fetch(`/api/trips/${tripId}/logistics/venues`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ type: v.type || 'other', name: v.name, address: v.address ?? '', date: v.date ?? '', time: v.time ?? '', notes: v.notes ?? '', status: 'confirmed' }),
+          body: JSON.stringify({ type: v.type || 'other', name: v.name, address: v.address ?? '', coordinates: v.coordinates ?? null, date: v.date ?? '', time: v.time ?? '', notes: v.notes ?? '', status: 'confirmed' }),
         });
-        res.ok ? ok++ : failed.push(v.name);
+        if (res.ok) { ok++; venueLog = (await res.json().catch(() => ({}))).logistics ?? venueLog; }
+        else failed.push(v.name);
       } catch { failed.push(v.name); }
       step();
     }
@@ -236,6 +300,7 @@ export default function SmartExtractModal({ open, onClose, tripId, data, filenam
               scheduledStart: s.scheduledStart,
               duration:       s.duration || 60,
               address:        s.address ?? '',
+              coordinates:    s.coordinates ?? null,
               notes:          s.notes   ?? '',
               source:         'imported',
             },
@@ -269,13 +334,46 @@ export default function SmartExtractModal({ open, onClose, tripId, data, filenam
             },
           }),
         });
-        res.ok ? ok++ : failed.push(label);
+        if (res.ok) { ok++; transLog = (await res.json().catch(() => ({}))).logistics ?? transLog; }
+        else failed.push(label);
       } catch { failed.push(label); }
       step();
     }
 
+    // ── Classify + link the source file ─────────────────────────────────────
+    let filed = false;
+    if (fileId && (setType || linkFile)) {
+      const patch: Record<string, any> = {};
+      if (setType && suggestedType) patch.type = suggestedType;
+
+      if (linkFile) {
+        const pick = (log: any, key: string, coll: string) => {
+          const arr = log?.[key];
+          if (!Array.isArray(arr) || !arr.length) return null;
+          const idx = arr.length - 1;
+          return { collection: coll, entryId: String(idx), label: arr[idx]?.name || transportLabel(arr[idx] ?? {} as any) || coll };
+        };
+        const target =
+          pick(accomLog, 'accommodation', 'accommodation') ??
+          pick(transLog, 'transportation', 'transport') ??
+          pick(venueLog, 'venues', 'venue');
+        if (target) patch.linkedTo = target;
+      }
+
+      if (Object.keys(patch).length) {
+        try {
+          const r = await fetch(`/api/trips/${tripId}/files/${fileId}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(patch),
+          });
+          if (r.ok) { filed = true; onFileUpdated?.((await r.json().catch(() => ({}))).file); }
+        } catch { /* non-fatal */ }
+      }
+    }
+
     setImporting(false);
-    setDone({ ok, failed });
+    setDone({ ok, failed, filed });
   }
 
   return (
@@ -309,21 +407,56 @@ export default function SmartExtractModal({ open, onClose, tripId, data, filenam
             {done.ok > 0
               ? <>Added {done.ok} item{done.ok !== 1 ? 's' : ''} to your trip — check the Logistics and Itinerary tabs.</>
               : <>Nothing was added.</>}
+            {done.filed && <> The file’s been filed and linked.</>}
             {done.failed.length > 0 && (
               <> Couldn’t add: {done.failed.join(', ')}. These may fall outside the trip dates.</>
             )}
           </Alert>
-        ) : isEmpty ? (
-          <Alert severity="warning" sx={{ fontFamily: D.body, fontSize: '0.85rem' }}>
-            Nothing to import — no hotels, venues, schedule or transport were found.
-          </Alert>
         ) : (
           <>
-            {!done && (
-              <Typography sx={{ fontFamily: D.body, fontSize: '0.8rem', color: 'text.secondary', mb: 2 }}>
-                Select what to import into your trip.
-              </Typography>
+            {classification?.summary && (
+              <Box sx={{ mb: 2, p: 1.5, borderRadius: 2, backgroundColor: 'rgba(107,124,92,0.08)' }}>
+                <Typography sx={{ fontFamily: D.body, fontSize: '0.72rem', fontWeight: 700, color: D.green, textTransform: 'uppercase', letterSpacing: '0.05em', mb: 0.5 }}>
+                  Looks like
+                </Typography>
+                <Typography sx={{ fontFamily: D.body, fontSize: '0.85rem', color: D.navy, lineHeight: 1.45 }}>
+                  {classification.summary}
+                </Typography>
+              </Box>
             )}
+
+            {(canSetType || !!fileId) && (
+              <Box sx={{ mb: 2 }}>
+                {canSetType && (
+                  <CheckItem
+                    checked={setType}
+                    onChange={setSetType}
+                    primary={`Set document type → ${DOC_TYPE_LABEL[suggestedType!] ?? suggestedType}`}
+                    secondary={fileCurrentType && fileCurrentType !== 'other' ? `currently: ${DOC_TYPE_LABEL[fileCurrentType] ?? fileCurrentType}` : undefined}
+                  />
+                )}
+                {!!fileId && !isEmpty && (
+                  <CheckItem
+                    checked={linkFile}
+                    onChange={setLinkFile}
+                    primary="Link this file to what I add"
+                    secondary="so it surfaces when you need it on the trip"
+                  />
+                )}
+              </Box>
+            )}
+
+            {isEmpty ? (
+              <Alert severity={canSetType ? 'info' : 'warning'} sx={{ fontFamily: D.body, fontSize: '0.85rem' }}>
+                {canSetType
+                  ? 'No hotels, venues, schedule or transport to import — but the document type can still be set above.'
+                  : 'Nothing to import — no hotels, venues, schedule or transport were found.'}
+              </Alert>
+            ) : (
+            <>
+            <Typography sx={{ fontFamily: D.body, fontSize: '0.8rem', color: 'text.secondary', mb: 2 }}>
+              Select what to import into your trip.
+            </Typography>
 
             {allAccomm.length > 0 && (
               <Section title={`Accommodation · ${allAccomm.length}`} icon={<HotelIcon sx={{ fontSize: 15 }} />} color={D.navy}>
@@ -333,8 +466,13 @@ export default function SmartExtractModal({ open, onClose, tripId, data, filenam
                     checked={selAccomm[i]}
                     onChange={v => setSelAccomm(p => { const n = [...p]; n[i] = v; return n; })}
                     primary={a.name}
-                    secondary={[fmtType(a.type), a.address].filter(Boolean).join(' · ')}
-                    note={a.notes}
+                    secondary={[
+                      fmtType(a.type),
+                      a.checkIn && a.checkOut ? `${fmtDate(a.checkIn)} → ${fmtDate(a.checkOut)}` : fmtDate(a.checkIn),
+                      a.address,
+                    ].filter(Boolean).join(' · ')}
+                    highlight={a.checkInHint}
+                    note={[a.addressUnverified && '⚠ address not found — add it after import', a.notes].filter(Boolean).join(' · ')}
                   />
                 ))}
               </Section>
@@ -349,7 +487,7 @@ export default function SmartExtractModal({ open, onClose, tripId, data, filenam
                     onChange={val => setSelVenues(p => { const n = [...p]; n[i] = val; return n; })}
                     primary={v.name}
                     secondary={[fmtType(v.type), v.address].filter(Boolean).join(' · ')}
-                    note={[fmtDate(v.date), fmtTime(v.time), v.notes].filter(Boolean).join(' · ')}
+                    note={[fmtDate(v.date), fmtTime(v.time), v.addressUnverified && '⚠ address not found', v.notes].filter(Boolean).join(' · ')}
                   />
                 ))}
               </Section>
@@ -364,7 +502,7 @@ export default function SmartExtractModal({ open, onClose, tripId, data, filenam
                     onChange={val => setSelStops(p => { const n = [...p]; n[i] = val; return n; })}
                     primary={s.name}
                     secondary={[fmtType(s.type), fmtDate(s.date), fmtTime(s.scheduledStart)].filter(Boolean).join(' · ')}
-                    note={[s.address, s.notes].filter(Boolean).join(' · ')}
+                    note={[s.address, s.addressUnverified && '⚠ address not found', s.notes].filter(Boolean).join(' · ')}
                   />
                 ))}
               </Section>
@@ -383,6 +521,8 @@ export default function SmartExtractModal({ open, onClose, tripId, data, filenam
                   />
                 ))}
               </Section>
+            )}
+            </>
             )}
           </>
         )}
@@ -410,11 +550,11 @@ export default function SmartExtractModal({ open, onClose, tripId, data, filenam
         >
           {done ? 'Close' : 'Cancel'}
         </Button>
-        {!done && !isEmpty && (
+        {!done && (selectedCount > 0 || (setType && canSetType)) && (
           <Button
             variant="contained"
             onClick={handleImport}
-            disabled={importing || selectedCount === 0}
+            disabled={importing}
             startIcon={importing ? <CircularProgress size={15} color="inherit" /> : <AutoFixHighIcon />}
             sx={{
               fontFamily: D.body, fontWeight: 700,
@@ -423,7 +563,11 @@ export default function SmartExtractModal({ open, onClose, tripId, data, filenam
               '&.Mui-disabled': { backgroundColor: 'rgba(107,124,92,0.3)' },
             }}
           >
-            {importing ? 'Adding…' : `Import ${selectedCount} item${selectedCount !== 1 ? 's' : ''}`}
+            {importing
+              ? 'Working…'
+              : selectedCount > 0
+                ? `Add ${selectedCount} & file`
+                : 'File this'}
           </Button>
         )}
       </DialogActions>

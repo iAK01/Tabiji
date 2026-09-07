@@ -7,6 +7,9 @@ import connectDB             from '@/lib/mongodb/connection';
 import Trip                  from '@/lib/mongodb/models/Trip';
 import User                  from '@/lib/mongodb/models/User';
 import TripFile              from '@/lib/mongodb/models/TripFile';
+import TripLogistics         from '@/lib/mongodb/models/TripLogistics';
+import { geocodeNear }       from '@/lib/geo/geocode';
+import { resolveCheckIn, checkInHint } from '@/lib/itinerary/checkInTiming';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -100,6 +103,7 @@ function buildPrompt(ctx: {
   userContext: string;
   sourceLabel: string;
   inlineText: string | null;
+  fileTypeHint: string | null;
 }): string {
   return `You are extracting structured trip data from material a traveller collected for their trip. It could be a conference schedule, an itinerary, a booking confirmation, a hotel email, a spreadsheet, a photo of a printed programme, or free-form notes.
 
@@ -109,13 +113,14 @@ Context:
 - Trip dates: ${ctx.tripDates || 'unknown'}
 - Local timezone: ${ctx.tz}
 - Source: ${ctx.sourceLabel}
-${ctx.userContext ? `- The traveller describes this material as: "${ctx.userContext}"` : ''}
+${ctx.userContext ? `- The traveller's own note about this: "${ctx.userContext}" — this is an instruction. Honour it: it may tell you which parts to keep or skip, whose booking this is, dates that apply, etc.` : ''}
+${ctx.fileTypeHint ? `- The traveller has tagged this file as: "${ctx.fileTypeHint}" — trust that unless the content clearly contradicts it` : ''}
 
 Extract everything relevant in these four groups:
-1. Accommodation — hotels, guesthouses, apartments, any place to stay
+1. Accommodation — hotels, guesthouses, apartments, any place to stay. Capture the check-in/check-out DATES and, if the material states them, the earliest check-in TIME and latest check-out TIME the property allows (e.g. "Check-in: from 15:00").
 2. Venues — named places for events, concerts, conferences, meals (distinct from accommodation)
 3. Itinerary stops — every scheduled session, concert, workshop, panel, meal, tour or activity that has a specific time
-4. Transport — flights, trains, buses, ferries, transfers, car hire, parking
+4. Transport — flights, trains, buses, ferries, transfers, booked car hire, booked airport parking
 
 Rules:
 - Dates: YYYY-MM-DD
@@ -123,24 +128,37 @@ Rules:
 - scheduledStart / departureTime / arrivalTime: full ISO timestamp in ${ctx.tz}, e.g. "2026-07-22T20:00:00"
 - itinerary "duration" is in minutes; estimate from an end time when given, otherwise use a sensible default for the activity type
 - If a venue also hosts a scheduled item, list it once under venues AND include the scheduled item under itineraryStops
-- Only include what is actually present in the material. Do not invent times, addresses or reference numbers. Omit a field rather than guess.
+- Only include what is actually present in the material. Do not invent times or reference numbers. Omit a field rather than guess.
+- "address": only a real street address if the material states one, else "". Never put just a city.
+- "searchQuery": ALWAYS provide one for accommodation, venues and itinerary stops — the place name followed by the city and country, e.g. "Sartory Hall, Cologne, Germany". This is used to look up the real location. Use "${ctx.city}, ${ctx.country}" as the city/country unless the material clearly places it elsewhere.
 - If the material contains none of a given group, return an empty array for it
 
+DO NOT create:
+- itinerary stops for hotel check-in or check-out — those are generated automatically from the accommodation dates and timed against the traveller's arrival flight. Just fill in the accommodation.
+- transport for parking, WiFi or facilities AT an accommodation or venue — put those in that item's "notes". Only booked airport/station parking with its own location counts as transport.
+
 Valid venue types: concert, conference, restaurant, sports, attraction, business, other
-Valid itinerary stop types: flight, hotel, meeting, meal, breakfast, activity, sightseeing, transport, transfer, checkin, work, gig, other
+Valid itinerary stop types: flight, meeting, meal, breakfast, activity, sightseeing, transport, transfer, work, gig, other
 Valid transport types: flight, train, bus, ferry, car, car_hire, taxi, private_transfer, parking
+
+Also classify the whole document so the app knows where it belongs:
+- "documentType": one of boarding_pass, train_ticket, hotel_confirmation, car_hire, event_brief, ticket, reservation, visa, insurance, passport, other
+  (hotel_confirmation = any lodging: hotel, apartment, hostel, B&B, Booking.com/Airbnb confirmation)
+- "summary": ONE plain sentence a traveller would understand, e.g. "Booking.com confirmation — Hotel Mondial, Cologne, check-in 24 Sep, check-out 27 Sep, ref XYZ123". If it is not a real trip document, say so.
 
 Return ONLY valid JSON, no markdown, no commentary:
 
 {
+  "documentType": "hotel_confirmation",
+  "summary": "one plain sentence",
   "accommodation": [
-    { "type": "hotel", "name": "...", "address": "...", "notes": "..." }
+    { "type": "hotel", "name": "...", "address": "...", "searchQuery": "Hotel name, ${ctx.city}, ${ctx.country}", "checkIn": "YYYY-MM-DD or null", "checkOut": "YYYY-MM-DD or null", "checkInTime": "HH:MM or null", "checkOutTime": "HH:MM or null", "confirmationNumber": "... or null", "notes": "..." }
   ],
   "venues": [
-    { "type": "concert", "name": "...", "address": "...", "date": "YYYY-MM-DD or null", "time": "HH:MM or null", "notes": "..." }
+    { "type": "concert", "name": "...", "address": "...", "searchQuery": "Venue name, ${ctx.city}, ${ctx.country}", "date": "YYYY-MM-DD or null", "time": "HH:MM or null", "notes": "..." }
   ],
   "itineraryStops": [
-    { "name": "...", "type": "meeting", "date": "YYYY-MM-DD", "scheduledStart": "2026-07-22T14:30:00", "duration": 90, "address": "...", "notes": "..." }
+    { "name": "...", "type": "meeting", "date": "YYYY-MM-DD", "scheduledStart": "2026-07-22T14:30:00", "duration": 90, "address": "...", "searchQuery": "Place name, ${ctx.city}, ${ctx.country}", "notes": "..." }
   ],
   "transport": [
     { "type": "flight", "departureLocation": "...", "arrivalLocation": "...", "departureTime": "2026-07-22T09:00:00 or null", "arrivalTime": "2026-07-22T11:30:00 or null", "confirmationNumber": "... or null", "flightNumber": "... or null", "operator": "... or null", "notes": "..." }
@@ -166,10 +184,11 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   if (!trip) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
   const body: {
-    text?: string; fileId?: string; gcsUrl?: string; mimeType?: string; context?: string;
+    text?: string; fileId?: string; gcsUrl?: string; mimeType?: string; context?: string; fileType?: string;
   } = await req.json().catch(() => ({}));
 
-  const userContext = (body.context ?? '').trim().slice(0, 500);
+  let userContext    = (body.context ?? '').trim().slice(0, 500);
+  const fileTypeHint = (body.fileType && body.fileType !== 'other') ? body.fileType : null;
 
   // ── Resolve the source ──────────────────────────────────────────────────────
   let resolved: Resolved;
@@ -179,6 +198,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     } else if (body.fileId) {
       const doc = await TripFile.findOne({ _id: body.fileId, tripId: id });
       if (!doc) return NextResponse.json({ error: 'File not found' }, { status: 404 });
+
+      // The note the traveller typed on the file is context for the AI.
+      if (!userContext && doc.notes?.trim()) userContext = doc.notes.trim().slice(0, 500);
 
       if (doc.resourceType === 'note') {
         const noteText = [doc.name, doc.body].filter(Boolean).join('\n\n');
@@ -220,6 +242,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     userContext,
     sourceLabel: claudeInput.label,
     inlineText:  claudeInput.kind === 'text' ? claudeInput.text : null,
+    fileTypeHint,
   });
 
   // ── Build the message content ──────────────────────────────────────────────
@@ -260,6 +283,16 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     }
 
     const parsed = JSON.parse(jsonMatch[0]);
+
+    const VALID_DOC_TYPES = new Set([
+      'boarding_pass', 'train_ticket', 'hotel_confirmation', 'car_hire', 'event_brief',
+      'ticket', 'reservation', 'visa', 'insurance', 'passport', 'other',
+    ]);
+    const classification = {
+      documentType: VALID_DOC_TYPES.has(parsed.documentType) ? parsed.documentType : (fileTypeHint ?? 'other'),
+      summary:      typeof parsed.summary === 'string' ? parsed.summary.slice(0, 300) : '',
+    };
+
     const extracted = {
       accommodation:  Array.isArray(parsed.accommodation)  ? parsed.accommodation  : [],
       venues:         Array.isArray(parsed.venues)         ? parsed.venues         : [],
@@ -267,7 +300,66 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       transport:      Array.isArray(parsed.transport)      ? parsed.transport      : [],
     };
 
-    return NextResponse.json({ extracted });
+    // Check-in / check-out stops are derived from the accommodation (and timed
+    // against the arrival flight) — never take the AI's version.
+    extracted.itineraryStops = extracted.itineraryStops.filter((s: any) => {
+      const t = String(s?.type || '').toLowerCase().replace(/[^a-z]/g, '');
+      const n = String(s?.name || '').toLowerCase();
+      return t !== 'checkin' && t !== 'checkout' && !/\bcheck[\s-]?(in|out)\b/.test(n);
+    });
+    // Drop "transport" that isn't a journey (on-site parking, same place → same place).
+    extracted.transport = extracted.transport.filter((t: any) => {
+      const dep = String(t?.departureLocation || '').trim().toLowerCase();
+      const arr = String(t?.arrivalLocation   || '').trim().toLowerCase();
+      return !(dep && arr && dep === arr);
+    });
+
+    // ── Resolve real addresses + coordinates ─────────────────────────────────
+    // A place with no verified location is useless — the traveller taps "navigate"
+    // and ends up in the middle of the country. Geocode each place against the
+    // trip's destination and reject anything that lands too far away.
+    const dest = trip.destination?.coordinates;
+    if (dest?.lat && dest?.lng) {
+      const proximity = { lat: dest.lat, lng: dest.lng };
+      const fallbackCity = [trip.destination?.city, trip.destination?.country].filter(Boolean).join(', ');
+
+      const locate = async (item: any) => {
+        const query = (item.searchQuery || `${item.name}, ${fallbackCity}`).trim();
+        const hit = await geocodeNear(query, proximity, 40);
+        if (hit) {
+          item.address     = hit.address;
+          item.coordinates = { lat: hit.lat, lng: hit.lng };
+        } else if (!item.address?.trim()) {
+          item.addressUnverified = true;
+        }
+        delete item.searchQuery;
+        return item;
+      };
+
+      await Promise.all([
+        ...extracted.accommodation.map(locate),
+        ...extracted.venues.map(locate),
+        ...extracted.itineraryStops.map(locate),
+      ]);
+    }
+
+    // ── Preview the check-in time against the trip's inbound flights ──────────
+    if (extracted.accommodation.length) {
+      const logistics = await TripLogistics.findOne({ tripId: id }).lean() as any;
+      const arrivals: (string | null)[] = (logistics?.transportation ?? []).map((t: any) => t.arrivalTime ?? null);
+      for (const a of extracted.accommodation) {
+        if (!a.checkIn) continue;
+        const res = resolveCheckIn({
+          checkInDate: String(a.checkIn).split('T')[0],
+          propertyCheckInTime: a.checkInTime,
+          arrivals,
+        });
+        a.resolvedCheckInTime = res.time;
+        a.checkInHint = checkInHint(res);
+      }
+    }
+
+    return NextResponse.json({ extracted, classification });
   } catch (err: any) {
     console.error('Document analysis error:', err);
     return NextResponse.json({ error: 'Failed to analyse that source' }, { status: 500 });

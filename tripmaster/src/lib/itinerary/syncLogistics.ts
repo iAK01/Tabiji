@@ -3,6 +3,7 @@
 import mongoose from 'mongoose';
 import TripItinerary from '@/lib/mongodb/models/TripItinerary';
 import TripLogistics from '@/lib/mongodb/models/TripLogistics';
+import { resolveCheckIn, normaliseTime } from './checkInTiming';
 
 function transportStopName(t: any): string {
   const type = t.type ?? 'flight';
@@ -316,10 +317,16 @@ export async function syncLogisticsToItinerary(tripId: string, logistics?: any) 
       ].filter(Boolean).join(' · ') || undefined;
 
       if (a.checkIn) {
-        const time = '15:00';
+        // Land first, then check in — see checkInTiming.ts
+        const checkInDate = toDateString(a.checkIn);
+        const { time } = resolveCheckIn({
+          checkInDate,
+          propertyCheckInTime: a.checkInTime,
+          arrivals: (log.transportation ?? []).map((t: any) => t.arrivalTime ?? null),
+        });
         newStops.push({
           _id:            new mongoose.Types.ObjectId(),
-          date:           toDateString(a.checkIn),
+          date:           checkInDate,
           name:           `Check in: ${a.name ?? 'Accommodation'}`,
           type:           'hotel',
           color:          '#5c35a0',
@@ -337,7 +344,7 @@ export async function syncLogisticsToItinerary(tripId: string, logistics?: any) 
       }
 
       if (a.checkOut) {
-        const time = '11:00';
+        const time = normaliseTime(a.checkOutTime) ?? '11:00';
         newStops.push({
           _id:            new mongoose.Types.ObjectId(),
           date:           toDateString(a.checkOut),

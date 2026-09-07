@@ -90,18 +90,27 @@ function canExtract(file: { resourceType: string; mimeType?: string }): boolean 
   return !!file.mimeType && EXTRACTABLE_MIME.includes(file.mimeType);
 }
 
+const READABLE_EXT = /\.(pdf|jpe?g|png|webp|docx?|xlsx?|csv|txt|md)$/i;
+// A file we can hand to the AI — by mime OR by extension (some browsers report an empty type for .csv/.docx).
+function isReadableUpload(f: { type?: string; name: string }): boolean {
+  return (!!f.type && EXTRACTABLE_MIME.includes(f.type)) || READABLE_EXT.test(f.name);
+}
+
 /**
  * Wraps a trigger element with the full Smart Extract lifecycle: on activate it
  * shows a progress dialog immediately, then either an error (with Try again) or
  * the <SmartExtractModal> review step. `source` is computed lazily so callers
  * can read current form state on click.
  */
-function SmartExtractControl({ tripId, source, children }: {
-  tripId:   string;
-  source:   () => SmartExtractSource;
-  children: (opts: { run: () => void; running: boolean }) => React.ReactNode;
+function SmartExtractControl({ tripId, source, fileId, fileCurrentType, onFileUpdated, children }: {
+  tripId:           string;
+  source:           () => SmartExtractSource;
+  fileId?:          string;
+  fileCurrentType?: string;
+  onFileUpdated?:   (file: TripFile) => void;
+  children:         (opts: { run: () => void; running: boolean }) => React.ReactNode;
 }) {
-  const { run, retry, reset, running, error, result, label } = useSmartExtract(tripId);
+  const { run, retry, reset, running, error, result, classification, label } = useSmartExtract(tripId);
   return (
     <>
       {children({ run: () => run(source()), running })}
@@ -116,7 +125,13 @@ function SmartExtractControl({ tripId, source, children }: {
       />
 
       {result && (
-        <SmartExtractModal open onClose={reset} tripId={tripId} data={result} filename={label} />
+        <SmartExtractModal
+          open onClose={reset} tripId={tripId} data={result} filename={label}
+          fileId={fileId}
+          fileCurrentType={fileCurrentType}
+          classification={classification}
+          onFileUpdated={onFileUpdated}
+        />
       )}
     </>
   );
@@ -268,15 +283,17 @@ type Mode = 'file' | 'link' | 'contact' | 'note' | 'todo';
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const FILE_TYPES = [
-  { value: 'boarding_pass',      label: 'Boarding Pass',       Icon: FlightIcon },
-  { value: 'train_ticket',       label: 'Train Ticket',        Icon: TrainIcon },
-  { value: 'hotel_confirmation', label: 'Hotel Confirmation',  Icon: HotelIcon },
-  { value: 'car_hire',           label: 'Car Hire',            Icon: DirectionsCarIcon },
-  { value: 'event_brief',        label: 'Event Brief',         Icon: EventIcon },
-  { value: 'visa',               label: 'Visa',                Icon: BadgeIcon },
-  { value: 'insurance',          label: 'Insurance',           Icon: HealthAndSafetyIcon },
-  { value: 'passport',           label: 'Passport Copy',       Icon: BadgeIcon },
-  { value: 'other',              label: 'Other',               Icon: InsertDriveFileIcon },
+  { value: 'boarding_pass',      label: 'Boarding pass',            Icon: FlightIcon },
+  { value: 'train_ticket',       label: 'Train / rail ticket',      Icon: TrainIcon },
+  { value: 'hotel_confirmation', label: 'Accommodation confirmation', Icon: HotelIcon },
+  { value: 'car_hire',           label: 'Car hire',                Icon: DirectionsCarIcon },
+  { value: 'event_brief',        label: 'Event brief / schedule',  Icon: EventIcon },
+  { value: 'ticket',             label: 'Event ticket',            Icon: ConfirmationNumberIcon },
+  { value: 'reservation',        label: 'Reservation (restaurant, tour…)', Icon: EventIcon },
+  { value: 'visa',               label: 'Visa',                    Icon: BadgeIcon },
+  { value: 'insurance',          label: 'Insurance',               Icon: HealthAndSafetyIcon },
+  { value: 'passport',           label: 'Passport copy',           Icon: BadgeIcon },
+  { value: 'other',              label: 'Other',                   Icon: InsertDriveFileIcon },
 ] as const;
 
 const LINK_TYPES = [
@@ -320,6 +337,7 @@ const ALL_TYPES = [...FILE_TYPES, ...LINK_TYPES, ...CONTACT_TYPES, ...NOTE_TYPES
 
 const TYPE_COLOUR: Record<string, string> = {
   boarding_pass: '#C9521B', train_ticket: '#0369a1', hotel_confirmation: '#5c35a0',
+  ticket: '#C9521B', reservation: '#55702C',
   car_hire: '#55702C', event_brief: '#1D2642', visa: '#b45309', insurance: '#0891b2',
   passport: '#b45309', event_website: '#0891b2', artist_lineup: '#7c3aed',
   venue: '#55702C', booking_reference: '#C9521B', useful_info: '#6b7280',
@@ -1083,7 +1101,7 @@ function ContactCard({ file, onDelete, onEdit }: { file: TripFile; onDelete: (id
 
 // ─── File / link card ─────────────────────────────────────────────────────────
 
-function ResourceCard({ file, tripId, onDelete, onEdit }: { file: TripFile; tripId: string; onDelete: (id: string) => void; onEdit: (file: TripFile) => void }) {
+function ResourceCard({ file, tripId, onDelete, onEdit, onUpdate }: { file: TripFile; tripId: string; onDelete: (id: string) => void; onEdit: (file: TripFile) => void; onUpdate: (file: TripFile) => void }) {
   const [menuAnchor,    setMenuAnchor]    = useState<null | HTMLElement>(null);
   const [confirmOpen,   setConfirmOpen]   = useState(false);
   const [viewerFile,    setViewerFile]    = useState<ViewableFile | null>(null);
@@ -1149,19 +1167,22 @@ function ResourceCard({ file, tripId, onDelete, onEdit }: { file: TripFile; trip
           )}
         </Box>
 
-        {/* Smart Extract — any readable file (PDF, image, Word, Excel, CSV, text) */}
+        {/* Smart Extract — identify the file, pull its contents into the trip, link it */}
         {extractable && (
           <SmartExtractControl
             tripId={tripId}
-            source={() => ({ fileId: file._id, label: file.name })}
+            source={() => ({ fileId: file._id, fileType: file.type, label: file.name })}
+            fileId={file._id}
+            fileCurrentType={file.type}
+            onFileUpdated={onUpdate}
           >
             {({ run, running }) => (
               <IconButton
                 size="small"
                 onClick={run}
                 disabled={running}
-                aria-label="Smart Extract"
-                title="Smart Extract — pull hotels, venues, schedule and transport into your trip"
+                aria-label="Identify and file"
+                title="Identify this — set its type, pull its contents into your trip, and link it"
                 sx={{ color: D.green, '&:hover': { color: '#5a6b4e' }, '&.Mui-disabled': { color: 'rgba(107,124,92,0.35)' } }}
               >
                 {running ? <CircularProgress size={16} sx={{ color: D.green }} /> : <AutoFixHighIcon fontSize="small" />}
@@ -1271,6 +1292,9 @@ export default function FilesTab({ tripId, fabTrigger }: FilesTabProps) {
   const [pendingAttachments,     setPendingAttachments]     = useState<PendingAttachment[]>([]);
   const [removedAttachmentPaths, setRemovedAttachmentPaths] = useState<string[]>([]);
   const [pasteSeed,              setPasteSeed]              = useState<{ text: string; context: string } | null>(null);
+  const [identifyAfterUpload,    setIdentifyAfterUpload]    = useState(true);
+  const [identifyFile,           setIdentifyFile]           = useState<TripFile | null>(null);
+  const uploadExtract = useSmartExtract(tripId);
 
   const dueDateRef = useRef<HTMLInputElement>(null);
   const dueTimeRef = useRef<HTMLInputElement>(null);
@@ -1321,6 +1345,7 @@ export default function FilesTab({ tripId, fabTrigger }: FilesTabProps) {
   const openDialog = (m: Mode) => {
     setMode(m);
     setPendingFile(null);
+    setIdentifyAfterUpload(true);
     setFileForm({ ...BLANK_FILE_FORM });
     setLinkForm({ ...BLANK_LINK_FORM });
     setContactForm({ ...BLANK_CONTACT_FORM });
@@ -1481,10 +1506,27 @@ export default function FilesTab({ tripId, fabTrigger }: FilesTabProps) {
       } else {
         setFiles(prev => [data.file, ...prev]);
       }
+
+      // Hand a freshly-uploaded readable document straight to Smart Extract.
+      const autoIdentify: TripFile | null =
+        !isEdit && mode === 'file' && identifyAfterUpload &&
+        data.file?.resourceType === 'file' && data.file.mimeType &&
+        EXTRACTABLE_MIME.includes(data.file.mimeType)
+          ? data.file
+          : null;
+
       setTimeout(() => {
         setDialogOpen(false); setUploading(false); setUploadPct(0);
         setPendingFile(null); setEditingFile(null); setLinkedTo(null);
         setPendingAttachments([]); setRemovedAttachmentPaths([]);
+        if (autoIdentify) {
+          setIdentifyFile(autoIdentify);
+          uploadExtract.run({
+            fileId:   autoIdentify._id,
+            fileType: autoIdentify.type,
+            label:    autoIdentify.name,
+          });
+        }
       }, 400);
     } catch {
       clearInterval(tick);
@@ -1723,7 +1765,7 @@ export default function FilesTab({ tripId, fabTrigger }: FilesTabProps) {
                       ? <NoteCard    file={file} tripId={tripId} onDelete={handleDelete} onEdit={openEdit} />
                       : file.resourceType === 'contact'
                       ? <ContactCard file={file} onDelete={handleDelete} onEdit={openEdit} />
-                      : <ResourceCard file={file} tripId={tripId} onDelete={handleDelete} onEdit={openEdit} />
+                      : <ResourceCard file={file} tripId={tripId} onDelete={handleDelete} onEdit={openEdit} onUpdate={f => setFiles(prev => prev.map(x => x._id === f._id ? f : x))} />
                     }
                   </Box>
                 ))}
@@ -1992,6 +2034,32 @@ export default function FilesTab({ tripId, fabTrigger }: FilesTabProps) {
                     {FILE_TYPES.map(({ value, label }) => <MenuItem key={value} value={value} sx={{ fontFamily: D.body }}>{label}</MenuItem>)}
                   </Select>
                 </FormControl>
+
+                {!editingFile && pendingFile && isReadableUpload(pendingFile) && (
+                  <FormControlLabel
+                    control={
+                      <Switch
+                        checked={identifyAfterUpload}
+                        onChange={e => setIdentifyAfterUpload(e.target.checked)}
+                        disabled={uploading}
+                        size="small"
+                        sx={{ '& .Mui-checked': { color: D.green }, '& .Mui-checked + .MuiSwitch-track': { backgroundColor: D.green } }}
+                      />
+                    }
+                    label={
+                      <Box>
+                        <Typography sx={{ fontFamily: D.body, fontSize: '0.85rem', fontWeight: 700, color: D.navy }}>
+                          ✨ Identify &amp; add to my trip
+                        </Typography>
+                        <Typography sx={{ fontFamily: D.body, fontSize: '0.72rem', color: 'text.disabled' }}>
+                          Reads it after upload and offers to file the hotel / flight / schedule
+                        </Typography>
+                      </Box>
+                    }
+                    sx={{ mx: 0, alignItems: 'flex-start', '& .MuiSwitch-root': { mt: 0.25 } }}
+                  />
+                )}
+
                 <TextField
                   label="Notes (optional)" value={fileForm.notes} fullWidth disabled={uploading}
                   onChange={e => setFileForm(p => ({ ...p, notes: e.target.value }))}
@@ -2049,6 +2117,29 @@ export default function FilesTab({ tripId, fabTrigger }: FilesTabProps) {
         initialText={pasteSeed?.text ?? ''}
         initialContext={pasteSeed?.context ?? ''}
       />
+
+      {/* Auto-identify a freshly-uploaded document */}
+      <SmartExtractProgress
+        open={uploadExtract.running || !!uploadExtract.error}
+        running={uploadExtract.running}
+        error={uploadExtract.error}
+        label={identifyFile?.name}
+        onRetry={uploadExtract.retry}
+        onClose={() => { uploadExtract.reset(); setIdentifyFile(null); }}
+      />
+      {uploadExtract.result && identifyFile && (
+        <SmartExtractModal
+          open
+          onClose={() => { uploadExtract.reset(); setIdentifyFile(null); }}
+          tripId={tripId}
+          data={uploadExtract.result}
+          filename={identifyFile.name}
+          fileId={identifyFile._id}
+          fileCurrentType={identifyFile.type}
+          classification={uploadExtract.classification}
+          onFileUpdated={f => setFiles(prev => prev.map(x => x._id === f._id ? f : x))}
+        />
+      )}
     </Box>
   );
 }

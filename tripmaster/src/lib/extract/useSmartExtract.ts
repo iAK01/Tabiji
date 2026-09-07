@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useRef, useState } from 'react';
-import type { ExtractedData } from '@/components/files/SmartExtractModal';
+import type { ExtractedData, DocClassification } from '@/components/files/SmartExtractModal';
 
 export interface SmartExtractSource {
   /** An existing TripFile (uploaded file OR saved note). */
@@ -9,6 +9,8 @@ export interface SmartExtractSource {
   /** A raw stored-file URL. */
   gcsUrl?: string;
   mimeType?: string;
+  /** The TripFile's current `type` — a routing hint for the AI. */
+  fileType?: string;
   /** Pasted text / a note body typed in the editor. */
   text?: string;
   /** The traveller's one-line description of what the material is. */
@@ -18,13 +20,14 @@ export interface SmartExtractSource {
 }
 
 interface State {
-  running: boolean;
-  error:   string | null;
-  result:  ExtractedData | null;
-  label:   string;
+  running:        boolean;
+  error:          string | null;
+  result:         ExtractedData | null;
+  classification: DocClassification | null;
+  label:          string;
 }
 
-const IDLE: State = { running: false, error: null, result: null, label: '' };
+const IDLE: State = { running: false, error: null, result: null, classification: null, label: '' };
 
 /**
  * Drives the Smart Extract flow from any entry point (file card, note card,
@@ -50,15 +53,21 @@ export function useSmartExtract(tripId: string) {
           fileId:   source.fileId,
           gcsUrl:   source.gcsUrl,
           mimeType: source.mimeType,
+          fileType: source.fileType,
           text:     source.text,
           context:  source.context,
         }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data?.error || 'Could not analyse that source.');
-      setState({ running: false, error: null, result: data.extracted as ExtractedData, label: source.label ?? '' });
+      setState({
+        running: false, error: null,
+        result: data.extracted as ExtractedData,
+        classification: (data.classification ?? null) as DocClassification | null,
+        label: source.label ?? '',
+      });
     } catch (err: any) {
-      setState({ running: false, error: err?.message ?? 'Something went wrong.', result: null, label: source.label ?? '' });
+      setState({ running: false, error: err?.message ?? 'Something went wrong.', result: null, classification: null, label: source.label ?? '' });
     }
   }, [tripId]);
 
