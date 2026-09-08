@@ -485,6 +485,54 @@ export default function TripPage() {
     return `${diffH > 0 ? '+' : ''}${diffH}h from home`;
   })();
 
+  // Shared utility-row controls — rendered over the cover photo on every tab.
+  const utilityRow = (
+    <>
+      <IconButton
+        color="inherit"
+        onClick={() => router.push('/dashboard')}
+        size="small"
+        sx={{ mr: 0.5 }}
+      >
+        <ArrowBackIcon fontSize="small" />
+      </IconButton>
+
+      <Box
+        component="img"
+        src="/Logo.jpeg"
+        alt="Logo"
+        onClick={() => router.push('/dashboard')}
+        sx={{ width: 36, height: 36, objectFit: 'contain', cursor: 'pointer', opacity: 0.85 }}
+      />
+
+      <Box sx={{ flexGrow: 1 }} />
+
+      {/* Status pill — matches dashboard style */}
+      <Box sx={{
+        display: 'flex', alignItems: 'center', gap: 0.6,
+        backgroundColor: alpha('#fff', 0.14),
+        borderRadius: 10, px: 1.25, py: 0.45,
+        backdropFilter: 'blur(4px)',
+      }}>
+        <Box sx={{
+          width: 6, height: 6, borderRadius: '50%',
+          backgroundColor: STATUS_DOT[trip.status] ?? alpha('#fff', 0.4),
+          flexShrink: 0,
+        }} />
+        <Typography sx={{
+          fontFamily: D.body, color: 'white', fontSize: '0.63rem',
+          fontWeight: 800, textTransform: 'capitalize', letterSpacing: '0.05em',
+        }}>
+          {trip.status}
+        </Typography>
+      </Box>
+
+      <IconButton color="inherit" onClick={openEdit} size="small" sx={{ ml: 0.5 }}>
+        <EditIcon fontSize="small" />
+      </IconButton>
+    </>
+  );
+
   return (
     <>
       <style>{`
@@ -504,56 +552,18 @@ export default function TripPage() {
           }}
         >
 
-          {/* Utility row */}
-          <Toolbar sx={{
-            minHeight: 52, gap: 1, px: { xs: 1.5, sm: 2.5 },
-            background: activeTab === 0 ? 'linear-gradient(to bottom, rgba(10,16,44,0.6) 0%, transparent 100%)' : 'none',
-          }}>
-            <IconButton
-              color="inherit"
-              onClick={() => router.push('/dashboard')}
-              size="small"
-              sx={{ mr: 0.5 }}
-            >
-              <ArrowBackIcon fontSize="small" />
-            </IconButton>
-
-            <Box
-              component="img"
-              src="/Logo.jpeg"
-              alt="Logo"
-              onClick={() => router.push('/dashboard')}
-              sx={{ width: 36, height: 36, objectFit: 'contain', cursor: 'pointer', opacity: 0.85 }}
-            />
-
-            <Box sx={{ flexGrow: 1 }} />
-
-            {/* Status pill — matches dashboard style */}
-            <Box sx={{
-              display: 'flex', alignItems: 'center', gap: 0.6,
-              backgroundColor: alpha('#fff', 0.1),
-              borderRadius: 10, px: 1.25, py: 0.45,
+          {/* Overview — utility row floats over TripOverview's own hero */}
+          {activeTab === 0 && (
+            <Toolbar sx={{
+              minHeight: 52, gap: 1, px: { xs: 1.5, sm: 2.5 },
+              background: 'linear-gradient(to bottom, rgba(10,16,44,0.6) 0%, transparent 100%)',
             }}>
-              <Box sx={{
-                width: 6, height: 6, borderRadius: '50%',
-                backgroundColor: STATUS_DOT[trip.status] ?? alpha('#fff', 0.4),
-                flexShrink: 0,
-              }} />
-              <Typography sx={{
-                fontFamily: D.body, color: 'white', fontSize: '0.63rem',
-                fontWeight: 800, textTransform: 'capitalize', letterSpacing: '0.05em',
-              }}>
-                {trip.status}
-              </Typography>
-            </Box>
+              {utilityRow}
+            </Toolbar>
+          )}
 
-            <IconButton color="inherit" onClick={openEdit} size="small" sx={{ ml: 0.5 }}>
-              <EditIcon fontSize="small" />
-            </IconButton>
-          </Toolbar>
-
-          {/* Photo strip — all tabs except overview */}
-          {activeTab !== 0 && <Box sx={{ position: 'relative', height: { xs: 180, sm: 210, md: 240 }, overflow: 'hidden', bgcolor: D.navy }}>
+          {/* Every other tab — full-bleed cover photo, utility row sitting on top of it */}
+          {activeTab !== 0 && <Box sx={{ position: 'relative', height: { xs: 248, sm: 288, md: 320 }, overflow: 'hidden', bgcolor: D.navy }}>
 
             {/* Photo background */}
             {trip.coverPhotoUrl && (
@@ -561,21 +571,29 @@ export default function TripPage() {
                 position: 'absolute', inset: 0,
                 backgroundImage: `url(${trip.coverPhotoUrl})`,
                 backgroundSize: 'cover',
-                backgroundPosition: 'center 40%',
+                backgroundPosition: 'center 38%',
               }} />
             )}
 
-            {/* Gradient overlay */}
+            {/* Gradient — dark at the top so the utility row reads, dark at the base for the title */}
             <Box sx={{
               position: 'absolute', inset: 0,
               background: trip.coverPhotoUrl
-                ? 'linear-gradient(to bottom, rgba(10,16,44,0.35) 0%, rgba(10,16,44,0.75) 60%, rgba(10,16,44,0.95) 100%)'
+                ? 'linear-gradient(to bottom, rgba(10,16,44,0.70) 0%, rgba(10,16,44,0.10) 22%, rgba(10,16,44,0.08) 40%, rgba(10,16,44,0.78) 78%, rgba(10,16,44,0.96) 100%)'
                 : `linear-gradient(135deg, ${D.navy} 0%, #2a3558 100%)`,
             }} />
 
+            {/* Utility row — transparent, over the photo */}
+            <Toolbar sx={{
+              position: 'relative', zIndex: 2,
+              minHeight: 52, gap: 1, px: { xs: 1.5, sm: 2.5 },
+            }}>
+              {utilityRow}
+            </Toolbar>
+
             {/* Bottom-left: tab name dominant + trip name as context */}
             <Box sx={{
-              position: 'absolute', bottom: 0, left: 0, right: 0,
+              position: 'absolute', bottom: 0, left: 0, right: 0, zIndex: 2,
               px: { xs: 2.5, sm: 3.5 }, pb: { xs: 1.75, sm: 2 },
             }}>
               {/* Small: trip name as context breadcrumb */}
@@ -629,10 +647,10 @@ export default function TripPage() {
               </Box>
             </Box>
 
-            {/* Top-right: weather + local time */}
+            {/* Top-right: weather + local time — clears the utility row above it */}
             {(heroWeatherDay || localTime) && (
               <Box sx={{
-                position: 'absolute', top: 14, right: { xs: 16, sm: 24 },
+                position: 'absolute', top: { xs: 56, sm: 60 }, right: { xs: 16, sm: 24 }, zIndex: 2,
                 display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 1.5,
               }}>
                 {heroWeatherDay && (

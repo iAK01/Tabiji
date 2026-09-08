@@ -15,6 +15,22 @@
 
 export type WeatherSource = 'forecast' | 'historical' | 'weatherapi' | 'climate';
 
+// Open-Meteo's free forecast endpoint covers ~16 days ahead and hard-errors
+// (rather than clamping) on any out-of-range date. 14 leaves a safety margin:
+// timezone=auto means "today" is destination-local and can run a day ahead of
+// the server. Trip days beyond this fall back to the historical average.
+const FORECAST_HORIZON_DAYS = 14;
+
+function addDays(date: Date, days: number): Date {
+  const d = new Date(date);
+  d.setDate(d.getDate() + days);
+  return d;
+}
+
+function toDateStr(date: Date): string {
+  return date.toISOString().split('T')[0];
+}
+
 export interface DayWeather {
   date: string;
   label: string;
@@ -147,7 +163,8 @@ async function fetchForecast(
 
   const res  = await fetch(url.toString());
   const data = await res.json();
-  if (!data.daily) throw new Error('Open-Meteo forecast failed');
+  if (data?.error)  throw new Error(`Open-Meteo forecast failed: ${data.reason ?? 'unknown error'}`);
+  if (!data.daily)  throw new Error('Open-Meteo forecast failed');
 
   return data.daily.time.map((date: string, i: number) => {
     const { condition, icon } = wmoLookup(data.daily.weathercode[i]);
@@ -570,37 +587,65 @@ export async function fetchTripWeather(
   today.setHours(0, 0, 0, 0);
   const tripStart = new Date(startDate);
   const daysUntil = Math.round((tripStart.getTime() - today.getTime()) / 86400000);
+  const forecastHorizon = toDateStr(addDays(today, FORECAST_HORIZON_DAYS));
 
   let tripDays:         DayWeather[] = [];
-  let mode:             'forecast' | 'historical';
+  let mode:             'forecast' | 'historical' = 'historical';
   let historicalYears:  number[] | undefined;
   let forecastAvailableFrom: string | undefined;
 
-  if (daysUntil <= 16) {
-    mode = 'forecast';
-    const openMeteoDays = await fetchForecast(coords.lat, coords.lon, startDate, endDate);
-
-    // FIX: only overlay WeatherAPI for future or current-day trips (daysUntil >= 0).
-    // When daysUntil < 0 the trip is already in the past — WeatherAPI forecast
-    // for a past start date returns current/future data which is completely wrong.
-    if (daysUntil >= 0 && daysUntil <= 3 && process.env.WEATHER_API_KEY) {
-      const waDays = await fetchWeatherAPI(
-        coords.lat, coords.lon,
-        Math.min(3 - daysUntil + 1, openMeteoDays.length)
-      );
-      const waMap  = new Map(waDays.map(d => [d.date, d]));
-      tripDays = openMeteoDays.map(d => waMap.get(d.date) ?? d);
-    } else {
-      tripDays = openMeteoDays;
-    }
-  } else {
+  // Full historical average — the fallback whenever the forecast window can't
+  // cover the trip start.
+  const useHistorical = async () => {
     mode = 'historical';
     const result = await fetchHistoricalAverage(coords.lat, coords.lon, startDate, endDate);
     tripDays        = result.days;
     historicalYears = result.years;
-    const fd = new Date(tripStart);
-    fd.setDate(fd.getDate() - 16);
-    forecastAvailableFrom = fd.toISOString().split('T')[0];
+    forecastAvailableFrom = toDateStr(addDays(tripStart, -FORECAST_HORIZON_DAYS));
+  };
+
+  if (daysUntil <= FORECAST_HORIZON_DAYS) {
+    try {
+      mode = 'forecast';
+
+      // Open-Meteo errors on any date past its horizon, so request only the
+      // portion of the trip it can serve and backfill the rest below.
+      const forecastEnd  = endDate <= forecastHorizon ? endDate : forecastHorizon;
+      const openMeteoDays = await fetchForecast(coords.lat, coords.lon, startDate, forecastEnd);
+
+      // FIX: only overlay WeatherAPI for future or current-day trips (daysUntil >= 0).
+      // When daysUntil < 0 the trip is already in the past — WeatherAPI forecast
+      // for a past start date returns current/future data which is completely wrong.
+      if (daysUntil >= 0 && daysUntil <= 3 && process.env.WEATHER_API_KEY) {
+        const waDays = await fetchWeatherAPI(
+          coords.lat, coords.lon,
+          Math.min(3 - daysUntil + 1, openMeteoDays.length)
+        );
+        const waMap  = new Map(waDays.map(d => [d.date, d]));
+        tripDays = openMeteoDays.map(d => waMap.get(d.date) ?? d);
+      } else {
+        tripDays = openMeteoDays;
+      }
+
+      // Trip days beyond the forecast horizon → historical-average tail.
+      if (endDate > forecastHorizon) {
+        try {
+          const tail = await fetchHistoricalAverage(
+            coords.lat, coords.lon,
+            toDateStr(addDays(today, FORECAST_HORIZON_DAYS + 1)), endDate,
+          );
+          tripDays        = [...tripDays, ...tail.days];
+          historicalYears = tail.years;
+          forecastAvailableFrom = forecastHorizon;
+        } catch { /* forecast portion still stands on its own */ }
+      }
+    } catch {
+      // Forecast unavailable (e.g. Open-Meteo horizon shifted under us) —
+      // degrade to the historical average rather than failing the whole tab.
+      await useHistorical();
+    }
+  } else {
+    await useHistorical();
   }
 
   // Current weather — always, regardless of trip dates.

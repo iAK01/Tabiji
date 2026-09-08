@@ -22,6 +22,9 @@ import CheckCircleIcon      from '@mui/icons-material/CheckCircle';
 import DeviceThermostatIcon from '@mui/icons-material/DeviceThermostat';
 import ExpandMoreIcon       from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon       from '@mui/icons-material/ExpandLess';
+import ArrowUpwardIcon      from '@mui/icons-material/ArrowUpward';
+import ArrowDownwardIcon    from '@mui/icons-material/ArrowDownward';
+import HorizontalRuleIcon   from '@mui/icons-material/HorizontalRule';
 
 // ─── Design tokens ─────────────────────────────────────────────────────────────
 
@@ -127,6 +130,16 @@ function conditionColor(condition: string): string {
   return D.terra;
 }
 
+// Absolute warm/cool read for a temperature — colours the number so you clock
+// hot vs cold before reading it. Bands match tripCharacter's Hot/Warm/Mild/Cold.
+function tempWarmth(t: number): { color: string; label: string } {
+  if (t >= 28) return { color: '#A8432A', label: 'hot'  };
+  if (t >= 20) return { color: D.terra,   label: 'warm' };
+  if (t >= 12) return { color: D.navy,    label: 'mild' };
+  if (t >= 6)  return { color: '#0891b2', label: 'cool' };
+  return         { color: '#0369a1', label: 'cold' };
+}
+
 function tripCharacter(days: DayWeather[]): { label: string; sub: string } {
   const maxTemp   = Math.max(...days.map(d => d.tempMax));
   const rainyDays = days.filter(d => d.chanceOfRain > 40).length;
@@ -198,11 +211,11 @@ function DayCard({ day, compact = false }: { day: DayWeather; compact?: boolean 
       {/* Icon */}
       {conditionIcon(day.condition, { fontSize: '1.6rem', color: iconColor, my: 0.25 })}
 
-      {/* Temperature — the number you read first */}
+      {/* Temperature — the number you read first, tinted warm/cool */}
       <Typography sx={{
         fontFamily: D.display,
         fontSize: compact ? '1.4rem' : '1.65rem',
-        lineHeight: 1, color: D.navy,
+        lineHeight: 1, color: tempWarmth(day.tempAvg).color,
       }}>
         {day.tempAvg}°
       </Typography>
@@ -344,8 +357,54 @@ function PackingNotes({ notes }: { notes: string[] }) {
 // ─── Home comparison ───────────────────────────────────────────────────────────
 
 function HomeComparison({ c }: { c: HomeComparison }) {
-  const deltaColor = c.tempDelta > 2 ? D.terra : c.tempDelta < -2 ? '#0369a1' : D.muted;
-  const prefix     = c.tempDelta > 0 ? '+' : '';
+  const warmer = c.tempDelta >= 1;
+  const cooler = c.tempDelta <= -1;
+  const dirColor = warmer ? D.terra : cooler ? '#0891b2' : D.muted;
+  const dirBg    = warmer ? `${D.terra}16` : cooler ? 'rgba(8,145,178,0.10)' : D.rule;
+  const dirLabel = warmer ? 'warmer' : cooler ? 'cooler' : 'similar';
+  const DirArrow = warmer ? ArrowUpwardIcon : cooler ? ArrowDownwardIcon : HorizontalRuleIcon;
+
+  const homeW = tempWarmth(c.homeTempAvg);
+  const destW = tempWarmth(c.destTempAvg);
+
+  const drier  = c.rainDelta <= -1;
+  const wetter = c.rainDelta >= 1;
+  const rainColor = drier ? D.green : wetter ? '#0891b2' : D.muted;
+
+  const col = (
+    Icon: typeof HomeIcon, city: string, temp: number,
+    w: { color: string; label: string }, rainDays: number, rainCue: boolean,
+  ) => (
+    <Box sx={{ p: 2, textAlign: 'center' }}>
+      <Icon sx={{ fontSize: '1rem', color: D.muted, mb: 0.5 }} />
+      <Typography sx={{
+        fontSize: '0.62rem', color: D.muted, display: 'block',
+        fontFamily: D.body, textTransform: 'uppercase',
+        letterSpacing: '0.07em', fontWeight: 700,
+      }}>
+        {city}
+      </Typography>
+      <Typography sx={{ fontFamily: D.display, fontSize: '1.7rem', lineHeight: 1.15, color: w.color }}>
+        {temp}°
+      </Typography>
+      <Typography sx={{
+        fontSize: '0.58rem', fontWeight: 800, letterSpacing: '0.12em',
+        textTransform: 'uppercase', color: w.color, fontFamily: D.body, mb: 0.4,
+      }}>
+        {w.label}
+      </Typography>
+      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.25 }}>
+        {rainCue && drier  && <ArrowDownwardIcon sx={{ fontSize: '0.8rem', color: rainColor }} />}
+        {rainCue && wetter && <ArrowUpwardIcon   sx={{ fontSize: '0.8rem', color: rainColor }} />}
+        <Typography sx={{
+          fontSize: '0.68rem', fontFamily: D.body,
+          color: rainCue && (drier || wetter) ? rainColor : D.muted,
+        }}>
+          {rainDays} rainy day{rainDays !== 1 ? 's' : ''}
+        </Typography>
+      </Box>
+    </Box>
+  );
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
@@ -353,56 +412,35 @@ function HomeComparison({ c }: { c: HomeComparison }) {
         {c.summary}
       </Typography>
 
-      {/* Side by side */}
+      {/* Side by side — colour and arrow carry the warm/cool story at a glance */}
       <Paper elevation={0} sx={{ border: `1.5px solid ${D.rule}`, borderRadius: '10px', overflow: 'hidden' }}>
         <Box sx={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr' }}>
-          {/* Home */}
-          <Box sx={{ p: 2, textAlign: 'center' }}>
-            <HomeIcon sx={{ fontSize: '1rem', color: D.muted, mb: 0.5 }} />
-            <Typography sx={{
-              fontSize: '0.62rem', color: D.muted, display: 'block',
-              fontFamily: D.body, textTransform: 'uppercase',
-              letterSpacing: '0.07em', fontWeight: 700,
-            }}>
-              {c.homeCity}
-            </Typography>
-            <Typography sx={{ fontFamily: D.display, fontSize: '1.7rem', lineHeight: 1.2, color: D.navy }}>
-              {c.homeTempAvg}°
-            </Typography>
-            <Typography sx={{ fontSize: '0.68rem', color: D.muted, fontFamily: D.body }}>
-              {c.homeRainDays} rainy day{c.homeRainDays !== 1 ? 's' : ''}
-            </Typography>
-          </Box>
 
-          {/* Delta */}
+          {col(HomeIcon, c.homeCity, c.homeTempAvg, homeW, c.homeRainDays, false)}
+
+          {/* Delta — the verdict */}
           <Box sx={{
-            px: 1.5, display: 'flex', flexDirection: 'column',
-            alignItems: 'center', justifyContent: 'center',
+            px: 2, display: 'flex', flexDirection: 'column',
+            alignItems: 'center', justifyContent: 'center', gap: 0.25,
             borderLeft: `1px solid ${D.rule}`, borderRight: `1px solid ${D.rule}`,
-            backgroundColor: D.rule,
+            backgroundColor: dirBg,
           }}>
-            <Typography sx={{ fontFamily: D.display, fontSize: '0.9rem', color: deltaColor }}>
-              {prefix}{c.tempDelta}°
+            <DirArrow sx={{ fontSize: '1.2rem', color: dirColor }} />
+            {c.tempDelta !== 0 && (
+              <Typography sx={{ fontFamily: D.display, fontSize: '1.15rem', lineHeight: 1, color: dirColor }}>
+                {c.tempDelta > 0 ? '+' : ''}{c.tempDelta}°
+              </Typography>
+            )}
+            <Typography sx={{
+              fontSize: '0.58rem', fontWeight: 800, letterSpacing: '0.1em',
+              textTransform: 'uppercase', color: dirColor, fontFamily: D.body,
+            }}>
+              {dirLabel}
             </Typography>
           </Box>
 
-          {/* Destination */}
-          <Box sx={{ p: 2, textAlign: 'center' }}>
-            <FlightLandIcon sx={{ fontSize: '1rem', color: D.muted, mb: 0.5 }} />
-            <Typography sx={{
-              fontSize: '0.62rem', color: D.muted, display: 'block',
-              fontFamily: D.body, textTransform: 'uppercase',
-              letterSpacing: '0.07em', fontWeight: 700,
-            }}>
-              {c.destCity}
-            </Typography>
-            <Typography sx={{ fontFamily: D.display, fontSize: '1.7rem', lineHeight: 1.2, color: deltaColor }}>
-              {c.destTempAvg}°
-            </Typography>
-            <Typography sx={{ fontSize: '0.68rem', color: D.muted, fontFamily: D.body }}>
-              {c.destRainDays} rainy day{c.destRainDays !== 1 ? 's' : ''}
-            </Typography>
-          </Box>
+          {col(FlightLandIcon, c.destCity, c.destTempAvg, destW, c.destRainDays, true)}
+
         </Box>
       </Paper>
 
@@ -516,7 +554,7 @@ function DataSources({ weather, destinationCity }: { weather: WeatherResult; des
 // ═══════════════════════════════════════════════════════════════════════════════
 // ─── PLANNING VIEW ─────────────────────────────────────────────────────────────
 // Hero: temperature character, packing notes. Home comparison prominent.
-// Use when trip is >16 days out (historical data).
+// Use when trip is >14 days out (historical data).
 // ═══════════════════════════════════════════════════════════════════════════════
 
 function PlanningView({
@@ -665,7 +703,7 @@ function PlanningView({
 // ═══════════════════════════════════════════════════════════════════════════════
 // ─── FORECAST VIEW ─────────────────────────────────────────────────────────────
 // Hero: best and worst day called out. Day grid is the main content.
-// Use when trip is 1–16 days out (live forecast data available).
+// Use when trip is 1–14 days out (live forecast data available).
 // ═══════════════════════════════════════════════════════════════════════════════
 
 function ForecastView({
@@ -942,9 +980,12 @@ export default function WeatherTab({ tripId, destinationCity, startDate, endDate
     ? Math.ceil((start.getTime() - today.getTime()) / 86400000)
     : null;
 
+  // 14 days matches the server's forecast horizon in src/lib/weather.ts — trips
+  // starting beyond it are served as historical averages, which the planning
+  // view presents better.
   const smartDefault: DisplayMode =
     start && end && today >= start && today <= end ? 'now'      :
-    daysUntil !== null && daysUntil <= 16          ? 'forecast' : 'planning';
+    daysUntil !== null && daysUntil <= 14          ? 'forecast' : 'planning';
 
   const activeMode = displayMode ?? smartDefault;
 
