@@ -59,7 +59,8 @@ export function AddStopDrawer({
   defaultTime, defaultType, editStop,
   isMobile, knownLocations,
 }: Props) {
-  const isEditing = !!editStop;
+  const isEditing   = !!editStop;
+  const isFromLogistics = editStop?.source === 'logistics';
 
   const NOTIFY_OPTIONS: { label: string; value: number | null }[] = [
     { label: 'Off',  value: null },
@@ -161,12 +162,21 @@ export function AddStopDrawer({
         display: 'flex', justifyContent: 'space-between',
         alignItems: 'center', mb: 2,
       }}>
-        <Typography sx={{
-          fontFamily: D.display, fontSize: '1rem',
-          color: D.navy, lineHeight: 1,
-        }}>
-          {isEditing ? 'Edit stop' : 'Add to day'}
-        </Typography>
+        <Box>
+          <Typography sx={{
+            fontFamily: D.display, fontSize: '1rem',
+            color: D.navy, lineHeight: 1,
+          }}>
+            {isEditing ? 'Edit stop' : 'Add to day'}
+          </Typography>
+          {isFromLogistics && (
+            <Typography sx={{
+              fontFamily: D.body, fontSize: '0.68rem', color: D.muted, mt: 0.4, lineHeight: 1.3,
+            }}>
+              From Logistics — your timing is kept when bookings change.
+            </Typography>
+          )}
+        </Box>
         <IconButton onClick={onClose} sx={{ p: 0.75, color: D.muted }}>
           <CloseIcon sx={{ fontSize: 20 }} />
         </IconButton>

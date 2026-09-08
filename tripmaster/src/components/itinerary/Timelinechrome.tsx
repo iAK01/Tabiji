@@ -178,7 +178,7 @@ export function TravelConnector({ stop, pxPerMin, startHour = DAY_START_HOUR }: 
           fontWeight: t.isTight || t.isImpossible ? 700 : 400,
           color: t.isImpossible ? 'error.main' : t.isTight ? 'warning.dark' : D.muted,
         }}>
-          {t.duration}min · {(t.distance / 1000).toFixed(1)}km
+          {t.toName ? `→ ${t.toName} · ` : ''}{t.duration}min · {(t.distance / 1000).toFixed(1)}km
           {t.isTight && ' ⚠️'}
           {t.isImpossible && ' 🚨'}
         </Typography>

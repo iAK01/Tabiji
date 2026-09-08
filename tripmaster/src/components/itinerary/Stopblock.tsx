@@ -41,7 +41,14 @@ export function StopBlock({ stop, onDelete, onClick, onResize, pxPerMin, isMobil
   const startMin = stopStartMinutes(stop);
   if (startMin === null) return null;
 
-  const isLocked    = stop.source === 'logistics';
+  // Logistics-mirrored stops split two ways:
+  //   fact    (locked:true)  → flight/checkout times etc. Read-only here; tap
+  //                            jumps to the Logistics record via onClick.
+  //   derived (locked:false) → airport buffer / hotel check-in / breakfast.
+  //                            Behaves like a normal stop (drag, resize, edit);
+  //                            the change is persisted as an override.
+  const fromLogistics = stop.source === 'logistics';
+  const isFact        = fromLogistics && stop.locked === true;
   const duration    = stopDuration(stop);
   const dragId      = stop._id ?? `${stop.name}-${stop.scheduledStart ?? stop.time ?? 'notime'}`;
   const cfg         = STOP_CONFIG[stop.type] ?? STOP_CONFIG.other;
@@ -99,7 +106,7 @@ export function StopBlock({ stop, onDelete, onClick, onResize, pxPerMin, isMobil
 
   // ── DnD ───────────────────────────────────────────────────────────────────────
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
-    id: dragId, disabled: isResizing,
+    id: dragId, disabled: isResizing || isFact,
   });
 
   const previewMin = transform
@@ -161,7 +168,7 @@ export function StopBlock({ stop, onDelete, onClick, onResize, pxPerMin, isMobil
           display:    'flex',
           alignItems: 'stretch',
           overflow:   'hidden',
-          cursor:     isDragging ? 'grabbing' : 'grab',
+          cursor:     isDragging ? 'grabbing' : isFact ? 'pointer' : 'grab',
           transition: isDragging || isResizing ? 'none' : 'box-shadow 0.15s',
           userSelect: 'none',
 
@@ -171,16 +178,18 @@ export function StopBlock({ stop, onDelete, onClick, onResize, pxPerMin, isMobil
         }}
       >
         {/* ── Top resize handle ── */}
-        <Box
-          onPointerDown={e => handleResizePointerDown(e, 'top')}
-          sx={{
-            position: 'absolute', top: 0, left: 0, right: 0, height: 8,
-            cursor: 'ns-resize', zIndex: 10,
-            backgroundColor: isResizing && resize?.edge === 'top'
-              ? alpha(cfg.color, 0.15) : 'transparent',
-            '&:hover': { backgroundColor: alpha(cfg.color, 0.08) },
-          }}
-        />
+        {!isFact && (
+          <Box
+            onPointerDown={e => handleResizePointerDown(e, 'top')}
+            sx={{
+              position: 'absolute', top: 0, left: 0, right: 0, height: 8,
+              cursor: 'ns-resize', zIndex: 10,
+              backgroundColor: isResizing && resize?.edge === 'top'
+                ? alpha(cfg.color, 0.15) : 'transparent',
+              '&:hover': { backgroundColor: alpha(cfg.color, 0.08) },
+            }}
+          />
+        )}
 
         {/* ── Icon column — full height, tappable when files attached ── */}
         <Box
@@ -284,7 +293,7 @@ export function StopBlock({ stop, onDelete, onClick, onResize, pxPerMin, isMobil
               }}>
                 {timeLabel}
               </Typography>
-              {isLocked && <LockIcon sx={{ fontSize: 9, color: alpha(D.navy, 0.35), flexShrink: 0 }} />}
+              {isFact && <LockIcon sx={{ fontSize: 9, color: alpha(D.navy, 0.35), flexShrink: 0 }} />}
             </Box>
           ) : (
             <>
@@ -314,7 +323,7 @@ export function StopBlock({ stop, onDelete, onClick, onResize, pxPerMin, isMobil
                 }}>
                   {displayName}
                 </Typography>
-                {isLocked && (
+                {isFact && (
                   <LockIcon sx={{ fontSize: 10, color: alpha(D.navy, 0.35), flexShrink: 0 }} />
                 )}
               </Box>
@@ -384,7 +393,7 @@ export function StopBlock({ stop, onDelete, onClick, onResize, pxPerMin, isMobil
                 sx={{ p: isMobile ? 0.75 : 0.25, minWidth: isMobile ? 32 : 22, minHeight: isMobile ? 32 : 22 }}
               />
             )}
-            {!isLocked && onDelete && (
+            {!fromLogistics && onDelete && (
               <IconButton
                 size="small"
                 onClick={e => { e.stopPropagation(); onDelete(); }}
@@ -403,6 +412,7 @@ export function StopBlock({ stop, onDelete, onClick, onResize, pxPerMin, isMobil
         )}
 
         {/* ── Bottom resize handle + nub ── */}
+        {!isFact && (
         <Box
           onPointerDown={e => handleResizePointerDown(e, 'bottom')}
           sx={{
@@ -423,6 +433,7 @@ export function StopBlock({ stop, onDelete, onClick, onResize, pxPerMin, isMobil
             '.MuiBox-root:hover &': { width: 36, backgroundColor: cfg.color },
           }} />
         </Box>
+        )}
       </Box>
     </Tooltip>
     <DocumentViewer file={viewerFile} onClose={() => setViewerFile(null)} />

@@ -51,6 +51,20 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       if (coordinates          !== undefined) stop.coordinates          = coordinates;
       if (notificationLeadMins !== undefined) stop.notificationLeadMins = notificationLeadMins;
       if (reference            !== undefined) stop.reference            = reference;
+
+      // A logistics-mirrored stop is regenerated on every logistics sync. Record
+      // the traveller's change as an override so syncLogistics can re-apply it
+      // instead of clobbering it. (Facts — locked:true — never reach here: the UI
+      // gives them no edit affordance.)
+      if (stop.source === 'logistics') {
+        stop.userOverride = {
+          ...(stop.userOverride || {}),
+          scheduledStart,
+          ...(duration !== undefined ? { duration } : {}),
+          ...(name     !== undefined ? { name }     : {}),
+          ...(notes    !== undefined ? { notes }    : {}),
+        };
+      }
       found = true;
       break;
     }

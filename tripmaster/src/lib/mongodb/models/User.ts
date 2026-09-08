@@ -53,6 +53,10 @@ const UserSchema = new Schema({
     language: { type: String, default: 'en' },
     defaultTripType: { type: String, enum: ['work', 'leisure', 'mixed'] },
 
+    // Minutes before a flight the traveller wants to be at the airport. Drives the
+    // auto-generated "Airport check-in" itinerary stop. 30–300; default 120.
+    airportBufferMins: { type: Number, default: 120 },
+
     // ── Navigation app preferences per travel mode ──────────────────────────
     // 'apple_maps' is only meaningful on iOS — the UI filters it by platform
     navigationApps: {

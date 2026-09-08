@@ -3,7 +3,31 @@
 import mongoose from 'mongoose';
 import TripItinerary from '@/lib/mongodb/models/TripItinerary';
 import TripLogistics from '@/lib/mongodb/models/TripLogistics';
+import Trip from '@/lib/mongodb/models/Trip';
+import User from '@/lib/mongodb/models/User';
 import { resolveCheckIn, normaliseTime } from './checkInTiming';
+
+const DEFAULT_AIRPORT_BUFFER_MIN = 120;
+
+// A logistics stop the user has re-timed on the itinerary is remembered by a key
+// stable across syncs: which record it came from + which phase + which day.
+function overrideKey(collection: string, index: number, phase: string, date: string): string {
+  return `${collection}:${index}:${phase}:${date}`;
+}
+
+// How long before departure the traveller wants to be at the airport — a profile
+// preference, falling back to 2h. Frequent flyers with carry-on set this lower.
+async function resolveAirportBufferMin(tripId: string): Promise<number> {
+  try {
+    const trip = await Trip.findById(tripId).select('userId').lean() as { userId?: any } | null;
+    if (!trip?.userId) return DEFAULT_AIRPORT_BUFFER_MIN;
+    const user = await User.findById(trip.userId).select('preferences.airportBufferMins').lean() as
+      { preferences?: { airportBufferMins?: number } } | null;
+    const b = user?.preferences?.airportBufferMins;
+    if (typeof b === 'number' && b >= 30 && b <= 300) return b;
+  } catch { /* fall through to default */ }
+  return DEFAULT_AIRPORT_BUFFER_MIN;
+}
 
 function transportStopName(t: any): string {
   const type = t.type ?? 'flight';
@@ -120,9 +144,24 @@ export async function syncLogisticsToItinerary(tripId: string, logistics?: any) 
     if (!itineraryDoc) return;
 
     const itinerary = itineraryDoc.toObject() as { _id: any; days: any[] };
+    const airportBufferMin = await resolveAirportBufferMin(tripId);
 
     for (const day of itinerary.days) {
       if (day.date) day.date = toDateString(day.date);
+    }
+
+    // Harvest any user re-timings of derived logistics stops *before* wiping them,
+    // so a manual "check in at 13:00" survives the regenerate-from-scratch below.
+    const overrides = new Map<string, any>();
+    for (const day of itinerary.days) {
+      for (const s of day.stops ?? []) {
+        if (s.source === 'logistics' && s.userOverride && s.logisticsRef && s.metadata?.phase) {
+          overrides.set(
+            overrideKey(s.logisticsRef.collection, s.logisticsRef.index, s.metadata.phase, day.date),
+            s.userOverride,
+          );
+        }
+      }
     }
 
     for (const day of itinerary.days) {
@@ -225,9 +264,10 @@ export async function syncLogisticsToItinerary(tripId: string, logistics?: any) 
       if (depTime) {
         const time = toTimeString(depTime);
 
-        // Airport check-in stop: 2 hours before origin flights only (not connections)
+        // Airport check-in stop: `airportBufferMin` before origin flights only
+        // (not connections). Derived (locked:false) — the traveller can drag it.
         if (t.type === 'flight' && !connectionSet.has(tIdx)) {
-          const checkInMs      = new Date(depTime).getTime() - 2 * 60 * 60 * 1000;
+          const checkInMs      = new Date(depTime).getTime() - airportBufferMin * 60 * 1000;
           const checkInDt      = new Date(checkInMs).toISOString();
           const checkInTime    = toTimeString(checkInDt);
           const checkInDateStr = toDateString(checkInDt);
@@ -239,7 +279,7 @@ export async function syncLogisticsToItinerary(tripId: string, logistics?: any) 
             color: '#0369a1',
             time:           checkInTime,
             scheduledStart: `${checkInDateStr}T${checkInTime}:00`,
-            duration:       120,
+            duration:       airportBufferMin,
             locked:         false,
             source:         'logistics',
             address:        t.departureLocation ?? undefined,
@@ -333,7 +373,9 @@ export async function syncLogisticsToItinerary(tripId: string, logistics?: any) 
           time,
           scheduledStart: toScheduledStart(a.checkIn, time),
           duration:       30,
-          locked:         true,
+          // Derived: the time is an estimate (property window / after landing).
+          // The traveller may know better ("hotel confirmed 13:00 early check-in").
+          locked:         false,
           source:         'logistics',
           notes:          accomNotes,
           address:        a.address ?? undefined,
@@ -434,6 +476,27 @@ export async function syncLogisticsToItinerary(tripId: string, logistics?: any) 
         metadata:     { venueType: v.type },
         logisticsRef: { collection: 'venue', index: vIdx },
       });
+    }
+
+    // ── Re-apply user re-timings to derived stops ─────────────────────────────
+    if (overrides.size) {
+      for (const stop of newStops) {
+        if (stop.locked || !stop.logisticsRef || !stop.metadata?.phase) continue;
+        const ov = overrides.get(
+          overrideKey(stop.logisticsRef.collection, stop.logisticsRef.index, stop.metadata.phase, stop.date),
+        );
+        if (!ov) continue;
+        if (ov.scheduledStart) {
+          stop.scheduledStart = ov.scheduledStart;
+          stop.time = ov.scheduledStart.split('T')[1]?.slice(0, 5) ?? stop.time;
+          const ovDate = ov.scheduledStart.split('T')[0];
+          if (ovDate) stop.date = ovDate;
+        }
+        if (typeof ov.duration === 'number') stop.duration = ov.duration;
+        if (ov.name)  stop.name  = ov.name;
+        if (ov.notes !== undefined) stop.notes = ov.notes;
+        stop.userOverride = ov;
+      }
     }
 
     // ── Assign stops to days ──────────────────────────────────────────────────

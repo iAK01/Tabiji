@@ -64,7 +64,7 @@ interface UserProfile {
   fallbackAirport:  { iata: string; name: string; city: string; country: string } | null;
   passport: { country: string; countryCode: string; expiry: string; number: string };
   travelInsurance: { provider: string; policyNumber: string; emergencyPhone: string; expiry: string };
-  preferences: { units: 'metric' | 'imperial'; defaultTripType: 'work' | 'leisure' | 'mixed' };
+  preferences: { units: 'metric' | 'imperial'; defaultTripType: 'work' | 'leisure' | 'mixed'; airportBufferMins: number };
 }
 
 const emptyProfile: UserProfile = {
@@ -78,7 +78,7 @@ const emptyProfile: UserProfile = {
   fallbackAirport:  null,
   passport: { country: '', countryCode: '', expiry: '', number: '' },
   travelInsurance: { provider: '', policyNumber: '', emergencyPhone: '', expiry: '' },
-  preferences: { units: 'metric', defaultTripType: 'leisure' },
+  preferences: { units: 'metric', defaultTripType: 'leisure', airportBufferMins: 120 },
 };
 
 const REGIONS      = Array.from(new Set(COUNTRY_LIST.map(c => c.region)));
@@ -587,11 +587,15 @@ export default function ProfilePage() {
             </SectionCard>
 
             <SectionCard icon={TuneIcon} title="Preferences" ghost={TuneIcon}>
-              <Box sx={{ display: 'flex', gap: 1 }}>
+              <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
                 <MetaChip icon={AccessTimeIcon} label={profile.preferences?.units === 'imperial' ? 'Imperial' : 'Metric'} />
                 {profile.preferences?.defaultTripType && (
                   <MetaChip icon={FlightIcon} label={`Default: ${profile.preferences.defaultTripType}`} />
                 )}
+                <MetaChip
+                  icon={FlightIcon}
+                  label={`Airport buffer: ${Math.round((profile.preferences?.airportBufferMins ?? 120) / 60 * 10) / 10}h`}
+                />
               </Box>
             </SectionCard>
 
@@ -787,6 +791,23 @@ export default function ProfilePage() {
                     <ToggleButton value="leisure" size="small" sx={{ fontFamily: D.body, textTransform: 'none', fontWeight: 600 }}>Leisure</ToggleButton>
                     <ToggleButton value="work"    size="small" sx={{ fontFamily: D.body, textTransform: 'none', fontWeight: 600 }}>Work</ToggleButton>
                     <ToggleButton value="mixed"   size="small" sx={{ fontFamily: D.body, textTransform: 'none', fontWeight: 600 }}>Mixed</ToggleButton>
+                  </ToggleButtonGroup>
+                </Box>
+                <Box>
+                  <Typography sx={{ fontSize: '0.78rem', fontWeight: 700, textTransform: 'uppercase',
+                                    letterSpacing: '0.06em', color: D.muted, mb: 0.5 }}>
+                    Airport arrival buffer
+                  </Typography>
+                  <Typography sx={{ fontSize: '0.78rem', color: D.muted, mb: 1.25, fontFamily: D.body }}>
+                    How early before a flight the &ldquo;Airport check-in&rdquo; step is added to your itinerary.
+                  </Typography>
+                  <ToggleButtonGroup value={form.preferences.airportBufferMins} exclusive
+                    onChange={(_, val) => val && setForm(p => ({ ...p, preferences: { ...p.preferences, airportBufferMins: val } }))}>
+                    {[60, 90, 120, 150, 180].map(m => (
+                      <ToggleButton key={m} value={m} size="small" sx={{ fontFamily: D.body, textTransform: 'none', fontWeight: 600 }}>
+                        {m % 60 === 0 ? `${m / 60}h` : `${Math.floor(m / 60)}h ${m % 60}m`}
+                      </ToggleButton>
+                    ))}
                   </ToggleButtonGroup>
                 </Box>
               </Box>

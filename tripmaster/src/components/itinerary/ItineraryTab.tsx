@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
+import { useSearchParams, useRouter, usePathname } from 'next/navigation';
 import {
   DndContext, DragEndEvent,
   PointerSensor, TouchSensor,
@@ -17,8 +18,10 @@ import AddIcon            from '@mui/icons-material/Add';
 import RouteIcon          from '@mui/icons-material/Route';
 import DirectionsWalkIcon from '@mui/icons-material/DirectionsWalk';
 import LockIcon           from '@mui/icons-material/Lock';
+import HotelIcon          from '@mui/icons-material/Hotel';
 import ExpandMoreIcon     from '@mui/icons-material/ExpandMore';
 import CalendarMonthIcon  from '@mui/icons-material/CalendarMonth';
+import NavigateButton     from '@/components/ui/NavigateButton';
 import ExportCalendarDialog from '@/components/calendar/ExportCalendarDialog';
 import { saveTripCache, getTripCache, queueAction } from '@/lib/offline/db';
 import {
@@ -41,12 +44,25 @@ interface Props {
   startDate:        string;
   endDate:          string;
   fabTrigger?:      { action: string; seq: number } | null;
-  onSwitchToDiscover?: () => void;
+  onSwitchToDiscover?:  () => void;
+  onSwitchToLogistics?: () => void;
 }
 
-export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover }: Props) {
+interface Accom {
+  name:         string;
+  address?:     string;
+  coordinates?: { lat: number; lng: number } | null;
+  checkIn:      string;   // YYYY-MM-DD
+  checkOut:     string;   // YYYY-MM-DD
+}
+
+export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, onSwitchToLogistics }: Props) {
   const theme    = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
+
+  const searchParams = useSearchParams();
+  const router       = useRouter();
+  const pathname     = usePathname();
 
   const pxPerMin  = isMobile ? PX_PER_MIN_MOBILE : PX_PER_MIN_DESKTOP;
 
@@ -58,6 +74,7 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover }:
   const [calculating,    setCalculating]    = useState(false);
   const [showAllChips,   setShowAllChips]   = useState(false);
   const [knownLocations, setKnownLocations] = useState<KnownLocation[]>([]);
+  const [accoms,         setAccoms]         = useState<Accom[]>([]);
   const [drawer, setDrawer] = useState<{
     open:      boolean;
     time:      string;
@@ -69,17 +86,40 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover }:
 
   const nowLineRef = useRef<HTMLDivElement>(null);
 
-  // ── Auto-select today when days load ─────────────────────────────────────────
+  // ── Pick the initial day: ?day=<dayNumber> if present, else today ────────────
   // Only on the initial load — must not re-fire every time `days` changes (e.g. after
-  // adding a stop), or the active day tab snaps back to today mid-edit.
+  // adding a stop), or the active day tab snaps back mid-edit.
   const hasAutoSelectedRef = useRef(false);
   useEffect(() => {
     if (days.length === 0 || hasAutoSelectedRef.current) return;
     hasAutoSelectedRef.current = true;
+    const dayParam = searchParams.get('day');
+    if (dayParam) {
+      const byNum = days.findIndex(d => String(d.dayNumber) === dayParam);
+      if (byNum !== -1) { setActiveDayIdx(byNum); return; }
+    }
     const todayStr = new Date().toDateString();
     const idx = days.findIndex(d => new Date(d.date).toDateString() === todayStr);
     if (idx !== -1) setActiveDayIdx(idx);
-  }, [days]);
+  }, [days, searchParams]);
+
+  // ── Keep the active day in the URL so refresh / back / deep-links land right ──
+  const selectDay = (i: number) => {
+    setActiveDayIdx(i);
+    const dn = days[i]?.dayNumber;
+    const params = new URLSearchParams(Array.from(searchParams.entries()));
+    params.set('tab', 'itinerary');
+    if (dn != null) params.set('day', String(dn));
+    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+  };
+
+  // React to the day param changing under us (back/forward button).
+  useEffect(() => {
+    const dayParam = searchParams.get('day');
+    if (!dayParam || days.length === 0) return;
+    const idx = days.findIndex(d => String(d.dayNumber) === dayParam);
+    if (idx !== -1) setActiveDayIdx(prev => (prev === idx ? prev : idx));
+  }, [searchParams, days]);
 
   // ── Scroll to current time when viewing today ─────────────────────────────────
   useEffect(() => {
@@ -150,6 +190,15 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover }:
       .then(r => r.json())
       .then(data => {
         const logistics = data.logistics ?? data;
+        const ymd = (v: any) => (v ? String(v).split('T')[0] : '');
+        setAccoms(
+          (logistics.accommodation ?? [])
+            .filter((a: any) => a.name && a.checkIn)
+            .map((a: any) => ({
+              name: a.name, address: a.address, coordinates: a.coordinates ?? null,
+              checkIn: ymd(a.checkIn), checkOut: ymd(a.checkOut || a.checkIn),
+            })),
+        );
         const locs: KnownLocation[] = [];
         (logistics.accommodation ?? []).forEach((a: any) => {
           if (a.name) locs.push({ label: a.name, address: a.address, coordinates: a.coordinates, type: 'hotel' });
@@ -385,6 +434,13 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover }:
 
   const activeDay        = days[activeDayIdx];
   const freeLabel        = activeDay ? freeLabelText(activeDay.stops) : '';
+
+  // Which accommodation covers the day being viewed — the persistent "you're
+  // based here" anchor a business traveller wants without hunting through Logistics.
+  const activeDayYmd = activeDay ? String(activeDay.date).split('T')[0] : '';
+  const basedAt = activeDayYmd
+    ? accoms.find(a => a.checkIn <= activeDayYmd && activeDayYmd <= a.checkOut) ?? null
+    : null;
   const visibleChipCount = isMobile ? 4 : 5;
   const visibleChips     = showAllChips ? QUICK_ADD_TYPES : QUICK_ADD_TYPES.slice(0, visibleChipCount);
 
@@ -511,7 +567,7 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover }:
           return (
             <Box
               key={day.date}
-              onClick={() => setActiveDayIdx(i)}
+              onClick={() => selectDay(i)}
               sx={{
                 textAlign:       'center',
                 py:              isMobile ? 1.25 : 1.5,
@@ -647,6 +703,50 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover }:
             >
               Quick add
             </Button>
+          )}
+        </Box>
+      )}
+
+      {/* ── "Based at" anchor — the hotel for the day being viewed ── */}
+      {basedAt && (
+        <Box sx={{
+          display: 'flex', alignItems: 'center', gap: 1,
+          mb: 2, px: 1.5, py: 1,
+          borderRadius: '10px',
+          border: `1px solid ${alpha('#5c35a0', 0.25)}`,
+          backgroundColor: alpha('#5c35a0', 0.06),
+        }}>
+          <HotelIcon sx={{ fontSize: 18, color: '#5c35a0', flexShrink: 0 }} />
+          <Box sx={{ minWidth: 0, flex: 1 }}>
+            <Typography sx={{
+              fontFamily: D.body, fontSize: '0.6rem', fontWeight: 800,
+              letterSpacing: '0.1em', textTransform: 'uppercase', color: alpha('#5c35a0', 0.7),
+              lineHeight: 1,
+            }}>
+              Based at
+            </Typography>
+            <Typography sx={{
+              fontFamily: D.display, fontSize: '0.9rem', color: D.navy, lineHeight: 1.25,
+              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', mt: 0.35,
+            }}>
+              {basedAt.name}
+            </Typography>
+            {basedAt.address && (
+              <Typography sx={{
+                fontFamily: D.body, fontSize: '0.72rem', color: D.muted, lineHeight: 1.3,
+                whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+              }}>
+                {basedAt.address}
+              </Typography>
+            )}
+          </Box>
+          {(basedAt.address || basedAt.coordinates) && (
+            <NavigateButton
+              destination={{ name: basedAt.name, address: basedAt.address, coordinates: basedAt.coordinates ?? null }}
+              suggestedMode="driving"
+              size="small"
+              sx={{ flexShrink: 0, minWidth: 40, minHeight: 40 }}
+            />
           )}
         </Box>
       )}
@@ -795,7 +895,14 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover }:
                         stop={stop}
                         onDelete={stop._id ? () => deleteStop(stop._id!) : undefined}
                         onClick={() => {
-                          if (stop.source !== 'logistics' && stop._id) {
+                          // Fact from a booking → send the user to the Logistics
+                          // record, the only place it can actually be changed.
+                          if (stop.source === 'logistics' && stop.locked) {
+                            onSwitchToLogistics?.();
+                            return;
+                          }
+                          // Everything else (incl. derived logistics stops) → edit here.
+                          if (stop._id) {
                             const t = stopStartMinutes(stop);
                             openDrawer(t ? formatTime(t) : '09:00', stop.type, stop);
                           }
@@ -868,7 +975,11 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover }:
         onClose={() => setDrawer(d => ({ ...d, open: false, editStop: undefined }))}
         onAdd={addStop}
         onUpdate={updateStop}
-        onDelete={drawer.editStop?._id ? () => deleteStop(drawer.editStop!._id!) : undefined}
+        onDelete={
+          drawer.editStop?._id && drawer.editStop.source !== 'logistics'
+            ? () => deleteStop(drawer.editStop!._id!)
+            : undefined
+        }
         defaultTime={drawer.time}
         defaultType={drawer.type}
         editStop={drawer.editStop}

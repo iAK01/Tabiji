@@ -74,12 +74,28 @@ export interface Stop {
   source?: string;
   icon?: string;
   notificationLeadMins?: number | null;
+  // Logistics-mirrored stops only:
+  //   locked === true  → "fact" from a booking (flight time, checkout). Read-only
+  //                      in the itinerary; tapping jumps to the Logistics record.
+  //   locked === false → "derived" prep step (airport buffer, hotel check-in,
+  //                      breakfast). Movable/editable here; the change is stored
+  //                      as `userOverride` and re-applied on every logistics sync.
+  locked?: boolean;
+  userOverride?: {
+    scheduledStart?: string;
+    duration?:       number;
+    name?:           string;
+    notes?:          string;
+  };
+  logisticsRef?: { collection: string; index: number };
+  metadata?: Record<string, any>;
   travelToNext?: {
     duration:    number;
     mode:        string;
     isTight:     boolean;
     isImpossible: boolean;
     distance:    number;
+    toName?:     string;
   };
 }
 

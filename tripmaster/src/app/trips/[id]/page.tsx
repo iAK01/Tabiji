@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useEffect, useRef, useState, useCallback, Suspense } from 'react';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import {
   Box, Container, Typography, AppBar, Toolbar, IconButton,
   Tabs, Tab, Chip, Button, Paper, CircularProgress, Tooltip, alpha,
@@ -177,6 +177,18 @@ const EXPENSES_TAB_INDEX = 8;
 const EXPENSES_TAB = { label: 'Expenses', Icon: ReceiptIcon };
 const isWorkTrip = (tripType?: string) => tripType === 'work' || tripType === 'mixed';
 
+// URL-facing tab identity. Index 0 (Overview) is the bare URL — no ?tab.
+// Order must line up with TAB_CONFIG; 'expenses' is the appended index 8.
+const TAB_SLUGS = [
+  'overview', 'logistics', 'itinerary', 'packing',
+  'discover', 'weather', 'map', 'resources',
+];
+TAB_SLUGS[EXPENSES_TAB_INDEX] = 'expenses';
+const slugToTab = (slug: string | null): number => {
+  const i = slug ? TAB_SLUGS.indexOf(slug) : 0;
+  return i >= 0 ? i : 0;
+};
+
 export type FabTrigger = { action: string; seq: number };
 type FabActionConfig = { label: string; icon: React.ReactNode; action: string };
 
@@ -233,16 +245,17 @@ function heroWeatherIcon(condition: string, sx?: object) {
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
-export default function TripPage() {
-  const { id }   = useParams();
-  const router   = useRouter();
-  const theme    = useTheme();
+function TripPageInner() {
+  const { id }       = useParams();
+  const router       = useRouter();
+  const searchParams = useSearchParams();
+  const theme        = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
 
   useFlushQueueOnReconnect();
 
   const [trip,      setTrip]      = useState<Trip | null>(null);
-  const [activeTab, setActiveTab] = useState(0);
+  const [activeTab, setActiveTabState] = useState(() => slugToTab(searchParams.get('tab')));
   const [editOpen,  setEditOpen]  = useState(false);
   const [editForm,  setEditForm]  = useState({
     name: '', tripType: '', purpose: '', startDate: '', endDate: '', status: '',
@@ -262,6 +275,25 @@ export default function TripPage() {
   const [deleting,           setDeleting]           = useState(false);
   const [deleteError,        setDeleteError]        = useState('');
   const [localTime,          setLocalTime]          = useState('');
+
+  // ── Tab ↔ URL ────────────────────────────────────────────────────────────────
+  // Tab change pushes a history entry so the browser / hardware back button steps
+  // back through tabs instead of leaving the trip. ?tab is dropped for Overview.
+  const setActiveTab = useCallback((next: number) => {
+    setActiveTabState(next);
+    const params = new URLSearchParams(Array.from(searchParams.entries()));
+    if (next === 0) params.delete('tab');
+    else params.set('tab', TAB_SLUGS[next] ?? 'overview');
+    params.delete('day');   // day belongs to the itinerary tab only
+    const qs = params.toString();
+    router.push(qs ? `?${qs}` : window.location.pathname, { scroll: false });
+  }, [router, searchParams]);
+
+  // URL → state, for back/forward navigation.
+  useEffect(() => {
+    const target = slugToTab(searchParams.get('tab'));
+    setActiveTabState(prev => (prev === target ? prev : target));
+  }, [searchParams]);
 
   // Profile's default company name — falls back into any trip that doesn't have its
   // own companyName set (older trips, or trips created before the profile had one).
@@ -803,7 +835,7 @@ export default function TripPage() {
               sx={{ scrollMarginTop: '66px' }}
             >
               {activeTab === 1 && <LogisticsTab tripId={trip._id} trip={tripWithDefaults} fabTrigger={fabTrigger} />}
-              {activeTab === 2 && <ItineraryTab tripId={trip._id} startDate={trip.startDate} endDate={trip.endDate} fabTrigger={fabTrigger} onSwitchToDiscover={() => setActiveTab(4)} />}
+              {activeTab === 2 && <ItineraryTab tripId={trip._id} startDate={trip.startDate} endDate={trip.endDate} fabTrigger={fabTrigger} onSwitchToDiscover={() => setActiveTab(4)} onSwitchToLogistics={() => setActiveTab(1)} />}
               {activeTab === 3 && <PackingTab tripId={trip._id} tripType={trip.tripType} nights={trip.nights} startDate={trip.startDate} fabTrigger={fabTrigger} />}
               {activeTab === 4 && <IntelligenceTab tripId={trip._id} />}
               {activeTab === 5 && (
@@ -1216,5 +1248,14 @@ export default function TripPage() {
 
       </Box>
     </>
+  );
+}
+
+// useSearchParams() needs a Suspense boundary above it in the App Router.
+export default function TripPage() {
+  return (
+    <Suspense fallback={null}>
+      <TripPageInner />
+    </Suspense>
   );
 }
