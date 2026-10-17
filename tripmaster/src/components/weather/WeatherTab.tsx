@@ -2,30 +2,27 @@
 
 import { useEffect, useState } from 'react';
 import {
-  Box, Typography, Paper, CircularProgress, Alert,
-  Chip, IconButton, Tooltip, LinearProgress, Collapse, Button,
+  Box, Typography, Paper, CircularProgress, Alert, IconButton, Tooltip,
 } from '@mui/material';
-import RefreshIcon          from '@mui/icons-material/Refresh';
-import InfoOutlinedIcon     from '@mui/icons-material/InfoOutlined';
-import ThermostatIcon       from '@mui/icons-material/Thermostat';
-import AirIcon              from '@mui/icons-material/Air';
-import UmbrellaIcon         from '@mui/icons-material/Umbrella';
-import WbSunnyIcon          from '@mui/icons-material/WbSunny';
-import CloudIcon            from '@mui/icons-material/Cloud';
-import ThunderstormIcon     from '@mui/icons-material/Thunderstorm';
-import AcUnitIcon           from '@mui/icons-material/AcUnit';
-import GrainIcon            from '@mui/icons-material/Grain';
-import LuggageIcon          from '@mui/icons-material/Luggage';
-import HomeIcon             from '@mui/icons-material/Home';
-import FlightLandIcon       from '@mui/icons-material/FlightLand';
-import CheckCircleIcon      from '@mui/icons-material/CheckCircle';
-import DeviceThermostatIcon from '@mui/icons-material/DeviceThermostat';
-import ExpandMoreIcon       from '@mui/icons-material/ExpandMore';
-import ExpandLessIcon       from '@mui/icons-material/ExpandLess';
-import ArrowUpwardIcon      from '@mui/icons-material/ArrowUpward';
-import ArrowDownwardIcon    from '@mui/icons-material/ArrowDownward';
-import HorizontalRuleIcon   from '@mui/icons-material/HorizontalRule';
-import { useUrlParam } from '@/lib/hooks/useUrlParam';
+import RefreshIcon      from '@mui/icons-material/Refresh';
+import HomeIcon         from '@mui/icons-material/Home';
+import FlightLandIcon   from '@mui/icons-material/FlightLand';
+import WbSunnyIcon      from '@mui/icons-material/WbSunny';
+import FilterDramaIcon  from '@mui/icons-material/FilterDrama';
+import CloudIcon        from '@mui/icons-material/Cloud';
+import FoggyIcon        from '@mui/icons-material/Foggy';
+import UmbrellaIcon     from '@mui/icons-material/Umbrella';
+import ThunderstormIcon from '@mui/icons-material/Thunderstorm';
+import AcUnitIcon       from '@mui/icons-material/AcUnit';
+import WaterDropIcon    from '@mui/icons-material/WaterDrop';
+import AirIcon          from '@mui/icons-material/Air';
+import WarningAmberIcon from '@mui/icons-material/WarningAmber';
+import ChevronRightIcon from '@mui/icons-material/ChevronRight';
+import {
+  freshCurrent, homeCompare, isWetDay, shortDay, summaryLine, todayIn, typicalFrom,
+  watchOuts, wearGuide,
+  type DayWeather, type HomeCompare, type WatchItem, type WearRow, type WeatherResult,
+} from '@/lib/weather-insights';
 
 // ─── Design tokens ─────────────────────────────────────────────────────────────
 
@@ -37,256 +34,61 @@ const D = {
   paper:   '#FDFAF5',
   muted:   'rgba(29,38,66,0.45)',
   rule:    'rgba(29,38,66,0.10)',
+  cool:    '#0891b2',
   display: '"Archivo Black", sans-serif',
   body:    '"Archivo", "Inter", sans-serif',
 };
 
-// ─── Types ─────────────────────────────────────────────────────────────────────
-
-interface DayWeather {
-  date:         string;
-  label:        string;
-  condition:    string;
-  icon:         string;
-  tempAvg:      number;
-  tempMax:      number;
-  tempMin:      number;
-  chanceOfRain: number;
-  precipMm:     number;
-  windKph:      number | null;
-  humidity:     number | null;
-  uvIndex:      number | null;
-  source:       'forecast' | 'historical' | 'weatherapi' | 'climate';
-}
-
-interface HomeComparison {
-  homeCity:       string;
-  destCity:       string;
-  homeTempAvg:    number;
-  destTempAvg:    number;
-  tempDelta:      number;
-  tempDeltaLabel: string;
-  homeRainDays:   number;
-  destRainDays:   number;
-  rainDelta:      number;
-  homeWindAvg:    number | null;
-  destWindAvg:    number | null;
-  summary:        string;
-  insights:       { icon: string; text: string }[];
-  homeDays:       DayWeather[];
-}
-
-interface WeatherResult {
-  mode:                  'forecast' | 'historical' | 'current';
-  days:                  DayWeather[];
-  fetchedAt:             string;
-  forecastAvailableFrom?: string;
-  historicalYears?:      number[];
-  currentWeather?:       DayWeather[];
-  summary?:              string;
-  packingNotes?:         string[];
-  homeComparison?:       HomeComparison;
-  climateNormals?: {
-    destAvgTemp:        number;
-    destAvgRainDays:    number;
-    homeAvgTemp?:       number;
-    homeAvgRainDays?:   number;
-    source:             string;
-    note:               string;
-  };
-}
-
 interface Props {
   tripId:          string;
   destinationCity: string;
-  startDate?:      string;
-  endDate?:        string;
 }
 
-type DisplayMode = 'planning' | 'forecast' | 'now';
-const WEATHER_VIEWS: readonly DisplayMode[] = ['planning', 'forecast', 'now'];
+// ─── Helpers ───────────────────────────────────────────────────────────────────
 
-// ─── Weather helpers ───────────────────────────────────────────────────────────
+type IconComponent = typeof WbSunnyIcon;
 
-function conditionIcon(condition: string, sx?: object) {
-  const c = condition.toLowerCase();
-  if (c.includes('thunder') || c.includes('storm'))
-    return <ThunderstormIcon sx={sx} />;
-  if (c.includes('snow') || c.includes('blizzard') || c.includes('ice') || c.includes('sleet') || c.includes('freez'))
-    return <AcUnitIcon sx={sx} />;
-  if (c.includes('rain') || c.includes('drizzle') || c.includes('shower'))
-    return <UmbrellaIcon sx={sx} />;
-  if (c.includes('overcast') || c.includes('cloud') || c.includes('fog') || c.includes('mist'))
-    return <CloudIcon sx={sx} />;
-  if (c.includes('patchy') || c.includes('partly'))
-    return <GrainIcon sx={sx} />;
-  return <WbSunnyIcon sx={sx} />;
+// By WMO code. Text matching only for v1 cached days, which carry no code.
+function weatherIcon(code: number | null | undefined, condition: string): { Icon: IconComponent; color: string } {
+  let c = code;
+  if (c == null) {
+    const t = condition.toLowerCase();
+    c = t.includes('thunder') ? 95
+      : /snow|sleet|blizzard/.test(t) ? 71
+      : /rain|drizzle|shower/.test(t) ? 61
+      : /fog|mist/.test(t) ? 45
+      : t.includes('overcast') ? 3
+      : /cloud|partly/.test(t) ? 2
+      : 0;
+  }
+  if (c >= 95)                                         return { Icon: ThunderstormIcon, color: '#5c35a0' };
+  if ((c >= 71 && c <= 77) || c === 85 || c === 86)    return { Icon: AcUnitIcon,       color: '#0369a1' };
+  if ((c >= 51 && c <= 67) || (c >= 80 && c <= 82))    return { Icon: UmbrellaIcon,     color: D.cool };
+  if (c === 45 || c === 48)                            return { Icon: FoggyIcon,        color: '#6b7280' };
+  if (c === 3)                                         return { Icon: CloudIcon,        color: '#6b7280' };
+  if (c === 2)                                         return { Icon: FilterDramaIcon,  color: '#8b7d6b' };
+  return { Icon: WbSunnyIcon, color: D.terra };
 }
 
-function conditionColor(condition: string): string {
-  const c = condition.toLowerCase();
-  if (c.includes('thunder') || c.includes('storm'))                                     return '#5c35a0';
-  if (c.includes('snow') || c.includes('ice') || c.includes('freez'))                   return '#0369a1';
-  if (c.includes('rain') || c.includes('drizzle') || c.includes('shower'))              return '#0891b2';
-  if (c.includes('patchy') || c.includes('partly') || c.includes('overcast') || c.includes('cloud')) return '#6b7280';
-  return D.terra;
+// Colour of a daytime high, so hot vs cold reads before the number does.
+function warmth(t: number): string {
+  if (t >= 30) return '#A8432A';
+  if (t >= 22) return D.terra;
+  if (t >= 14) return D.navy;
+  if (t >= 6)  return D.cool;
+  return '#0369a1';
 }
 
-// Absolute warm/cool read for a temperature — colours the number so you clock
-// hot vs cold before reading it. Bands match tripCharacter's Hot/Warm/Mild/Cold.
-function tempWarmth(t: number): { color: string; label: string } {
-  if (t >= 28) return { color: '#A8432A', label: 'hot'  };
-  if (t >= 20) return { color: D.terra,   label: 'warm' };
-  if (t >= 12) return { color: D.navy,    label: 'mild' };
-  if (t >= 6)  return { color: '#0891b2', label: 'cool' };
-  return         { color: '#0369a1', label: 'cold' };
+function ageLabel(iso: string): string {
+  const mins = Math.round((Date.now() - Date.parse(iso)) / 60000);
+  if (mins <= 1)  return 'just now';
+  if (mins < 60)  return `${mins}m ago`;
+  const hrs = Math.round(mins / 60);
+  return hrs < 48 ? `${hrs}h ago` : `${Math.round(hrs / 24)}d ago`;
 }
 
-function tripCharacter(days: DayWeather[]): { label: string; sub: string } {
-  const maxTemp   = Math.max(...days.map(d => d.tempMax));
-  const rainyDays = days.filter(d => d.chanceOfRain > 40).length;
-
-  const tempLabel =
-    maxTemp >= 28 ? 'Hot'  :
-    maxTemp >= 20 ? 'Warm' :
-    maxTemp >= 12 ? 'Mild' : 'Cold';
-
-  const rainLabel =
-    rainyDays >= days.length * 0.6 ? 'Wet'   :
-    rainyDays >= days.length * 0.3 ? 'Mixed' : 'Dry';
-
-  const sub =
-    maxTemp >= 28 && rainLabel === 'Dry' ? 'Pack light, stay hydrated'          :
-    maxTemp < 12                         ? 'Layers essential'                   :
-    rainLabel === 'Wet'                  ? 'Waterproofs a must'                 :
-    rainLabel === 'Mixed'                ? 'Pack for both sun and rain'         : 'Comfortable conditions';
-
-  return { label: `${tempLabel} & ${rainLabel}`, sub };
-}
-
-// ─── Source chip ───────────────────────────────────────────────────────────────
-
-function SourceChip({ source }: { source: DayWeather['source'] }) {
-  const map: Record<string, { label: string; bg: string; color: string }> = {
-    weatherapi: { label: 'live', bg: 'rgba(46,125,50,0.12)',   color: '#2e7d32' },
-    forecast:   { label: 'fcst', bg: 'rgba(25,118,210,0.12)', color: '#1976d2' },
-    historical: { label: 'avg',  bg: `${D.terra}1A`,          color: D.terra   },
-    climate:    { label: 'mdl',  bg: 'rgba(156,39,176,0.12)', color: '#7c3aed' },
-  };
-  const s = map[source] ?? map.forecast;
-  return (
-    <Chip label={s.label} size="small" sx={{
-      height: 16, fontSize: '0.8rem', fontWeight: 800,
-      fontFamily: D.body, letterSpacing: '0.05em',
-      backgroundColor: s.bg, color: s.color,
-    }} />
-  );
-}
-
-// ─── Day card ──────────────────────────────────────────────────────────────────
-
-function DayCard({ day, compact = false }: { day: DayWeather; compact?: boolean }) {
-  const iconColor = conditionColor(day.condition);
-  const rainHigh  = day.chanceOfRain > 60;
-  const rainMed   = day.chanceOfRain > 30;
-
-  return (
-    <Paper elevation={0} sx={{
-      p: compact ? 1.25 : 1.75,
-      border: `1.5px solid ${D.rule}`,
-      borderRadius: '10px',
-      display: 'flex', flexDirection: 'column', alignItems: 'center',
-      gap: 0.5,
-      minWidth: compact ? 96 : 116,
-      flex: '0 0 auto',
-      backgroundColor: rainHigh ? 'rgba(8,145,178,0.04)' : D.paper,
-    }}>
-      {/* Date */}
-      <Typography sx={{
-        fontSize: '0.8rem', fontWeight: 800, letterSpacing: '0.08em',
-        textTransform: 'uppercase', color: D.terra, lineHeight: 1,
-        fontFamily: D.body,
-      }}>
-        {day.label}
-      </Typography>
-
-      {/* Icon */}
-      {conditionIcon(day.condition, { fontSize: '1.6rem', color: iconColor, my: 0.25 })}
-
-      {/* Temperature — the number you read first, tinted warm/cool */}
-      <Typography sx={{
-        fontFamily: D.display,
-        fontSize: compact ? '1.4rem' : '1.65rem',
-        lineHeight: 1, color: tempWarmth(day.tempAvg).color,
-      }}>
-        {day.tempAvg}°
-      </Typography>
-
-      {/* High / low */}
-      <Typography sx={{ fontSize: '0.85rem', color: D.muted, lineHeight: 1, fontFamily: D.body }}>
-        {day.tempMax}° / {day.tempMin}°
-      </Typography>
-
-      {/* Rain */}
-      <Box sx={{ width: '100%', mt: 0.5 }}>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.3, px: 0.25 }}>
-          <UmbrellaIcon sx={{ fontSize: '1rem', color: D.muted }} />
-          <Typography sx={{
-            fontSize: '1rem',
-            color: rainHigh ? '#0891b2' : D.muted,
-            fontWeight: rainHigh ? 800 : 400,
-            fontFamily: D.body,
-          }}>
-            {day.chanceOfRain}%
-          </Typography>
-        </Box>
-        <LinearProgress variant="determinate" value={day.chanceOfRain} sx={{
-          height: 2, borderRadius: 2,
-          backgroundColor: D.rule,
-          '& .MuiLinearProgress-bar': {
-            backgroundColor: rainHigh ? '#0891b2' : rainMed ? '#60a5d4' : `${D.rule}`,
-            borderRadius: 2,
-          },
-        }} />
-      </Box>
-
-      {day.windKph !== null && (
-        <Typography sx={{ fontSize: '1rem', color: D.muted, fontFamily: D.body }}>
-          {day.windKph} km/h
-        </Typography>
-      )}
-
-      <SourceChip source={day.source} />
-    </Paper>
-  );
-}
-
-// ─── Day grid — scroll on mobile, grid on desktop ─────────────────────────────
-
-function DayGrid({ days, compact = false }: { days: DayWeather[]; compact?: boolean }) {
-  return (
-    <>
-      {/* Mobile: horizontal scroll */}
-      <Box sx={{
-        display: { xs: 'flex', sm: 'none' },
-        gap: 1, overflowX: 'auto', pb: 1,
-        '&::-webkit-scrollbar': { height: 3 },
-        '&::-webkit-scrollbar-thumb': { backgroundColor: D.rule, borderRadius: 2 },
-      }}>
-        {days.map(d => <DayCard key={d.date} day={d} compact={compact} />)}
-      </Box>
-
-      {/* Desktop: grid */}
-      <Box sx={{
-        display: { xs: 'none', sm: 'grid' },
-        gridTemplateColumns: 'repeat(auto-fill, minmax(128px, 1fr))',
-        gap: 1.25,
-      }}>
-        {days.map(d => <DayCard key={d.date} day={d} compact={compact} />)}
-      </Box>
-    </>
-  );
-}
+const longDate = (date: string) =>
+  new Date(`${date}T12:00:00Z`).toLocaleDateString('en-IE', { day: 'numeric', month: 'long', timeZone: 'UTC' });
 
 // ─── Section label ─────────────────────────────────────────────────────────────
 
@@ -302,716 +104,277 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
   );
 }
 
-// ─── Stat strip ────────────────────────────────────────────────────────────────
+// ─── Day card ──────────────────────────────────────────────────────────────────
 
-function StatStrip({ days }: { days: DayWeather[] }) {
-  const maxTemp = Math.max(...days.map(d => d.tempMax));
-  const avgRain = Math.round(days.reduce((a, d) => a + d.chanceOfRain, 0) / days.length);
-  const avgWind = days[0]?.windKph;
-
-  const stats = [
-    { label: 'Avg high', value: `${maxTemp}°C`, Icon: DeviceThermostatIcon },
-    { label: 'Rain',     value: `${avgRain}%`,  Icon: UmbrellaIcon         },
-    ...(avgWind != null ? [{ label: 'Wind', value: `${avgWind} km/h`, Icon: AirIcon }] : []),
-  ];
+function DayCard({ day, isToday, showCity }: { day: DayWeather; isToday: boolean; showCity: boolean }) {
+  const { Icon, color } = weatherIcon(day.code, day.condition);
+  const typical = day.source === 'historical';
+  const wet     = isWetDay(day);
+  const rain = typical
+    ? `${day.chanceOfRain ?? 0}%`
+    : day.precipMm >= 0.1
+      ? `${day.precipMm} mm${day.chanceOfRain != null ? ` · ${day.chanceOfRain}%` : ''}`
+      : 'Dry';
 
   return (
-    <Box sx={{
-      display: 'flex', borderRadius: '8px',
-      border: `1.5px solid ${D.rule}`, overflow: 'hidden', mt: 2,
+    <Paper elevation={0} sx={{
+      p: 1.5,
+      border: `1.5px solid ${isToday ? D.terra : D.rule}`,
+      borderRadius: '10px',
+      display: 'flex', flexDirection: 'column', alignItems: 'center',
+      gap: 0.4, textAlign: 'center',
+      minWidth: { xs: 112, md: 0 }, flex: '0 0 auto',
+      backgroundColor: D.paper,
     }}>
-      {stats.map(({ label, value, Icon }, i) => (
-        <Box key={label} sx={{
-          flex: 1, py: 1.25, textAlign: 'center',
-          borderRight: i < stats.length - 1 ? `1px solid ${D.rule}` : 'none',
-        }}>
-          <Icon sx={{ fontSize: '0.95rem', color: D.muted, display: 'block', mx: 'auto', mb: 0.3 }} />
-          <Typography sx={{ fontFamily: D.display, fontSize: '1rem', lineHeight: 1, color: D.navy }}>
-            {value}
-          </Typography>
-          <Typography sx={{ fontSize: '0.68rem', color: D.muted, mt: 0.3, fontFamily: D.body }}>
-            {label}
-          </Typography>
-        </Box>
-      ))}
-    </Box>
-  );
-}
-
-// ─── Packing notes ─────────────────────────────────────────────────────────────
-
-function PackingNotes({ notes }: { notes: string[] }) {
-  if (!notes.length) return null;
-  return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.75 }}>
-      {notes.map((note, i) => (
-        <Box key={i} sx={{ display: 'flex', alignItems: 'flex-start', gap: 1 }}>
-          <LuggageIcon sx={{ fontSize: '1rem', color: D.green, mt: 0.2, flexShrink: 0 }} />
-          <Typography sx={{ fontSize: '1rem', color: D.muted, lineHeight: 1.45, fontFamily: D.body }}>
-            {note}
-          </Typography>
-        </Box>
-      ))}
-    </Box>
-  );
-}
-
-// ─── Home comparison ───────────────────────────────────────────────────────────
-
-function HomeComparison({ c }: { c: HomeComparison }) {
-  const warmer = c.tempDelta >= 1;
-  const cooler = c.tempDelta <= -1;
-  const dirColor = warmer ? D.terra : cooler ? '#0891b2' : D.muted;
-  const dirBg    = warmer ? `${D.terra}16` : cooler ? 'rgba(8,145,178,0.10)' : D.rule;
-  const dirLabel = warmer ? 'warmer' : cooler ? 'cooler' : 'similar';
-  const DirArrow = warmer ? ArrowUpwardIcon : cooler ? ArrowDownwardIcon : HorizontalRuleIcon;
-
-  const homeW = tempWarmth(c.homeTempAvg);
-  const destW = tempWarmth(c.destTempAvg);
-
-  const drier  = c.rainDelta <= -1;
-  const wetter = c.rainDelta >= 1;
-  const rainColor = drier ? D.green : wetter ? '#0891b2' : D.muted;
-
-  const col = (
-    Icon: typeof HomeIcon, city: string, temp: number,
-    w: { color: string; label: string }, rainDays: number, rainCue: boolean,
-  ) => (
-    <Box sx={{ p: 2, textAlign: 'center' }}>
-      <Icon sx={{ fontSize: '1rem', color: D.muted, mb: 0.5 }} />
       <Typography sx={{
-        fontSize: '0.62rem', color: D.muted, display: 'block',
-        fontFamily: D.body, textTransform: 'uppercase',
-        letterSpacing: '0.07em', fontWeight: 700,
+        fontSize: '0.8rem', fontWeight: 800, letterSpacing: '0.08em',
+        textTransform: 'uppercase', color: D.terra, lineHeight: 1.1, fontFamily: D.body,
       }}>
-        {city}
+        {isToday ? 'Today' : day.label}
       </Typography>
-      <Typography sx={{ fontFamily: D.display, fontSize: '1.7rem', lineHeight: 1.15, color: w.color }}>
-        {temp}°
-      </Typography>
-      <Typography sx={{
-        fontSize: '0.58rem', fontWeight: 800, letterSpacing: '0.12em',
-        textTransform: 'uppercase', color: w.color, fontFamily: D.body, mb: 0.4,
-      }}>
-        {w.label}
-      </Typography>
-      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.25 }}>
-        {rainCue && drier  && <ArrowDownwardIcon sx={{ fontSize: '0.8rem', color: rainColor }} />}
-        {rainCue && wetter && <ArrowUpwardIcon   sx={{ fontSize: '0.8rem', color: rainColor }} />}
-        <Typography sx={{
-          fontSize: '0.68rem', fontFamily: D.body,
-          color: rainCue && (drier || wetter) ? rainColor : D.muted,
-        }}>
-          {rainDays} rainy day{rainDays !== 1 ? 's' : ''}
+      {showCity && (
+        <Typography noWrap sx={{ fontSize: '0.75rem', color: D.muted, maxWidth: '100%', fontFamily: D.body }}>
+          {day.city}
         </Typography>
+      )}
+
+      <Tooltip title={day.condition}>
+        <Icon sx={{ fontSize: '1.6rem', color, my: 0.25 }} />
+      </Tooltip>
+
+      {/* The high leads — it's the temperature you'll actually be out in */}
+      <Typography sx={{ fontFamily: D.display, fontSize: '1.65rem', lineHeight: 1, color: warmth(day.tempMax) }}>
+        {day.tempMax}°
+      </Typography>
+      <Typography sx={{ fontSize: '0.85rem', color: D.muted, lineHeight: 1.2, fontFamily: D.body }}>
+        low {day.tempMin}°
+      </Typography>
+      {day.feelsMax != null && (
+        <Typography sx={{ fontSize: '0.85rem', color: D.navy, fontWeight: 600, lineHeight: 1.2, fontFamily: D.body }}>
+          feels {day.feelsMax}°
+        </Typography>
+      )}
+
+      <Tooltip title={typical ? 'Chance of a wet day' : 'Expected rain · chance'}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.4, mt: 0.5 }}>
+          <WaterDropIcon sx={{ fontSize: '0.9rem', color: wet ? D.cool : D.muted }} />
+          <Typography sx={{
+            fontSize: '0.85rem', fontFamily: D.body,
+            color: wet ? D.cool : D.muted, fontWeight: wet ? 800 : 400,
+          }}>
+            {rain}
+          </Typography>
+        </Box>
+      </Tooltip>
+
+      {day.windKph != null && (
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.4 }}>
+          <AirIcon sx={{ fontSize: '0.9rem', color: D.muted }} />
+          <Typography sx={{ fontSize: '0.85rem', color: D.muted, fontFamily: D.body }}>
+            {day.windKph} km/h
+          </Typography>
+        </Box>
+      )}
+
+      {typical && (
+        <Typography sx={{
+          fontSize: '0.7rem', fontWeight: 800, letterSpacing: '0.08em',
+          textTransform: 'uppercase', color: D.terra, opacity: 0.75, fontFamily: D.body,
+        }}>
+          typical
+        </Typography>
+      )}
+    </Paper>
+  );
+}
+
+// Scroll on phones and tablets; one row of equal columns on desktop (rows of 7
+// for long trips) so a 9-day trip never leaves an orphan card.
+function DayStrip({ days, today }: { days: DayWeather[]; today: string }) {
+  const showCity = new Set(days.map(d => d.city)).size > 1;
+  const cols  = days.length <= 10 ? days.length : 7;
+  const cards = days.map(d => <DayCard key={d.date} day={d} isToday={d.date === today} showCity={showCity} />);
+  return (
+    <>
+      <Box sx={{
+        display: { xs: 'flex', md: 'none' },
+        gap: 1, overflowX: 'auto', pb: 1,
+        '&::-webkit-scrollbar': { height: 3 },
+        '&::-webkit-scrollbar-thumb': { backgroundColor: D.rule, borderRadius: 2 },
+      }}>
+        {cards}
+      </Box>
+      <Box sx={{
+        display: { xs: 'none', md: 'grid' },
+        gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
+        gap: 1.25,
+      }}>
+        {cards}
+      </Box>
+    </>
+  );
+}
+
+// ─── What to wear ──────────────────────────────────────────────────────────────
+
+function WearGuide({ rows }: { rows: WearRow[] }) {
+  return (
+    <Paper elevation={0} sx={{ border: `1.5px solid ${D.rule}`, borderRadius: '10px', overflow: 'hidden' }}>
+      {rows.map((r, i) => (
+        <Box key={r.key} sx={{
+          display: 'grid',
+          gridTemplateColumns: { xs: '96px 1fr', sm: '128px 150px 1fr' },
+          columnGap: 2, alignItems: 'baseline',
+          px: { xs: 1.75, sm: 2.25 }, py: 1.4,
+          borderTop: i ? `1px solid ${D.rule}` : 'none',
+        }}>
+          <Typography sx={{
+            fontSize: '0.8rem', fontWeight: 800, letterSpacing: '0.08em',
+            textTransform: 'uppercase', color: D.muted, fontFamily: D.body,
+          }}>
+            {r.label}
+          </Typography>
+          <Typography sx={{ display: { xs: 'none', sm: 'block' }, fontFamily: D.display, fontSize: '1rem', color: D.navy }}>
+            {r.value}
+          </Typography>
+          <Box>
+            <Typography sx={{ display: { xs: 'block', sm: 'none' }, fontFamily: D.display, fontSize: '0.95rem', color: D.navy, mb: 0.25 }}>
+              {r.value}
+            </Typography>
+            <Typography sx={{ fontSize: '1rem', color: D.navy, lineHeight: 1.45, fontFamily: D.body }}>
+              {r.text}
+            </Typography>
+          </Box>
+        </Box>
+      ))}
+    </Paper>
+  );
+}
+
+// ─── Watch out ─────────────────────────────────────────────────────────────────
+
+function WatchOut({ items, onOpenDay }: { items: WatchItem[]; onOpenDay: (n: number) => void }) {
+  return (
+    <Paper elevation={0} sx={{ border: `1.5px solid ${D.terra}40`, borderRadius: '10px', overflow: 'hidden' }}>
+      {items.map((w, i) => (
+        <Box
+          key={w.date}
+          role="button"
+          onClick={() => onOpenDay(w.dayNumber)}
+          sx={{
+            display: 'flex', alignItems: 'center', gap: 1.5,
+            px: { xs: 1.75, sm: 2.25 }, py: 1.25, cursor: 'pointer',
+            borderTop: i ? `1px solid ${D.rule}` : 'none',
+            '&:hover': { backgroundColor: `${D.terra}0D` },
+          }}
+        >
+          <WarningAmberIcon sx={{ fontSize: '1.1rem', color: D.terra, flexShrink: 0 }} />
+          <Typography sx={{ fontWeight: 800, color: D.navy, fontFamily: D.body, minWidth: 64 }}>
+            {shortDay(w.date)}
+          </Typography>
+          <Typography sx={{ flex: 1, color: D.navy, fontFamily: D.body }}>{w.text}</Typography>
+          <ChevronRightIcon sx={{ color: D.muted, fontSize: '1.2rem' }} />
+        </Box>
+      ))}
+    </Paper>
+  );
+}
+
+// ─── Compared to home ──────────────────────────────────────────────────────────
+
+const COMPARE_GRID = { xs: '78px 1fr 1fr', sm: '128px 1fr 1fr' };
+
+function CompareHeader({ Icon, text, sub }: { Icon: IconComponent; text: string; sub?: string }) {
+  return (
+    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.6, minWidth: 0 }}>
+      <Icon sx={{ fontSize: '1rem', color: D.muted, flexShrink: 0 }} />
+      <Box sx={{ minWidth: 0 }}>
+        <Typography noWrap sx={{
+          fontSize: '0.8rem', fontWeight: 800, letterSpacing: '0.08em',
+          textTransform: 'uppercase', color: D.navy, fontFamily: D.body,
+        }}>
+          {text}
+        </Typography>
+        {sub && <Typography sx={{ fontSize: '0.75rem', color: D.muted, fontFamily: D.body }}>{sub}</Typography>}
       </Box>
     </Box>
   );
+}
+
+function HomeCompareView({ c }: { c: HomeCompare }) {
+  const toneColor = (t: HomeCompare['rows'][number]['tone']) =>
+    t === 'warm' ? D.terra : t === 'cool' ? D.cool : D.navy;
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
-      <Typography sx={{ fontSize: '1rem', color: D.muted, lineHeight: 1.5, fontFamily: D.body }}>
-        {c.summary}
+      <Typography sx={{ fontSize: '1.1rem', color: D.navy, lineHeight: 1.5, fontFamily: D.body, fontWeight: 600 }}>
+        {c.verdict}
       </Typography>
 
-      {/* Side by side — colour and arrow carry the warm/cool story at a glance */}
       <Paper elevation={0} sx={{ border: `1.5px solid ${D.rule}`, borderRadius: '10px', overflow: 'hidden' }}>
-        <Box sx={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr' }}>
-
-          {col(HomeIcon, c.homeCity, c.homeTempAvg, homeW, c.homeRainDays, false)}
-
-          {/* Delta — the verdict */}
-          <Box sx={{
-            px: 2, display: 'flex', flexDirection: 'column',
-            alignItems: 'center', justifyContent: 'center', gap: 0.25,
-            borderLeft: `1px solid ${D.rule}`, borderRight: `1px solid ${D.rule}`,
-            backgroundColor: dirBg,
-          }}>
-            <DirArrow sx={{ fontSize: '1.2rem', color: dirColor }} />
-            {c.tempDelta !== 0 && (
-              <Typography sx={{ fontFamily: D.display, fontSize: '1.15rem', lineHeight: 1, color: dirColor }}>
-                {c.tempDelta > 0 ? '+' : ''}{c.tempDelta}°
-              </Typography>
-            )}
-            <Typography sx={{
-              fontSize: '0.58rem', fontWeight: 800, letterSpacing: '0.1em',
-              textTransform: 'uppercase', color: dirColor, fontFamily: D.body,
-            }}>
-              {dirLabel}
-            </Typography>
-          </Box>
-
-          {col(FlightLandIcon, c.destCity, c.destTempAvg, destW, c.destRainDays, true)}
-
-        </Box>
-      </Paper>
-
-      {/* Insights */}
-      {c.insights.length > 0 && (
-        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.75 }}>
-          {c.insights.map((ins, i) => (
-            <Box key={i} sx={{ display: 'flex', gap: 1, alignItems: 'flex-start' }}>
-              <CheckCircleIcon sx={{ fontSize: '0.9rem', color: D.green, mt: 0.2, flexShrink: 0 }} />
-              <Typography sx={{ fontSize: '0.85rem', color: D.muted, lineHeight: 1.4, fontFamily: D.body }}>
-                {ins.text}
-              </Typography>
-            </Box>
-          ))}
-        </Box>
-      )}
-
-      {/* Home day cards */}
-      {c.homeDays.length > 0 && (
-        <Box>
-          <SectionLabel>{c.homeCity} at the same time of year</SectionLabel>
-          <DayGrid days={c.homeDays} compact />
-        </Box>
-      )}
-    </Box>
-  );
-}
-
-// ─── Data sources (replaces "Technical detail") ────────────────────────────────
-
-function DataSources({ weather, destinationCity }: { weather: WeatherResult; destinationCity: string }) {
-  const [open, setOpen] = useState(false);
-
-  return (
-    <Box>
-      <Button
-        size="small"
-        endIcon={open ? <ExpandLessIcon /> : <ExpandMoreIcon />}
-        onClick={() => setOpen(p => !p)}
-        sx={{
-          fontSize: '0.72rem', color: D.muted,
-          fontWeight: 700, px: 0, fontFamily: D.body,
-        }}
-      >
-        {open ? 'Hide' : 'Show'} data sources
-      </Button>
-
-      <Collapse in={open}>
-        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 1.5 }}>
-
-          {weather.climateNormals && (
-            <Paper elevation={0} sx={{
-              p: 1.75, border: `1.5px solid ${D.rule}`, borderRadius: '10px',
-            }}>
-              <SectionLabel>Climate model cross-check</SectionLabel>
-              <Box sx={{ display: 'flex', gap: 2.5, flexWrap: 'wrap' }}>
-                <Box>
-                  <Typography sx={{ fontSize: '0.68rem', color: D.muted, fontFamily: D.body }}>
-                    {destinationCity} model avg temp
-                  </Typography>
-                  <Typography sx={{ fontFamily: D.display, fontSize: '1rem', color: D.navy }}>
-                    {weather.climateNormals.destAvgTemp}°C
-                  </Typography>
-                </Box>
-                <Box>
-                  <Typography sx={{ fontSize: '0.68rem', color: D.muted, fontFamily: D.body }}>
-                    Model rain days
-                  </Typography>
-                  <Typography sx={{ fontFamily: D.display, fontSize: '1rem', color: D.navy }}>
-                    {weather.climateNormals.destAvgRainDays} of {weather.days.length}
-                  </Typography>
-                </Box>
-                {weather.climateNormals.homeAvgTemp !== undefined && (
-                  <Box>
-                    <Typography sx={{ fontSize: '0.68rem', color: D.muted, fontFamily: D.body }}>
-                      {weather.homeComparison?.homeCity} model avg
-                    </Typography>
-                    <Typography sx={{ fontFamily: D.display, fontSize: '1rem', color: D.navy }}>
-                      {weather.climateNormals.homeAvgTemp}°C
-                    </Typography>
-                  </Box>
-                )}
-              </Box>
-              <Typography sx={{ fontSize: '0.88rem', color: D.muted, mt: 1, fontFamily: D.body }}>
-                {weather.climateNormals.note}
-              </Typography>
-            </Paper>
-          )}
-
-          <Box sx={{ display: 'flex', gap: 1.5, flexWrap: 'wrap' }}>
-            {[
-              { label: 'live', bg: 'rgba(46,125,50,0.12)',   color: '#2e7d32', desc: 'WeatherAPI.com (3 days)'   },
-              { label: 'fcst', bg: 'rgba(25,118,210,0.12)', color: '#1976d2', desc: 'Open-Meteo (16 days)'      },
-              { label: 'avg',  bg: `${D.terra}1A`,          color: D.terra,   desc: '5-year ERA5 historical'    },
-            ].map(({ label, bg, color, desc }) => (
-              <Box key={label} sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                <Chip label={label} size="small" sx={{
-                  height: 16, fontSize: '0.58rem', fontWeight: 800,
-                  backgroundColor: bg, color, fontFamily: D.body,
-                }} />
-                <Typography sx={{ fontSize: '0.68rem', color: D.muted, fontFamily: D.body }}>{desc}</Typography>
-              </Box>
-            ))}
-          </Box>
-        </Box>
-      </Collapse>
-    </Box>
-  );
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// ─── PLANNING VIEW ─────────────────────────────────────────────────────────────
-// Hero: temperature character, packing notes. Home comparison prominent.
-// Use when trip is >14 days out (historical data).
-// ═══════════════════════════════════════════════════════════════════════════════
-
-function PlanningView({
-  weather, destinationCity, isHistorical,
-}: {
-  weather: WeatherResult; destinationCity: string; isHistorical: boolean;
-}) {
-  const { label: charLabel, sub: charSub } = tripCharacter(weather.days);
-  const maxTemp = Math.max(...weather.days.map(d => d.tempMax));
-  const minTemp = Math.min(...weather.days.map(d => d.tempMin));
-
-  return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
-
-      {/* Day strip */}
-      <Box>
-        <SectionLabel>
-          {isHistorical ? 'Typical daily conditions' : 'Day-by-day forecast'}
-        </SectionLabel>
-        <DayGrid days={weather.days} />
-      </Box>
-
-      {/* Historical notice */}
-      {isHistorical && (
-        <Alert
-          severity="info"
-          icon={<InfoOutlinedIcon fontSize="small" />}
-          sx={{
-            backgroundColor: `${D.green}0E`,
-            border: `1px solid ${D.green}28`,
-            borderRadius: '10px', py: 0.75,
-            '& .MuiAlert-icon': { color: D.green },
-          }}
-        >
-          <Typography sx={{
-            fontSize: '0.78rem', fontWeight: 700,
-            fontFamily: D.body, color: D.navy, mb: 0.1,
-          }}>
-            Historical averages
-          </Typography>
-          <Typography sx={{ fontSize: '0.83rem', color: D.muted, fontFamily: D.body }}>
-            Based on {weather.historicalYears?.length ?? 5} years of recorded data
-            {weather.forecastAvailableFrom
-              ? ` · Live forecast from ${new Date(weather.forecastAvailableFrom)
-                  .toLocaleDateString('en-IE', { day: 'numeric', month: 'long' })}`
-              : ''}
-          </Typography>
-        </Alert>
-      )}
-
-      {/* Trip character hero */}
-      <Paper elevation={0} sx={{
-        p: { xs: 2.5, sm: 3 },
-        border: `1.5px solid ${D.rule}`,
-        borderRadius: '12px',
-        background: `linear-gradient(135deg, ${D.green}0A 0%, transparent 55%)`,
-      }}>
         <Box sx={{
-          display: 'flex', alignItems: 'flex-start',
-          justifyContent: 'space-between', gap: 2, mb: 0,
+          display: 'grid', gridTemplateColumns: COMPARE_GRID, columnGap: 1.5, alignItems: 'center',
+          px: { xs: 1.75, sm: 2.25 }, py: 1.1, backgroundColor: `${D.navy}08`,
         }}>
-          {/* Temperature range */}
-          <Box>
-            <Typography sx={{
-              fontFamily: D.display,
-              fontSize: { xs: '2.4rem', sm: '3rem' },
-              lineHeight: 1, color: D.navy,
-              letterSpacing: '-0.02em',
-            }}>
-              {minTemp}–{maxTemp}°C
-            </Typography>
-            <Typography sx={{
-              fontSize: '0.75rem', color: D.muted,
-              fontFamily: D.body, mt: 0.5,
-            }}>
-              {destinationCity} · {weather.days.length} day{weather.days.length !== 1 ? 's' : ''}
-              {isHistorical ? ' · historical avg' : ''}
-            </Typography>
-          </Box>
-
-          {/* Character badge */}
-          <Box sx={{ textAlign: 'right', flexShrink: 0, mt: 0.25 }}>
-            <Typography sx={{
-              fontFamily: D.display,
-              fontSize: { xs: '0.88rem', sm: '1rem' },
-              color: D.terra, lineHeight: 1.2,
-            }}>
-              {charLabel}
-            </Typography>
-            <Typography sx={{
-              fontSize: '0.7rem', color: D.muted,
-              fontFamily: D.body, mt: 0.4,
-            }}>
-              {charSub}
-            </Typography>
-          </Box>
+          <span />
+          <CompareHeader Icon={HomeIcon} text={c.homeCity} sub="same dates" />
+          <CompareHeader Icon={FlightLandIcon} text={c.destCity} />
         </Box>
-
-        {/* Summary */}
-        {weather.summary && (
-          <Typography sx={{
-            fontSize: '1rem', color: D.muted,
-            lineHeight: 1.5, fontFamily: D.body, mt: 1.25,
+        {c.rows.map(r => (
+          <Box key={r.key} sx={{
+            display: 'grid', gridTemplateColumns: COMPARE_GRID, columnGap: 1.5, alignItems: 'baseline',
+            px: { xs: 1.75, sm: 2.25 }, py: 1.2, borderTop: `1px solid ${D.rule}`,
           }}>
-            {weather.summary}
-          </Typography>
-        )}
-
-        {/* Packing notes */}
-        {weather.packingNotes && weather.packingNotes.length > 0 && (
-          <Box sx={{
-            pt: 1.5, mt: 1.5,
-            borderTop: `1px dashed ${D.rule}`,
-          }}>
-            <PackingNotes notes={weather.packingNotes} />
+            <Typography sx={{
+              fontSize: '0.8rem', fontWeight: 800, letterSpacing: '0.08em',
+              textTransform: 'uppercase', color: D.muted, fontFamily: D.body,
+            }}>
+              {r.label}
+            </Typography>
+            <Box>
+              <Typography sx={{ fontSize: '1rem', color: D.navy, fontFamily: D.body }}>{r.home}</Typography>
+              {r.homeSub && <Typography sx={{ fontSize: '0.85rem', color: D.muted, fontFamily: D.body }}>{r.homeSub}</Typography>}
+            </Box>
+            <Box>
+              <Typography sx={{ fontSize: '1rem', color: toneColor(r.tone), fontWeight: 800, fontFamily: D.body }}>{r.dest}</Typography>
+              {r.destSub && <Typography sx={{ fontSize: '0.85rem', color: D.muted, fontFamily: D.body }}>{r.destSub}</Typography>}
+            </Box>
           </Box>
-        )}
-
-        {/* Stat strip */}
-        <StatStrip days={weather.days} />
+        ))}
       </Paper>
 
-      {/* Home comparison — most valuable in planning mode */}
-      {weather.homeComparison ? (
-        <Box>
-          <SectionLabel>Compared to home</SectionLabel>
-          <HomeComparison c={weather.homeComparison} />
-        </Box>
-      ) : (
-        <Alert
-          severity="info"
-          icon={<HomeIcon fontSize="small" />}
-          sx={{ py: 0.75, borderRadius: '10px' }}
-        >
-          <Typography sx={{ fontSize: '0.92rem', fontFamily: D.body }}>
-            Set your home location in your profile to compare with home.
-          </Typography>
-        </Alert>
-      )}
-
-      <DataSources weather={weather} destinationCity={destinationCity} />
-    </Box>
-  );
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// ─── FORECAST VIEW ─────────────────────────────────────────────────────────────
-// Day grid is the main content and leads; best/worst days follow it.
-// Use when trip is 1–14 days out (live forecast data available).
-// ═══════════════════════════════════════════════════════════════════════════════
-
-function ForecastView({
-  weather, destinationCity,
-}: {
-  weather: WeatherResult; destinationCity: string;
-}) {
-  const days = weather.days;
-
-  // Derive best day (warmest, least rain) and worst day (most rain, coldest)
-  const bestDay = [...days].sort(
-    (a, b) => (b.tempMax - b.chanceOfRain * 0.4) - (a.tempMax - a.chanceOfRain * 0.4)
-  )[0];
-  const worstDay = [...days].sort(
-    (a, b) => (b.chanceOfRain + (20 - b.tempMax) * 0.5) - (a.chanceOfRain + (20 - a.tempMax) * 0.5)
-  )[0];
-  const hasDual = bestDay && worstDay && bestDay.date !== worstDay.date;
-
-  return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
-
-      {/* Day grid — main content in forecast mode */}
-      <Box>
-        <SectionLabel>All {days.length} days</SectionLabel>
-        <DayGrid days={days} />
-      </Box>
-
-      {/* Summary */}
-      {weather.summary && (
-        <Typography sx={{
-          fontSize: '1.2rem', color: D.muted,
-          lineHeight: 1.5, fontFamily: D.body,
-        }}>
-          {weather.summary}
+      {c.analog && (
+        <Typography sx={{ fontSize: '1rem', color: D.muted, lineHeight: 1.5, fontFamily: D.body }}>
+          {c.analog}
         </Typography>
       )}
-
-      {/* Best / worst hero */}
-      {hasDual && (
-        <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1.5 }}>
-          {([
-            { day: bestDay,  label: 'Best day',  accentColor: D.green,   tempColor: D.navy     },
-            { day: worstDay, label: 'Watch out', accentColor: '#0891b2', tempColor: '#0369a1'  },
-          ] as const).map(({ day, label, accentColor, tempColor }) => (
-            <Paper key={day.date} elevation={0} sx={{
-              p: { xs: 1.75, sm: 2 },
-              border: `1.5px solid ${accentColor}35`,
-              borderTop: `3px solid ${accentColor}`,
-              borderRadius: '0 0 12px 12px',
-              display: 'flex', flexDirection: 'column', gap: 0.5,
-            }}>
-              <Typography sx={{
-                fontSize: '0.8rem', fontWeight: 800, letterSpacing: '0.1em',
-                textTransform: 'uppercase', color: accentColor, fontFamily: D.body,
-              }}>
-                {label}
-              </Typography>
-              <Typography sx={{
-                fontSize: '0.8rem', color: D.muted,
-                fontFamily: D.body, fontWeight: 700,
-              }}>
-                {day.label}
-              </Typography>
-              {conditionIcon(day.condition, {
-                fontSize: '1.6rem',
-                color: conditionColor(day.condition),
-                my: 0.5,
-              })}
-              <Typography sx={{
-                fontFamily: D.display, fontSize: '2rem',
-                lineHeight: 1, color: tempColor,
-              }}>
-                {day.tempMax}°
-              </Typography>
-              <Typography sx={{ fontSize: '0.82rem', color: D.muted, fontFamily: D.body }}>
-                {day.condition}
-              </Typography>
-              <Typography sx={{ fontSize: '0.75rem', color: D.muted, fontFamily: D.body }}>
-                {day.chanceOfRain}% rain
-              </Typography>
-            </Paper>
-          ))}
-        </Box>
-      )}
-
-      {/* Packing notes */}
-      {weather.packingNotes && weather.packingNotes.length > 0 && (
-        <Box>
-          <SectionLabel>Pack for this trip</SectionLabel>
-          <PackingNotes notes={weather.packingNotes} />
-        </Box>
-      )}
-
-      {/* Home comparison — less prominent in forecast mode */}
-      {weather.homeComparison && (
-        <Box>
-          <SectionLabel>Compared to home</SectionLabel>
-          <HomeComparison c={weather.homeComparison} />
-        </Box>
-      )}
-
-      <DataSources weather={weather} destinationCity={destinationCity} />
-    </Box>
-  );
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// ─── NOW VIEW ──────────────────────────────────────────────────────────────────
-// Hero: current conditions right now. Large temperature number leads.
-// Use when trip is active (today is within startDate–endDate).
-// ═══════════════════════════════════════════════════════════════════════════════
-
-function NowView({
-  weather, destinationCity,
-}: {
-  weather: WeatherResult; destinationCity: string;
-}) {
-  const currentDays = weather.currentWeather ?? [];
-  const today       = currentDays[0];
-
-  if (!today) {
-    return (
-      <Alert severity="info" sx={{ borderRadius: '10px' }}>
-        <Typography sx={{ fontSize: '0.95rem', fontFamily: D.body }}>
-          Current conditions not available for {destinationCity}.
-        </Typography>
-      </Alert>
-    );
-  }
-
-  const iconColor = conditionColor(today.condition);
-
-  return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
-
-      {/* Right now hero */}
-      <Paper elevation={0} sx={{
-        p: { xs: 2.5, sm: 3 },
-        border: `1.5px solid ${D.rule}`,
-        borderRadius: '12px',
-        background: `linear-gradient(135deg, ${iconColor}0A 0%, transparent 60%)`,
-      }}>
-        <Box sx={{
-          display: 'flex', alignItems: 'center',
-          justifyContent: 'space-between', gap: 2,
-        }}>
-          {/* Temperature */}
-          <Box>
-            <Typography sx={{
-              fontSize: '0.7rem', fontWeight: 800, letterSpacing: '0.1em',
-              textTransform: 'uppercase', color: D.terra,
-              fontFamily: D.body, mb: 0.5,
-            }}>
-              Right now
-            </Typography>
-            <Typography sx={{
-              fontFamily: D.display,
-              fontSize: { xs: '3.8rem', sm: '4.8rem' },
-              lineHeight: 1, color: D.navy,
-              letterSpacing: '-0.02em',
-            }}>
-              {today.tempAvg}°C
-            </Typography>
-            <Typography sx={{
-              fontSize: '0.98rem', color: D.muted,
-              fontFamily: D.body, mt: 0.5,
-            }}>
-              {today.condition}
-            </Typography>
-            <Typography sx={{
-              fontSize: '0.85rem', color: D.muted,
-              fontFamily: D.body, mt: 0.25,
-            }}>
-              {destinationCity} · {today.label}
-            </Typography>
-          </Box>
-
-          {/* Icon + range */}
-          <Box sx={{ textAlign: 'right', flexShrink: 0 }}>
-            {conditionIcon(today.condition, {
-              fontSize: { xs: '3.5rem', sm: '4.5rem' },
-              color: iconColor,
-            })}
-            <Typography sx={{
-              fontSize: '0.75rem', color: D.muted,
-              fontFamily: D.body, mt: 0.5,
-            }}>
-              {today.tempMax}° / {today.tempMin}°
-            </Typography>
-            {today.windKph !== null && (
-              <Typography sx={{ fontSize: '0.78rem', color: D.muted, fontFamily: D.body }}>
-                {today.windKph} km/h
-              </Typography>
-            )}
-          </Box>
-        </Box>
-
-        {/* Rain bar */}
-        {today.chanceOfRain > 0 && (
-          <Box sx={{ mt: 2 }}>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
-              <Typography sx={{ fontSize: '0.7rem', color: D.muted, fontFamily: D.body }}>
-                Rain chance today
-              </Typography>
-              <Typography sx={{
-                fontSize: '0.95rem', fontWeight: 800,
-                color: '#0891b2', fontFamily: D.body,
-              }}>
-                {today.chanceOfRain}%
-              </Typography>
-            </Box>
-            <LinearProgress variant="determinate" value={today.chanceOfRain} sx={{
-              height: 3, borderRadius: 2,
-              backgroundColor: D.rule,
-              '& .MuiLinearProgress-bar': { backgroundColor: '#0891b2', borderRadius: 2 },
-            }} />
-          </Box>
-        )}
-      </Paper>
-
-      {/* Coming up — remaining current weather days */}
-      {currentDays.length > 1 && (
-        <Box>
-          <SectionLabel>Coming up</SectionLabel>
-          <DayGrid days={currentDays.slice(1)} />
-        </Box>
-      )}
-
-      {/* Trip days */}
-      {weather.days.length > 0 && (
-        <Box>
-          <SectionLabel>Trip days</SectionLabel>
-          <DayGrid days={weather.days} />
-        </Box>
-      )}
-
-      {/* Packing notes */}
-      {weather.packingNotes && weather.packingNotes.length > 0 && (
-        <Box>
-          <SectionLabel>Pack for this trip</SectionLabel>
-          <PackingNotes notes={weather.packingNotes} />
-        </Box>
-      )}
-
-      <DataSources weather={weather} destinationCity={destinationCity} />
     </Box>
   );
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // ─── MAIN ──────────────────────────────────────────────────────────────────────
+// One view. The day strip leads; what to wear, watch-outs and the home comparison
+// follow. Typical (historical) days are marked per card, so there's no separate
+// planning/forecast mode to pick.
 // ═══════════════════════════════════════════════════════════════════════════════
 
-export default function WeatherTab({ tripId, destinationCity, startDate, endDate }: Props) {
-  const [weather,     setWeather]     = useState<WeatherResult | null>(null);
-  const [loading,     setLoading]     = useState(true);
-  const [refreshing,  setRefreshing]  = useState(false);
-  const [error,       setError]       = useState<string | null>(null);
-  const [cachedAge,   setCachedAge]   = useState<string | null>(null);
-  const [displayMode, setDisplayMode] = useUrlParam('view', WEATHER_VIEWS, null);
+export default function WeatherTab({ tripId, destinationCity }: Props) {
+  const [weather,    setWeather]    = useState<WeatherResult | null>(null);
+  const [loading,    setLoading]    = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error,      setError]      = useState<string | null>(null);
 
-  // ── Derive trip timing ──────────────────────────────────────────────────────
-  const today = new Date(); today.setHours(0, 0, 0, 0);
-
-  const start = startDate ? (() => {
-    const d = new Date(startDate); d.setHours(0, 0, 0, 0); return d;
-  })() : null;
-
-  const end = endDate ? (() => {
-    const d = new Date(endDate); d.setHours(0, 0, 0, 0); return d;
-  })() : null;
-
-  const daysUntil = start
-    ? Math.ceil((start.getTime() - today.getTime()) / 86400000)
-    : null;
-
-  // 14 days matches the server's forecast horizon in src/lib/weather.ts — trips
-  // starting beyond it are served as historical averages, which the planning
-  // view presents better.
-  const smartDefault: DisplayMode =
-    start && end && today >= start && today <= end ? 'now'      :
-    daysUntil !== null && daysUntil <= 14          ? 'forecast' : 'planning';
-
-  const activeMode = displayMode ?? smartDefault;
-
-  // ── Load weather ────────────────────────────────────────────────────────────
   const loadWeather = async (forceRefresh = false) => {
     if (forceRefresh) setRefreshing(true);
     else              setLoading(true);
     setError(null);
 
     try {
-      const res  = await fetch(
-        `/api/trips/${tripId}/weather`,
-        forceRefresh ? { method: 'POST' } : {}
-      );
+      const res  = await fetch(`/api/trips/${tripId}/weather`, forceRefresh ? { method: 'POST' } : {});
       const data = await res.json();
       if (data.error) { setError(data.error); return; }
       setWeather(data.weather);
-
-      if (data.weather.fetchedAt) {
-        const age  = Date.now() - new Date(data.weather.fetchedAt).getTime();
-        const mins = Math.round(age / 60000);
-        const hrs  = Math.round(age / 3600000);
-        setCachedAge(hrs >= 1 ? `${hrs}h ago` : mins <= 1 ? 'just now' : `${mins}m ago`);
-      }
     } catch {
       setError('Failed to load weather');
     } finally {
@@ -1022,7 +385,15 @@ export default function WeatherTab({ tripId, destinationCity, startDate, endDate
 
   useEffect(() => { loadWeather(); }, [tripId]);
 
-  // ── States ──────────────────────────────────────────────────────────────────
+  // Watch-out rows open that day in the Itinerary — same native pushState the
+  // trip page uses for tabs, so it works offline and Back returns here.
+  const openItineraryDay = (dayNumber: number) => {
+    const params = new URLSearchParams(window.location.search);
+    params.set('tab', 'itinerary');
+    params.set('day', String(dayNumber));
+    window.history.pushState(null, '', `?${params.toString()}`);
+  };
+
   if (loading) return (
     <Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}>
       <CircularProgress />
@@ -1033,40 +404,43 @@ export default function WeatherTab({ tripId, destinationCity, startDate, endDate
     <Alert severity="warning" sx={{ mt: 2, borderRadius: '10px' }}>
       {error === 'No destination city on trip'
         ? 'Add a destination city to your trip to see weather.'
-        : `Could not load weather: ${error}`}
+        : `Could not load weather for ${destinationCity}: ${error}`}
     </Alert>
   );
 
-  if (!weather) return null;
+  const days = weather?.days ?? [];
+  if (!weather || !days.length) return null;
 
-  const hasCurrentData = (weather.currentWeather?.length ?? 0) > 0;
+  const today    = todayIn(weather.timezone);
+  const onTrip   = today >= days[0].date && today <= days[days.length - 1].date;
+  const now      = onTrip ? freshCurrent(weather) : null;
+  const typical  = typicalFrom(days);
+  const summary  = summaryLine(days);
+  const wear     = wearGuide(weather);
+  const watch    = watchOuts(days);
+  const compare  = homeCompare(weather);
+  const places   = (weather.places ?? []).map(p => p.label).join(' → ');
+  const years    = weather.historicalYears;
+  const allTypical = days.every(d => d.source === 'historical');
 
-  const tabs: { key: DisplayMode; label: string }[] = [
-    { key: 'planning', label: 'Planning'  },
-    { key: 'forecast', label: 'Forecast'  },
-    ...(hasCurrentData ? [{ key: 'now' as DisplayMode, label: 'Right now' }] : []),
-  ];
-
-  // ── Render ──────────────────────────────────────────────────────────────────
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
 
       {/* Header */}
-      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <Box>
+      <Box sx={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 2 }}>
+        <Box sx={{ minWidth: 0 }}>
           <Typography sx={{
-            fontFamily: D.display,
-            fontSize: { xs: '1.8rem', sm: '2rem' },
+            fontFamily: D.display, fontSize: { xs: '1.8rem', sm: '2rem' },
             color: D.navy, lineHeight: 1,
           }}>
             Weather
           </Typography>
-          {cachedAge && (
-            <Typography sx={{
-              fontSize: '0.85rem', color: D.muted,
-              fontFamily: D.body, mt: 0.35,
-            }}>
-              Updated {cachedAge}
+          <Typography noWrap sx={{ fontSize: '0.85rem', color: D.muted, fontFamily: D.body, mt: 0.35 }}>
+            Updated {ageLabel(weather.fetchedAt)}{places ? ` · ${places}` : ''}
+          </Typography>
+          {now && (
+            <Typography sx={{ fontSize: '1rem', color: D.navy, fontFamily: D.body, fontWeight: 700, mt: 0.75 }}>
+              Now {now.temp}° · feels {now.feels}° · {now.condition}
             </Typography>
           )}
         </Box>
@@ -1086,55 +460,54 @@ export default function WeatherTab({ tripId, destinationCity, startDate, endDate
         </Tooltip>
       </Box>
 
-      {/* Mode switcher — smart default, user can override */}
-      <Box sx={{ display: 'flex', gap: 0.75 }}>
-        {tabs.map(({ key, label }) => {
-          const isActive = activeMode === key;
-          return (
-            <Chip
-              key={key}
-              label={label}
-              size="small"
-              onClick={() => setDisplayMode(key === smartDefault ? null : key)}
-              sx={{
-                height: 28,
-                fontSize: '0.92rem', fontWeight: 800,
-                fontFamily: D.body, letterSpacing: '0.02em',
-                backgroundColor: isActive ? D.navy : 'transparent',
-                color:           isActive ? '#fff' : D.muted,
-                border:          `1.5px solid ${isActive ? D.navy : D.rule}`,
-                cursor: 'pointer',
-                transition: 'all 0.15s ease',
-                '&:hover': {
-                  backgroundColor: isActive ? D.navy : D.rule,
-                },
-              }}
-            />
-          );
-        })}
+      {/* Day by day — main content */}
+      <Box>
+        <SectionLabel>{allTypical ? 'Typical days' : 'Day by day'}</SectionLabel>
+        <DayStrip days={days} today={onTrip ? today : ''} />
+        {typical && (
+          <Typography sx={{ fontSize: '0.85rem', color: D.muted, fontFamily: D.body, mt: 1 }}>
+            {allTypical ? 'Typical conditions' : `From ${shortDay(typical.date)}: typical conditions`}
+            {years ? ` from ${years} years of records` : ''}
+            {` · forecast from ${longDate(typical.forecastFrom)}`}
+          </Typography>
+        )}
+        {summary && (
+          <Typography sx={{ fontSize: '1.1rem', color: D.navy, lineHeight: 1.5, fontFamily: D.body, mt: 1.5 }}>
+            {summary}
+          </Typography>
+        )}
       </Box>
 
-      {/* Views */}
-      {activeMode === 'planning' && (
-        <PlanningView
-          weather={weather}
-          destinationCity={destinationCity}
-          isHistorical={weather.mode === 'historical'}
-        />
-      )}
-      {activeMode === 'forecast' && (
-        <ForecastView
-          weather={weather}
-          destinationCity={destinationCity}
-        />
-      )}
-      {activeMode === 'now' && hasCurrentData && (
-        <NowView
-          weather={weather}
-          destinationCity={destinationCity}
-        />
+      {wear.length > 0 && (
+        <Box>
+          <SectionLabel>What to wear</SectionLabel>
+          <WearGuide rows={wear} />
+        </Box>
       )}
 
+      {watch.length > 0 && (
+        <Box>
+          <SectionLabel>Watch out</SectionLabel>
+          <WatchOut items={watch} onOpenDay={openItineraryDay} />
+        </Box>
+      )}
+
+      {compare ? (
+        <Box>
+          <SectionLabel>Compared to home</SectionLabel>
+          <HomeCompareView c={compare} />
+        </Box>
+      ) : weather.homeUnset && (
+        <Alert severity="info" icon={<HomeIcon fontSize="small" />} sx={{ py: 0.75, borderRadius: '10px' }}>
+          <Typography sx={{ fontSize: '0.92rem', fontFamily: D.body }}>
+            Set your home location in your profile to compare with home.
+          </Typography>
+        </Alert>
+      )}
+
+      <Typography sx={{ fontSize: '0.75rem', color: D.muted, fontFamily: D.body }}>
+        Forecast and records: Open-Meteo
+      </Typography>
     </Box>
   );
 }

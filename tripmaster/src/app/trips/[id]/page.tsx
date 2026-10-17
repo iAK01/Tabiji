@@ -36,6 +36,7 @@ import ItineraryTab        from '@/components/itinerary/ItineraryTab';
 import PackingTab          from '@/components/packing/PackingTab';
 import IntelligenceTab     from '@/components/intelligence/IntelligenceTab';
 import WeatherTab          from '@/components/weather/WeatherTab';
+import { weatherHeadline, type WeatherResult } from '@/lib/weather-insights';
 import TripOverview        from '@/components/overview/TripOverview';
 import FilesTab            from '@/components/files/FilesTab';
 import ExpensesTab         from '@/components/expenses/ExpensesTab';
@@ -46,7 +47,6 @@ import ThunderstormIcon    from '@mui/icons-material/Thunderstorm';
 import AcUnitIcon          from '@mui/icons-material/AcUnit';
 import UmbrellaIcon        from '@mui/icons-material/Umbrella';
 import CloudIcon           from '@mui/icons-material/Cloud';
-import GrainIcon           from '@mui/icons-material/Grain';
 
 import dynamic             from 'next/dynamic';
 import { saveTripCache, getTripCache } from '@/lib/offline/db';
@@ -118,22 +118,6 @@ const STATUS_DOT: Record<string, string> = {
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-interface WeatherDay {
-  date:          string;
-  label:         string;
-  condition:     string;
-  icon:          string;
-  tempAvg:       number;
-  tempMax:       number;
-  tempMin:       number;
-  chanceOfRain:  number;
-  precipMm:      number;
-  windKph:       number;
-  humidity:      number | null;
-  uvIndex:       number | null;
-  source:        string;
-}
-
 interface Trip {
   _id:            string;
   name:           string;
@@ -153,16 +137,7 @@ interface Trip {
   promoterName?:     string;
   clientName?:       string;
   thirdPartyName?:   string;
-  weather?: {
-    summary?:       string;
-    packingNotes?:  string[];
-    days?:          WeatherDay[];
-    currentWeather?: WeatherDay[];
-    homeComparison?: {
-      tempDeltaLabel?: string;
-      insights?: { icon: string; text: string }[];
-    };
-  };
+  weather?: WeatherResult;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -245,7 +220,6 @@ function heroWeatherIcon(condition: string, sx?: object) {
   if (c.includes('snow') || c.includes('ice') || c.includes('sleet') || c.includes('freez')) return <AcUnitIcon sx={sx} />;
   if (c.includes('rain') || c.includes('drizzle') || c.includes('shower'))             return <UmbrellaIcon sx={sx} />;
   if (c.includes('overcast') || c.includes('cloud') || c.includes('fog') || c.includes('mist')) return <CloudIcon sx={sx} />;
-  if (c.includes('patchy') || c.includes('partly'))                                    return <GrainIcon sx={sx} />;
   return <WbSunnyIcon sx={sx} />;
 }
 
@@ -514,7 +488,8 @@ function TripPageInner() {
   // Status flips to 'active' 2 days early for push reminders — the on-trip UI waits for the start date
   const isActive = isOnTrip(trip);
 
-  const heroWeatherDay = trip.weather?.currentWeather?.[0] ?? trip.weather?.days?.[0];
+  // Now if fresh, else today's (or day one's) high — never a stale "now".
+  const heroWeather = weatherHeadline(trip.weather);
 
   const destTz   = trip.destination?.timezone ?? '';
   const originTz = trip.origin?.timezone ?? '';
@@ -693,21 +668,21 @@ function TripPageInner() {
             </Box>
 
             {/* Top-right: weather + local time — clears the utility row above it */}
-            {(heroWeatherDay || localTime) && (
+            {(heroWeather || localTime) && (
               <Box sx={{
                 position: 'absolute', top: { xs: 56, sm: 60 }, right: { xs: 16, sm: 24 }, zIndex: 2,
                 display: 'flex', alignItems: 'flex-start', gap: 2.5,
               }}>
-                {heroWeatherDay && (
+                {heroWeather && (
                   <Box sx={{ textAlign: 'right' }}>
                     <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 0.5, mb: 0.3 }}>
-                      {heroWeatherIcon(heroWeatherDay.condition, { fontSize: '1.2rem', color: 'rgba(255,255,255,0.55)' })}
+                      {heroWeatherIcon(heroWeather.condition, { fontSize: '1.2rem', color: 'rgba(255,255,255,0.55)' })}
                       <Typography sx={{ fontFamily: D.display, color: 'white', fontSize: '1.4rem', lineHeight: 1, letterSpacing: '-0.03em', textShadow: '0 1px 6px rgba(0,0,0,0.5)' }}>
-                        {Math.round(heroWeatherDay.tempAvg)}°
+                        {heroWeather.temp}°
                       </Typography>
                     </Box>
                     <Typography sx={{ fontFamily: D.body, color: 'rgba(255,255,255,0.4)', fontSize: '0.55rem', fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', textShadow: '0 1px 4px rgba(0,0,0,0.5)' }}>
-                      {heroWeatherDay.condition}
+                      {heroWeather.kind === 'typical' ? `Typical · ${heroWeather.condition}` : heroWeather.condition}
                     </Typography>
                   </Box>
                 )}
@@ -854,8 +829,6 @@ function TripPageInner() {
                 <WeatherTab
                   tripId={trip._id}
                   destinationCity={trip.destination?.city}
-                  startDate={trip.startDate}
-                  endDate={trip.endDate}
                 />
               )}
               {activeTab === 6 && (

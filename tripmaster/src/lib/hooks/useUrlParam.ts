@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 
-// A tab's sub-view (Logistics → Accommodation, Weather → Now…) kept in the URL
+// A tab's sub-view (Logistics → Accommodation, an Expenses view…) kept in the URL
 // so a refresh or shared link lands in the same place. Uses replaceState, not
 // pushState: the back button steps through top-level tabs, not every sub-tab tap.
 // Native history calls (synced into useSearchParams by Next) rather than the

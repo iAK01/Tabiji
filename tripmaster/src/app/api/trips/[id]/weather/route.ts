@@ -5,106 +5,35 @@ import { getServerSession } from 'next-auth';
 import connectDB from '@/lib/mongodb/connection';
 import Trip from '@/lib/mongodb/models/Trip';
 import User from '@/lib/mongodb/models/User';
-import { fetchTripWeather } from '@/lib/weather';
+import { getTripWeather } from '@/lib/weather';
 
-const FORECAST_TTL_MS   = 6 * 60 * 60 * 1000;       // 6 hours
-const HISTORICAL_TTL_MS = 7 * 24 * 60 * 60 * 1000;  // 7 days
+// GET serves the cached result while it's still valid for the trip as it is now;
+// POST (manual refresh) always refetches.
+async function handle(id: string, force: boolean) {
+  const session = await getServerSession();
+  if (!session?.user?.email) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
 
-// Resolve home coordinates — uses stored coords if present, otherwise
-// geocodes the city name via Open-Meteo. This handles profiles saved before
-// coordinates were being stored.
-async function resolveHomeCoords(
-  homeLocation: { city?: string; coordinates?: { lat: number; lng: number } } | undefined
-): Promise<{ lat: number; lon: number } | null> {
-  if (!homeLocation?.city) return null;
-
-  if (homeLocation.coordinates?.lat) {
-    return { lat: homeLocation.coordinates.lat, lon: homeLocation.coordinates.lng };
-  }
+  await connectDB();
+  const user = await User.findOne({ email: session.user.email });
+  if (!user) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
+  const trip = await Trip.findOne({ _id: id, userId: user._id, deleted: false });
+  if (!trip) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  if (!trip.destination?.city) return NextResponse.json({ error: 'No destination city on trip' }, { status: 400 });
 
   try {
-    const res  = await fetch(
-      `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(homeLocation.city)}&count=1&language=en&format=json`
-    );
-    const data = await res.json();
-    if (!data.results?.length) return null;
-    return { lat: data.results[0].latitude, lon: data.results[0].longitude };
-  } catch {
-    return null;
+    const { weather, cached } = await getTripWeather(trip, user, { force });
+    return NextResponse.json({ weather, cached });
+  } catch (err: any) {
+    return NextResponse.json({ error: err.message ?? 'Weather fetch failed' }, { status: 500 });
   }
 }
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const session = await getServerSession();
-  if (!session?.user?.email) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
-
-  await connectDB();
-  const user = await User.findOne({ email: session.user.email });
-  const trip = await Trip.findOne({ _id: id, userId: user._id, deleted: false });
-  if (!trip) return NextResponse.json({ error: 'Not found' }, { status: 404 });
-
-  // Check cache — but never trust a cached forecast that predates the user
-  // having a home location set. Otherwise a trip opened before the profile
-  // had a home address stays stuck with no home comparison until the TTL
-  // happens to lapse, even though the profile has since been fixed.
-  const cached = trip.weather;
-  const staleMissingHomeComparison = !!user.homeLocation?.city && !cached?.homeComparison;
-  if (cached?.fetchedAt && !staleMissingHomeComparison) {
-    const age = Date.now() - new Date(cached.fetchedAt).getTime();
-    const ttl = cached.mode === 'historical' ? HISTORICAL_TTL_MS : FORECAST_TTL_MS;
-    if (age < ttl) return NextResponse.json({ weather: cached, cached: true });
-  }
-
-  const city = trip.destination?.city;
-  if (!city) return NextResponse.json({ error: 'No destination city on trip' }, { status: 400 });
-
-  try {
-    const homeCoords = await resolveHomeCoords(user.homeLocation);
-
-    const weather = await fetchTripWeather(
-      city,
-      trip.startDate.toISOString().split('T')[0],
-      trip.endDate.toISOString().split('T')[0],
-      user.homeLocation?.city ?? undefined,
-      homeCoords,
-    );
-
-    await Trip.findByIdAndUpdate(id, { weather });
-    return NextResponse.json({ weather, cached: false });
-  } catch (err: any) {
-    return NextResponse.json({ error: err.message ?? 'Weather fetch failed' }, { status: 500 });
-  }
+  return handle(id, false);
 }
 
-// Manual refresh — bypasses cache TTL
 export async function POST(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const session = await getServerSession();
-  if (!session?.user?.email) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
-
-  await connectDB();
-  const user = await User.findOne({ email: session.user.email });
-  const trip = await Trip.findOne({ _id: id, userId: user._id, deleted: false });
-  if (!trip) return NextResponse.json({ error: 'Not found' }, { status: 404 });
-
-  const city = trip.destination?.city;
-  if (!city) return NextResponse.json({ error: 'No destination city on trip' }, { status: 400 });
-
-  try {
-    const homeCoords = await resolveHomeCoords(user.homeLocation);
-
-    const weather = await fetchTripWeather(
-      city,
-      trip.startDate.toISOString().split('T')[0],
-      trip.endDate.toISOString().split('T')[0],
-      user.homeLocation?.city ?? undefined,
-      homeCoords,
-    );
-
-    await Trip.findByIdAndUpdate(id, { weather });
-    return NextResponse.json({ weather, cached: false });
-  } catch (err: any) {
-    return NextResponse.json({ error: err.message ?? 'Weather fetch failed' }, { status: 500 });
-  }
+  return handle(id, true);
 }

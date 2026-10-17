@@ -1,105 +1,133 @@
-// src/lib/weather.ts
+// src/lib/weather.ts — server only.
 //
-// Three-mode weather strategy:
-//   forecast   — trip within 16 days → Open-Meteo forecast + WeatherAPI overlay
-//   historical — trip beyond 16 days → 5-year ERA5 archive average
-//   current    — always → today + 2 days for destination
+// One consistent source per day: Open-Meteo's forecast wherever it reaches
+// (≈14 days ahead, ≈85 days back), and beyond that a typical day pooled from up
+// to 10 years of ERA5 records, ±3 days around each date. Home is fetched for the
+// same dates with the same split, so every comparison is like for like.
 //
-// Home comparison:
-//   Parallel historical fetch for user's home city using the same trip dates.
-//   Generates human-readable deltas — temp, rain, wind, day/night feel.
+// Where the forecast is *for* matters as much as the model: a bare name lookup
+// for an island lands on its centroid ("Gran Canaria" → 1,682 m up in the
+// mountains, fog and 15°). Points come from the booked stay first, then a
+// populated-place lookup, then the arrival airport.
 //
-// Climate normals (no API key required):
-//   Open-Meteo Climate API — climate-api.open-meteo.com — free, no key.
-//   EC_Earth3P_HR model (high-res CMIP6). Cross-checks ERA5 historical averaging.
+// Derived reads (what to wear, home comparison, summary) live in
+// weather-insights.ts so they apply to cached results without a refetch.
 
-export type WeatherSource = 'forecast' | 'historical' | 'weatherapi' | 'climate';
+import { createHash } from 'crypto';
+import Trip from '@/lib/mongodb/models/Trip';
+import User from '@/lib/mongodb/models/User';
+import TripLogistics from '@/lib/mongodb/models/TripLogistics';
+import { airportByIata, airports } from '@/lib/data/airports';
+import {
+  WEATHER_VERSION,
+  type CurrentWeather, type DayWeather, type WeatherPlace, type WeatherResult,
+} from '@/lib/weather-insights';
 
-// Open-Meteo's free forecast endpoint covers ~16 days ahead and hard-errors
-// (rather than clamping) on any out-of-range date. 14 leaves a safety margin:
-// timezone=auto means "today" is destination-local and can run a day ahead of
-// the server. Trip days beyond this fall back to the historical average.
+// Open-Meteo hard-errors (rather than clamping) past its horizon. 14 leaves a
+// margin: timezone=auto makes "today" destination-local, which can run a day
+// ahead of the server.
 const FORECAST_HORIZON_DAYS = 14;
+const PAST_FORECAST_DAYS    = 85;   // the forecast API serves ~92 days back
+const HISTORY_YEARS         = 10;
+const POOL_DAYS             = 3;    // ±3 days around each date → up to 70 samples
+const ERA5_LAG_DAYS         = 7;
+const STAY_MAX_KM           = 150;
 
-function addDays(date: Date, days: number): Date {
-  const d = new Date(date);
-  d.setDate(d.getDate() + days);
-  return d;
+const HOUR_MS = 3_600_000;
+const DAY_MS  = 86_400_000;
+
+// ─── Dates (UTC, YYYY-MM-DD) ──────────────────────────────────────────────────
+
+const parseYmd = (s: string) => Date.UTC(+s.slice(0, 4), +s.slice(5, 7) - 1, +s.slice(8, 10));
+const toYmd    = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+const addDays  = (s: string, n: number) => toYmd(parseYmd(s) + n * DAY_MS);
+const todayUtc = () => new Date().toISOString().slice(0, 10);
+
+function dateRange(from: string, to: string): string[] {
+  const out: string[] = [];
+  for (let t = parseYmd(from); t <= parseYmd(to); t += DAY_MS) out.push(toYmd(t));
+  return out;
 }
 
-function toDateStr(date: Date): string {
-  return date.toISOString().split('T')[0];
+// Same month/day in another year; 29 Feb becomes the 28th in non-leap years.
+function withYear(s: string, year: number): string {
+  const md   = s.slice(5);
+  const leap = (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
+  return `${year}-${md === '02-29' && !leap ? '02-28' : md}`;
 }
 
-export interface DayWeather {
-  date: string;
-  label: string;
-  condition: string;
-  icon: string;
-  tempAvg: number;
-  tempMax: number;
-  tempMin: number;
-  chanceOfRain: number;
-  precipMm: number;
-  windKph: number | null;
-  humidity: number | null;
-  uvIndex: number | null;
-  source: WeatherSource;
+function formatLabel(s: string): string {
+  return new Date(parseYmd(s)).toLocaleDateString('en-IE', {
+    weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC',
+  });
 }
 
-export interface HomeComparison {
-  homeCity: string;
-  destCity: string;
-  homeTempAvg: number;
-  destTempAvg: number;
-  tempDelta: number;
-  tempDeltaLabel: string;
-  homeRainDays: number;
-  destRainDays: number;
-  rainDelta: number;
-  homeWindAvg: number | null;
-  destWindAvg: number | null;
-  summary: string;
-  insights: { icon: string; text: string }[];
-  homeDays: DayWeather[];
+const ymdOf = (v: unknown): string | undefined => {
+  if (!v) return undefined;
+  if (v instanceof Date) return Number.isNaN(v.getTime()) ? undefined : v.toISOString().slice(0, 10);
+  const s = String(v);
+  return /^\d{4}-\d{2}-\d{2}/.test(s) ? s.slice(0, 10) : undefined;
+};
+
+// ─── Numbers ──────────────────────────────────────────────────────────────────
+
+const isNum = (x: unknown): x is number => typeof x === 'number' && Number.isFinite(x);
+const mean  = (xs: unknown[]) => { const v = xs.filter(isNum); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null; };
+const round = (x: number | null | undefined) => (isNum(x) ? Math.round(x) : null);
+const one   = (x: number | null | undefined) => (isNum(x) ? Math.round(x * 10) / 10 : null);
+
+function distanceKm(a: { lat: number; lon: number }, b: { lat: number; lon: number }): number {
+  const rad = Math.PI / 180;
+  const dLat = (b.lat - a.lat) * rad;
+  const dLon = (b.lon - a.lon) * rad;
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * rad) * Math.cos(b.lat * rad) * Math.sin(dLon / 2) ** 2;
+  return 12_742 * Math.asin(Math.sqrt(h));
 }
 
-export interface WeatherResult {
-  mode: 'forecast' | 'historical' | 'current';
-  days: DayWeather[];
-  fetchedAt: string;
-  forecastAvailableFrom?: string;
-  historicalYears?: number[];
-  currentWeather?: DayWeather[];
-  summary?: string;
-  packingNotes?: string[];
-  homeComparison?: HomeComparison;
-  climateNormals?: {
-    destAvgTemp: number;
-    destAvgRainDays: number;
-    homeAvgTemp?: number;
-    homeAvgRainDays?: number;
-    source: 'EC_Earth3P_HR';
-    note: string;
-  };
+// ─── Sun geometry — daylight everywhere, clear-sky UV for typical days ───────
+
+function declination(date: string): number {
+  const n = Math.round((parseYmd(date) - Date.UTC(+date.slice(0, 4), 0, 1)) / DAY_MS) + 1;
+  return 23.44 * Math.sin((2 * Math.PI / 365) * (284 + n));
 }
 
-// ─── WMO code map ───────────────────────────────────────────────────────────
+function daylightHours(lat: number, date: string): number {
+  const rad  = Math.PI / 180;
+  const phi  = lat * rad;
+  const dec  = declination(date) * rad;
+  const cosW = (Math.sin(-0.833 * rad) - Math.sin(phi) * Math.sin(dec)) / (Math.cos(phi) * Math.cos(dec));
+  if (cosW <= -1) return 24;
+  if (cosW >= 1)  return 0;
+  return (2 * Math.acos(cosW) / rad) / 15;
+}
+
+// Noon clear-sky UV index from solar zenith angle (Madronich's approximation).
+function clearSkyUv(lat: number, date: string): number {
+  const cosZ = Math.cos(Math.abs(lat - declination(date)) * Math.PI / 180);
+  return cosZ <= 0 ? 0 : Math.round(12.5 * cosZ ** 2.42);
+}
+
+// ─── WMO codes ────────────────────────────────────────────────────────────────
+
 const WMO_MAP: Record<number, { condition: string; icon: string }> = {
-  0:  { condition: 'Clear sky',            icon: '☀️' },
-  1:  { condition: 'Mainly clear',         icon: '🌤️' },
-  2:  { condition: 'Partly cloudy',        icon: '⛅' },
-  3:  { condition: 'Overcast',             icon: '☁️' },
+  0:  { condition: 'Clear sky',           icon: '☀️' },
+  1:  { condition: 'Mainly clear',        icon: '🌤️' },
+  2:  { condition: 'Partly cloudy',       icon: '⛅' },
+  3:  { condition: 'Overcast',            icon: '☁️' },
   45: { condition: 'Foggy',               icon: '🌫️' },
   48: { condition: 'Icy fog',             icon: '🌫️' },
   51: { condition: 'Light drizzle',       icon: '🌦️' },
   53: { condition: 'Drizzle',             icon: '🌧️' },
   55: { condition: 'Heavy drizzle',       icon: '🌧️' },
+  56: { condition: 'Freezing drizzle',    icon: '🌧️' },
+  57: { condition: 'Freezing drizzle',    icon: '🌧️' },
   61: { condition: 'Light rain',          icon: '🌧️' },
-  63: { condition: 'Rain',               icon: '🌧️' },
+  63: { condition: 'Rain',                icon: '🌧️' },
   65: { condition: 'Heavy rain',          icon: '🌧️' },
+  66: { condition: 'Freezing rain',       icon: '🌧️' },
+  67: { condition: 'Freezing rain',       icon: '🌧️' },
   71: { condition: 'Light snow',          icon: '🌨️' },
-  73: { condition: 'Snow',               icon: '❄️' },
+  73: { condition: 'Snow',                icon: '❄️' },
   75: { condition: 'Heavy snow',          icon: '❄️' },
   77: { condition: 'Snow grains',         icon: '🌨️' },
   80: { condition: 'Rain showers',        icon: '🌦️' },
@@ -112,596 +140,533 @@ const WMO_MAP: Record<number, { condition: string; icon: string }> = {
   99: { condition: 'Thunderstorm + hail', icon: '⛈️' },
 };
 
-function wmoLookup(code: number) {
-  return WMO_MAP[code] ?? { condition: 'Unknown', icon: '🌡️' };
+const wmo = (code: number | null | undefined) =>
+  (isNum(code) && WMO_MAP[code]) || { condition: 'Unknown', icon: '🌡️' };
+
+// Typical days have no single weather code — describe the odds instead.
+function typicalCondition(chance: number, tMax: number, sunFrac: number | null): { condition: string; code: number } {
+  if (tMax <= 2 && chance >= 30) return { condition: 'Snow possible',    code: 71 };
+  if (chance >= 60)              return { condition: 'Often rainy',      code: 61 };
+  if (chance >= 30)              return { condition: 'Showers possible', code: 80 };
+  if (sunFrac == null)           return { condition: 'Typical day',      code: 2 };
+  if (sunFrac >= 0.65)           return { condition: 'Mostly sunny',     code: 1 };
+  if (sunFrac >= 0.4)            return { condition: 'Sunny spells',     code: 2 };
+  return { condition: 'Mostly cloudy', code: 3 };
 }
 
-function formatLabel(dateStr: string): string {
-  return new Date(dateStr).toLocaleDateString('en-IE', {
-    weekday: 'short', day: 'numeric', month: 'short',
+// ─── HTTP ─────────────────────────────────────────────────────────────────────
+
+async function getJson(url: URL): Promise<any> {
+  const res  = await fetch(url.toString(), { cache: 'no-store' });
+  const data = await res.json().catch(() => null);
+  if (!res.ok || !data || data.error) throw new Error(data?.reason ?? `Open-Meteo HTTP ${res.status}`);
+  return data;
+}
+
+function omUrl(base: string, point: { lat: number; lon: number }, params: Record<string, string>): URL {
+  const url = new URL(base);
+  url.searchParams.set('latitude',  String(point.lat));
+  url.searchParams.set('longitude', String(point.lon));
+  url.searchParams.set('timezone',  'auto');
+  for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
+  return url;
+}
+
+// Mean apparent temperature 20:00–22:00 local, per date.
+function eveningFeels(hourly: { time?: string[]; apparent_temperature?: (number | null)[] } | undefined) {
+  const acc = new Map<string, number[]>();
+  hourly?.time?.forEach((t, i) => {
+    const h = +t.slice(11, 13);
+    const v = hourly.apparent_temperature?.[i];
+    if (h >= 20 && h <= 22 && isNum(v)) {
+      const k = t.slice(0, 10);
+      acc.set(k, [...(acc.get(k) ?? []), v]);
+    }
   });
+  return new Map([...acc].map(([k, vs]) => [k, vs.reduce((a, b) => a + b, 0) / vs.length]));
 }
 
-function generateDateRange(startDate: string, endDate: string): string[] {
-  const dates: string[] = [];
-  const current = new Date(startDate);
-  const end     = new Date(endDate);
-  while (current <= end) {
-    dates.push(current.toISOString().split('T')[0]);
-    current.setDate(current.getDate() + 1);
+// ─── Forecast ─────────────────────────────────────────────────────────────────
+
+interface Point { lat: number; lon: number }
+
+async function fetchForecastDays(point: Point, start: string, end: string, city: string) {
+  const data = await getJson(omUrl('https://api.open-meteo.com/v1/forecast', point, {
+    daily: [
+      'weather_code', 'temperature_2m_max', 'temperature_2m_min',
+      'apparent_temperature_max', 'apparent_temperature_min',
+      'precipitation_sum', 'precipitation_probability_max',
+      'wind_speed_10m_max', 'uv_index_max', 'sunshine_duration',
+    ].join(','),
+    hourly:     'apparent_temperature',
+    start_date: start,
+    end_date:   end,
+  }));
+  const d   = data.daily;
+  const eve = eveningFeels(data.hourly);
+
+  const days: DayWeather[] = [];
+  (d.time as string[]).forEach((date, i) => {
+    const tMax = round(d.temperature_2m_max[i]);
+    const tMin = round(d.temperature_2m_min[i]);
+    if (tMax == null || tMin == null) return;    // gap → filled from averages
+    const code = isNum(d.weather_code[i]) ? d.weather_code[i] : null;
+    const sun  = d.sunshine_duration[i];
+    days.push({
+      date, label: formatLabel(date), city,
+      ...wmo(code), code,
+      tempMax: tMax, tempMin: tMin,
+      feelsMax:      round(d.apparent_temperature_max[i]),
+      feelsMin:      round(d.apparent_temperature_min[i]),
+      feelsEvening:  round(eve.get(date)),
+      chanceOfRain:  isNum(d.precipitation_probability_max[i]) ? d.precipitation_probability_max[i] : null,
+      precipMm:      one(d.precipitation_sum[i]) ?? 0,
+      windKph:       round(d.wind_speed_10m_max[i]),
+      uvIndex:       one(d.uv_index_max[i]),
+      sunshineHours: isNum(sun) ? one(sun / 3600) : null,
+      daylightHours: one(daylightHours(point.lat, date)),
+      source:        'forecast',
+    });
+  });
+  return { days, timezone: (data.timezone as string) ?? null };
+}
+
+// ─── Typical days — pooled ERA5 records ───────────────────────────────────────
+
+interface Sample {
+  tMax: number | null; tMin: number | null;
+  fMax: number | null; fMin: number | null; fEve: number | null;
+  precip: number | null; wind: number | null; sun: number | null;
+}
+
+async function fetchArchiveWindow(point: Point, start: string, len: number) {
+  const data = await getJson(omUrl('https://archive-api.open-meteo.com/v1/archive', point, {
+    daily: [
+      'temperature_2m_max', 'temperature_2m_min',
+      'apparent_temperature_max', 'apparent_temperature_min',
+      'precipitation_sum', 'wind_speed_10m_max', 'sunshine_duration',
+    ].join(','),
+    hourly:     'apparent_temperature',
+    start_date: start,
+    end_date:   addDays(start, len - 1),
+  }));
+  const d   = data.daily;
+  const eve = eveningFeels(data.hourly);
+  const samples: Sample[] = (d.time as string[]).map((date, i) => ({
+    tMax: d.temperature_2m_max[i], tMin: d.temperature_2m_min[i],
+    fMax: d.apparent_temperature_max[i], fMin: d.apparent_temperature_min[i],
+    fEve: eve.get(date) ?? null,
+    precip: d.precipitation_sum[i], wind: d.wind_speed_10m_max[i],
+    sun: isNum(d.sunshine_duration[i]) ? d.sunshine_duration[i] / 3600 : null,
+  }));
+  return { samples, timezone: (data.timezone as string) ?? null };
+}
+
+async function fetchTypicalDays(point: Point, start: string, end: string, city: string) {
+  const dates  = dateRange(start, end);
+  const len    = dates.length + 2 * POOL_DAYS;
+  const latest = addDays(todayUtc(), -ERA5_LAG_DAYS);
+  const first  = +start.slice(0, 4);
+
+  // Each year's window is shifted as a whole, so trips over New Year (or 29 Feb)
+  // keep their day order instead of collapsing into an inverted range.
+  const starts: string[] = [];
+  for (let y = first - 1; starts.length < HISTORY_YEARS && y >= first - 40; y--) {
+    const s = addDays(withYear(start, y), -POOL_DAYS);
+    if (addDays(s, len - 1) <= latest) starts.push(s);
   }
-  return dates;
-}
 
-// ─── Geocode ────────────────────────────────────────────────────────────────
-async function geocode(city: string): Promise<{ lat: number; lon: number } | null> {
-  try {
-    const res  = await fetch(
-      `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=1&language=en&format=json`
-    );
-    const data = await res.json();
-    if (!data.results?.length) return null;
-    return { lat: data.results[0].latitude, lon: data.results[0].longitude };
-  } catch { return null; }
-}
+  const windows = (await Promise.all(starts.map(s => fetchArchiveWindow(point, s, len).catch(() => null))))
+    .filter((w): w is NonNullable<typeof w> => !!w && w.samples.length === len);
+  if (!windows.length) throw new Error('Historical data unavailable');
 
-// ─── Open-Meteo forecast (up to 16 days) ───────────────────────────────────
-async function fetchForecast(
-  lat: number, lon: number, startDate: string, endDate: string
-): Promise<DayWeather[]> {
-  const url = new URL('https://api.open-meteo.com/v1/forecast');
-  url.searchParams.set('latitude',  String(lat));
-  url.searchParams.set('longitude', String(lon));
-  url.searchParams.set('daily', [
-    'weathercode', 'temperature_2m_max', 'temperature_2m_min',
-    'precipitation_sum', 'precipitation_probability_max',
-    'windspeed_10m_max', 'uv_index_max',
-  ].join(','));
-  url.searchParams.set('start_date', startDate);
-  url.searchParams.set('end_date',   endDate);
-  url.searchParams.set('timezone', 'auto');
-
-  const res  = await fetch(url.toString());
-  const data = await res.json();
-  if (data?.error)  throw new Error(`Open-Meteo forecast failed: ${data.reason ?? 'unknown error'}`);
-  if (!data.daily)  throw new Error('Open-Meteo forecast failed');
-
-  return data.daily.time.map((date: string, i: number) => {
-    const { condition, icon } = wmoLookup(data.daily.weathercode[i]);
-    const tMax = Math.round(data.daily.temperature_2m_max[i]);
-    const tMin = Math.round(data.daily.temperature_2m_min[i]);
+  const days = dates.map((date, i): DayWeather => {
+    const pool  = windows.flatMap(w => w.samples.slice(i, i + 2 * POOL_DAYS + 1));
+    const tMax  = round(mean(pool.map(s => s.tMax))) ?? 0;
+    const tMin  = round(mean(pool.map(s => s.tMin))) ?? 0;
+    const rainy = pool.filter(s => isNum(s.precip)).length;
+    const chance = rainy ? Math.round(100 * pool.filter(s => (s.precip ?? 0) >= 1).length / rainy) : 0;
+    const light = daylightHours(point.lat, date);
+    const sun   = mean(pool.map(s => s.sun));
+    const typ   = typicalCondition(chance, tMax, sun != null && light > 0 ? sun / light : null);
     return {
-      date, label: formatLabel(date), condition, icon,
-      tempAvg: Math.round((tMax + tMin) / 2), tempMax: tMax, tempMin: tMin,
-      chanceOfRain: data.daily.precipitation_probability_max[i] ?? 0,
-      precipMm:     Math.round((data.daily.precipitation_sum[i] ?? 0) * 10) / 10,
-      windKph:      data.daily.windspeed_10m_max[i] ? Math.round(data.daily.windspeed_10m_max[i]) : null,
-      humidity: null,
-      uvIndex:  data.daily.uv_index_max[i] ?? null,
-      source:   'forecast' as WeatherSource,
+      date, label: formatLabel(date), city,
+      condition: typ.condition, icon: wmo(typ.code).icon, code: typ.code,
+      tempMax: tMax, tempMin: tMin,
+      feelsMax:      round(mean(pool.map(s => s.fMax))),
+      feelsMin:      round(mean(pool.map(s => s.fMin))),
+      feelsEvening:  round(mean(pool.map(s => s.fEve))),
+      chanceOfRain:  chance,
+      precipMm:      one(mean(pool.map(s => s.precip))) ?? 0,
+      windKph:       round(mean(pool.map(s => s.wind))),
+      uvIndex:       clearSkyUv(point.lat, date),
+      sunshineHours: one(sun),
+      daylightHours: one(light),
+      source:        'historical',
     };
   });
+  return { days, years: windows.length, timezone: windows[0].timezone };
 }
 
-// ─── WeatherAPI.com overlay (first 3 days, highest accuracy) ───────────────
-// FIX: accepts lat/lon and uses coordinates in the q parameter instead of
-// a city name string. This prevents WeatherAPI resolving "Ballina" to
-// Ballina, NSW, Australia instead of Ballina, Co. Mayo, Ireland.
-async function fetchWeatherAPI(
-  lat: number, lon: number, days: number
-): Promise<DayWeather[]> {
-  const key = process.env.WEATHER_API_KEY;
-  if (!key) return [];
-  try {
-    const q   = `${lat},${lon}`;
-    const res  = await fetch(
-      `https://api.weatherapi.com/v1/forecast.json?key=${key}&q=${encodeURIComponent(q)}&days=${days}&aqi=no&alerts=no`
-    );
-    const data = await res.json();
-    if (data.error) return [];
-    return data.forecast.forecastday.map((day: any) => {
-      const condition = day.day.condition.text;
-      const tMax = Math.round(day.day.maxtemp_c);
-      const tMin = Math.round(day.day.mintemp_c);
-      return {
-        date: day.date, label: formatLabel(day.date),
-        condition, icon: iconFromText(condition, Math.round(day.day.avgtemp_c)),
-        tempAvg: Math.round(day.day.avgtemp_c), tempMax: tMax, tempMin: tMin,
-        chanceOfRain: day.day.daily_chance_of_rain ?? 0,
-        precipMm:     Math.round((day.day.totalprecip_mm ?? 0) * 10) / 10,
-        windKph:      Math.round(day.day.maxwind_kph),
-        humidity:     day.day.avghumidity ?? null,
-        uvIndex:      day.day.uv ?? null,
-        source:       'weatherapi' as WeatherSource,
-      };
-    });
-  } catch { return []; }
-}
+// ─── A place's days: forecast where it reaches, typical elsewhere ─────────────
 
-function iconFromText(condition: string, temp: number): string {
-  const c = condition.toLowerCase();
-  if (c.includes('thunder'))                        return '⛈️';
-  if (c.includes('snow') || c.includes('blizzard')) return '❄️';
-  if (c.includes('sleet'))                          return '🌨️';
-  if (c.includes('rain') || c.includes('drizzle'))  return '🌧️';
-  if (c.includes('shower'))                         return '🌦️';
-  if (c.includes('fog') || c.includes('mist'))      return '🌫️';
-  if (c.includes('overcast'))                       return '☁️';
-  if (c.includes('cloudy'))                         return '⛅';
-  if (c.includes('sunny') || c.includes('clear'))   return temp > 30 ? '🌞' : '☀️';
-  return '🌤️';
-}
+async function fetchSeries(point: Point, start: string, end: string, city: string) {
+  const today  = todayUtc();
+  const fcFrom = addDays(today, -PAST_FORECAST_DAYS);
+  const fcTo   = addDays(today, FORECAST_HORIZON_DAYS);
+  const dates  = dateRange(start, end);
 
-// ─── ERA5 archive — single year ─────────────────────────────────────────────
-async function fetchHistoricalYear(
-  lat: number, lon: number, startDate: string, endDate: string, year: number
-): Promise<DayWeather[] | null> {
-  const shift = (d: string, y: number) => `${y}${d.slice(4)}`;
-  try {
-    const url = new URL('https://archive-api.open-meteo.com/v1/archive');
-    url.searchParams.set('latitude',  String(lat));
-    url.searchParams.set('longitude', String(lon));
-    url.searchParams.set('daily', [
-      'weathercode', 'temperature_2m_max', 'temperature_2m_min',
-      'precipitation_sum', 'windspeed_10m_max',
-    ].join(','));
-    url.searchParams.set('start_date', shift(startDate, year));
-    url.searchParams.set('end_date',   shift(endDate,   year));
-    url.searchParams.set('timezone', 'auto');
-
-    const res  = await fetch(url.toString());
-    const data = await res.json();
-    if (!data.daily) return null;
-
-    return data.daily.time.map((date: string, i: number) => {
-      const { condition, icon } = wmoLookup(data.daily.weathercode[i]);
-      const tMax = Math.round(data.daily.temperature_2m_max[i]);
-      const tMin = Math.round(data.daily.temperature_2m_min[i]);
-      return {
-        date, label: formatLabel(date), condition, icon,
-        tempAvg: Math.round((tMax + tMin) / 2), tempMax: tMax, tempMin: tMin,
-        chanceOfRain: 0, // filled after averaging
-        precipMm:  Math.round((data.daily.precipitation_sum[i] ?? 0) * 10) / 10,
-        windKph:   data.daily.windspeed_10m_max[i] ? Math.round(data.daily.windspeed_10m_max[i]) : null,
-        humidity:  null, uvIndex: null,
-        source:    'historical' as WeatherSource,
-      };
-    });
-  } catch { return null; }
-}
-
-// 5-year ERA5 average
-async function fetchHistoricalAverage(
-  lat: number, lon: number, startDate: string, endDate: string
-): Promise<{ days: DayWeather[]; years: number[] }> {
-  const current = new Date().getFullYear();
-  const yearsToFetch = [
-    current - 1, current - 2, current - 3, current - 4, current - 5,
-  ];
-
-  const results = await Promise.all(
-    yearsToFetch.map(y => fetchHistoricalYear(lat, lon, startDate, endDate, y))
-  );
-
-  const valid     = results.filter((r): r is DayWeather[] => r !== null && r.length > 0);
-  const usedYears = yearsToFetch.filter((_, i) => results[i] !== null && results[i]!.length > 0);
-  if (valid.length === 0) throw new Error('Historical data unavailable');
-
-  const tripDates = generateDateRange(startDate, endDate);
-
-  const averaged = tripDates.map((tripDate, i) => {
-    const slices = valid.map(yr => yr[i]).filter(Boolean);
-    if (!slices.length) return null;
-
-    const tMax = Math.round(slices.reduce((s, d) => s + d.tempMax, 0) / slices.length);
-    const tMin = Math.round(slices.reduce((s, d) => s + d.tempMin, 0) / slices.length);
-    const precip = slices.reduce((s, d) => s + d.precipMm, 0) / slices.length;
-    const chanceOfRain = Math.round((slices.filter(d => d.precipMm > 1).length / slices.length) * 100);
-
-    const windSlices = slices.filter(d => d.windKph !== null);
-    const windKph = windSlices.length
-      ? Math.round(windSlices.reduce((s, d) => s + d.windKph!, 0) / windSlices.length)
-      : null;
-
-    const counts: Record<string, number> = {};
-    slices.forEach(d => { counts[d.condition] = (counts[d.condition] ?? 0) + 1; });
-    const condition = Object.entries(counts).sort((a, b) => b[1] - a[1])[0][0];
-    const wmoEntry  = Object.entries(WMO_MAP).find(([, v]) => v.condition === condition);
-    const icon      = wmoEntry ? WMO_MAP[Number(wmoEntry[0])].icon : '🌡️';
-
-    return {
-      date: tripDate, label: formatLabel(tripDate), condition, icon,
-      tempAvg: Math.round((tMax + tMin) / 2), tempMax: tMax, tempMin: tMin,
-      chanceOfRain, precipMm: Math.round(precip * 10) / 10,
-      windKph, humidity: null, uvIndex: null,
-      source: 'historical' as WeatherSource,
-    } as DayWeather;
-  }).filter((d): d is DayWeather => d !== null);
-
-  return { days: averaged, years: usedYears };
-}
-
-// ─── Open-Meteo Climate API — free, no key required ─────────────────────────
-export async function fetchClimateNormals(
-  lat: number, lon: number, startDate: string, endDate: string
-): Promise<{ avgTemp: number; avgRainDays: number } | null> {
-  try {
-    const refYear  = 2010;
-    const refStart = `${refYear}${startDate.slice(4)}`;
-    const refEnd   = `${refYear}${endDate.slice(4)}`;
-
-    const url = new URL('https://climate-api.open-meteo.com/v1/climate');
-    url.searchParams.set('latitude',   String(lat));
-    url.searchParams.set('longitude',  String(lon));
-    url.searchParams.set('start_date', refStart);
-    url.searchParams.set('end_date',   refEnd);
-    url.searchParams.set('models', 'EC_Earth3P_HR');
-    url.searchParams.set('daily', 'temperature_2m_max,temperature_2m_min,precipitation_sum');
-
-    const res  = await fetch(url.toString());
-    const data = await res.json();
-    if (!data.daily?.time?.length) return null;
-
-    const temps = data.daily.temperature_2m_max.map((tMax: number, i: number) =>
-      Math.round((tMax + data.daily.temperature_2m_min[i]) / 2)
-    );
-    const avgTemp  = Math.round(temps.reduce((s: number, t: number) => s + t, 0) / temps.length);
-    const rainDays = data.daily.precipitation_sum.filter((p: number) => p > 1).length;
-
-    return { avgTemp, avgRainDays: rainDays };
-  } catch { return null; }
-}
-
-// ─── Count genuinely rainy days ──────────────────────────────────────────────
-function countRainyDays(days: DayWeather[]): number {
-  return days.filter(d => {
-    if (d.source === 'historical') return d.precipMm > 2;
-    return d.chanceOfRain > 40;
-  }).length;
-}
-
-// ─── Summary + packing notes ────────────────────────────────────────────────
-function generateSummary(days: DayWeather[], mode: 'forecast' | 'historical'): {
-  summary: string; packingNotes: string[];
-} {
-  const tripLength  = days.length;
-  const avgTempAvg  = Math.round(days.reduce((s, d) => s + d.tempAvg, 0) / tripLength);
-  const peakHigh    = Math.max(...days.map(d => d.tempMax));
-  const nightLow    = Math.min(...days.map(d => d.tempMin));
-  const rainyDays   = countRainyDays(days);
-
-  let tempLabel: string;
-  if (peakHigh > 28)         tempLabel = 'warm to hot';
-  else if (peakHigh > 22)    tempLabel = 'mild to warm';
-  else if (avgTempAvg >= 15) tempLabel = 'mild';
-  else if (avgTempAvg >= 10) tempLabel = 'cool';
-  else                       tempLabel = 'cold';
-
-  let rainLabel: string;
-  const rainFraction = rainyDays / tripLength;
-  if (rainyDays === 0)         rainLabel = 'dry';
-  else if (rainFraction > 0.6) rainLabel = 'frequently rainy';
-  else if (rainFraction > 0.3) rainLabel = 'mixed';
-  else                         rainLabel = 'mostly dry';
-
-  const modeNote = mode === 'historical' ? ' (historical average)' : '';
-  const summary  = `${rainLabel}, ${tempLabel} — avg ${avgTempAvg}°C, highs to ${peakHigh}°C${modeNote}`;
-
-  const packingNotes: string[] = [];
-
-  if (rainyDays >= 2) {
-    packingNotes.push(mode === 'historical'
-      ? `Historically rains on ${rainyDays} of ${tripLength} days — a compact umbrella or waterproof jacket is worth it`
-      : `Rain expected on ${rainyDays} of ${tripLength} days — a compact umbrella or waterproof jacket is worth it`
-    );
-  } else if (rainyDays === 1) {
-    packingNotes.push(mode === 'historical'
-      ? `Typically one rainy day — worth having a light waterproof`
-      : `One rainy day expected — worth having a light waterproof`
-    );
-  }
-
-  const coldNights = days.filter(d => d.tempMin < 8).length;
-  if (coldNights >= 2) {
-    packingNotes.push(
-      `Overnight lows drop to ${nightLow}°C — bring a layer for evenings even if the days are warm`
-    );
-  }
-
-  const hotDays = days.filter(d => d.tempMax > 28).length;
-  if (hotDays >= 2) {
-    packingNotes.push(
-      `${hotDays} days reaching above 28°C — sunscreen and light, breathable clothing essential`
-    );
-  }
-
-  const snowDays = days.filter(d =>
-    d.condition.toLowerCase().includes('snow') ||
-    d.condition.toLowerCase().includes('blizzard')
-  ).length;
-  if (snowDays > 0) {
-    packingNotes.push(`Snow possible on ${snowDays} day${snowDays > 1 ? 's' : ''} — waterproof footwear advisable`);
-  }
-
-  const windDays = days.filter(d => d.windKph !== null && d.windKph > 25).length;
-  if (windDays >= Math.ceil(tripLength * 0.6)) {
-    const avgWind = Math.round(
-      days.filter(d => d.windKph !== null).reduce((s, d) => s + d.windKph!, 0) /
-      days.filter(d => d.windKph !== null).length
-    );
-    packingNotes.push(
-      `Consistently windy (avg ${avgWind} km/h) — a windproof outer layer will make a difference`
-    );
-  }
-
-  return { summary, packingNotes };
-}
-
-// ─── Home comparison ────────────────────────────────────────────────────────
-async function buildHomeComparison(
-  homeCity:   string,
-  homeCoords: { lat: number; lon: number },
-  destCity:   string,
-  destDays:   DayWeather[],
-  startDate:  string,
-  endDate:    string,
-): Promise<HomeComparison | null> {
-  try {
-    const { days: homeDays } = await fetchHistoricalAverage(
-      homeCoords.lat, homeCoords.lon, startDate, endDate
-    );
-    if (!homeDays.length) return null;
-
-    const destTempAvg  = Math.round(destDays.reduce((s, d) => s + d.tempAvg, 0) / destDays.length);
-    const homeTempAvg  = Math.round(homeDays.reduce((s, d) => s + d.tempAvg, 0) / homeDays.length);
-    const tempDelta    = destTempAvg - homeTempAvg;
-
-    const destRainDays = countRainyDays(destDays);
-    const homeRainDays = countRainyDays(homeDays);
-    const rainDelta    = destRainDays - homeRainDays;
-
-    const hw = homeDays.filter(d => d.windKph !== null).map(d => d.windKph!);
-    const dw = destDays.filter(d => d.windKph !== null).map(d => d.windKph!);
-    const homeWindAvg = hw.length ? Math.round(hw.reduce((s, v) => s + v, 0) / hw.length) : null;
-    const destWindAvg = dw.length ? Math.round(dw.reduce((s, v) => s + v, 0) / dw.length) : null;
-
-    const absDelta = Math.abs(tempDelta);
-    const tempDir  = tempDelta > 0 ? 'warmer' : 'cooler';
-    const tempDeltaLabel = absDelta < 2
-      ? 'about the same temperature'
-      : `${absDelta}°C ${tempDir}`;
-
-    const tripMonth = new Date(startDate).toLocaleDateString('en-IE', { month: 'long' });
-    const rainDesc  = rainDelta > 1 ? 'wetter'
-      : rainDelta < -1 ? 'drier'
-      : 'with similar rainfall';
-    const summary = absDelta < 2
-      ? `${destCity} in ${tripMonth} has similar temperatures to ${homeCity}, ${rainDesc}`
-      : `${destCity} in ${tripMonth} is typically ${tempDeltaLabel} than ${homeCity}, ${rainDesc}`;
-
-    const insights: { icon: string; text: string }[] = [];
-
-    if (absDelta >= 8) {
-      insights.push({
-        icon: '🌡️',
-        text: `${absDelta}°C ${tempDir} than home — you'll feel the difference as soon as you land`,
-      });
-    } else if (absDelta >= 4) {
-      insights.push({
-        icon: '🌡️',
-        text: `${absDelta}°C ${tempDir} than ${homeCity} — noticeable but not extreme`,
-      });
-    } else if (absDelta >= 2) {
-      insights.push({
-        icon: '🌡️',
-        text: `Slightly ${tempDir} than home — similar but you'll notice it`,
-      });
-    }
-
-    const destMaxTemp = Math.max(...destDays.map(d => d.tempMax));
-    const homeMaxTemp = Math.max(...homeDays.map(d => d.tempMax));
-    const dayDelta    = destMaxTemp - homeMaxTemp;
-    if (dayDelta >= 6) {
-      insights.push({
-        icon: '☀️',
-        text: `Daytime highs reach ${destMaxTemp}°C — ${dayDelta}°C hotter than home at its warmest`,
-      });
-    } else if (homeMaxTemp - destMaxTemp >= 6) {
-      insights.push({
-        icon: '☁️',
-        text: `Daytime highs only reach ${destMaxTemp}°C — ${homeMaxTemp - destMaxTemp}°C cooler than at home`,
-      });
-    }
-
-    const destMinTemp = Math.min(...destDays.map(d => d.tempMin));
-    const homeMinTemp = Math.min(...homeDays.map(d => d.tempMin));
-    const nightDelta  = destMinTemp - homeMinTemp;
-    if (nightDelta >= 5) {
-      insights.push({
-        icon: '🌙',
-        text: `Evenings stay warmer than you're used to at home — lighter layers will do`,
-      });
-    } else if (homeMinTemp - destMinTemp >= 5) {
-      insights.push({
-        icon: '🌙',
-        text: `Nights drop lower than home — pack something warm for evenings out`,
-      });
-    }
-
-    if (rainDelta <= -2) {
-      insights.push({
-        icon: '🌂',
-        text: `Fewer rainy days than ${homeCity} — you can go lighter on waterproofs`,
-      });
-    } else if (rainDelta >= 2) {
-      insights.push({
-        icon: '🌂',
-        text: `More rain than home — an umbrella is more important here than you might think`,
-      });
-    }
-
-    if (homeWindAvg !== null && destWindAvg !== null) {
-      if (homeWindAvg - destWindAvg >= 15) {
-        insights.push({
-          icon: '💨',
-          text: `Much calmer wind than ${homeCity} — it'll feel warmer than the temperature alone suggests`,
-        });
-      } else if (destWindAvg - homeWindAvg >= 15) {
-        insights.push({
-          icon: '💨',
-          text: `Windier than home — it may feel cooler than the temperature implies`,
-        });
-      }
-    }
-
-    if (insights.length === 0) {
-      insights.push({
-        icon: '✅',
-        text: `Conditions are broadly similar to ${homeCity} — no major climate adjustment needed`,
-      });
-    }
-
-    return {
-      homeCity, destCity,
-      homeTempAvg, destTempAvg, tempDelta, tempDeltaLabel,
-      homeRainDays, destRainDays, rainDelta,
-      homeWindAvg, destWindAvg,
-      summary, insights,
-      homeDays,
-    };
-  } catch { return null; }
-}
-
-// ─── PUBLIC: fetch trip weather ──────────────────────────────────────────────
-export async function fetchTripWeather(
-  city:        string,
-  startDate:   string,
-  endDate:     string,
-  homeCity?:   string,
-  homeCoords?: { lat: number; lon: number } | null,
-): Promise<WeatherResult> {
-  const coords = await geocode(city);
-  if (!coords) throw new Error(`Could not geocode "${city}"`);
-
-  const today     = new Date();
-  today.setHours(0, 0, 0, 0);
-  const tripStart = new Date(startDate);
-  const daysUntil = Math.round((tripStart.getTime() - today.getTime()) / 86400000);
-  const forecastHorizon = toDateStr(addDays(today, FORECAST_HORIZON_DAYS));
-
-  let tripDays:         DayWeather[] = [];
-  let mode:             'forecast' | 'historical' = 'historical';
-  let historicalYears:  number[] | undefined;
-  let forecastAvailableFrom: string | undefined;
-
-  // Full historical average — the fallback whenever the forecast window can't
-  // cover the trip start.
-  const useHistorical = async () => {
-    mode = 'historical';
-    const result = await fetchHistoricalAverage(coords.lat, coords.lon, startDate, endDate);
-    tripDays        = result.days;
-    historicalYears = result.years;
-    forecastAvailableFrom = toDateStr(addDays(tripStart, -FORECAST_HORIZON_DAYS));
-  };
-
-  if (daysUntil <= FORECAST_HORIZON_DAYS) {
+  let forecast: DayWeather[] = [];
+  let timezone: string | null = null;
+  const fcDates = dates.filter(d => d >= fcFrom && d <= fcTo);
+  if (fcDates.length) {
     try {
-      mode = 'forecast';
-
-      // Open-Meteo errors on any date past its horizon, so request only the
-      // portion of the trip it can serve and backfill the rest below.
-      const forecastEnd  = endDate <= forecastHorizon ? endDate : forecastHorizon;
-      const openMeteoDays = await fetchForecast(coords.lat, coords.lon, startDate, forecastEnd);
-
-      // FIX: only overlay WeatherAPI for future or current-day trips (daysUntil >= 0).
-      // When daysUntil < 0 the trip is already in the past — WeatherAPI forecast
-      // for a past start date returns current/future data which is completely wrong.
-      if (daysUntil >= 0 && daysUntil <= 3 && process.env.WEATHER_API_KEY) {
-        const waDays = await fetchWeatherAPI(
-          coords.lat, coords.lon,
-          Math.min(3 - daysUntil + 1, openMeteoDays.length)
-        );
-        const waMap  = new Map(waDays.map(d => [d.date, d]));
-        tripDays = openMeteoDays.map(d => waMap.get(d.date) ?? d);
-      } else {
-        tripDays = openMeteoDays;
-      }
-
-      // Trip days beyond the forecast horizon → historical-average tail.
-      if (endDate > forecastHorizon) {
-        try {
-          const tail = await fetchHistoricalAverage(
-            coords.lat, coords.lon,
-            toDateStr(addDays(today, FORECAST_HORIZON_DAYS + 1)), endDate,
-          );
-          tripDays        = [...tripDays, ...tail.days];
-          historicalYears = tail.years;
-          forecastAvailableFrom = forecastHorizon;
-        } catch { /* forecast portion still stands on its own */ }
-      }
-    } catch {
-      // Forecast unavailable (e.g. Open-Meteo horizon shifted under us) —
-      // degrade to the historical average rather than failing the whole tab.
-      await useHistorical();
-    }
-  } else {
-    await useHistorical();
+      const r  = await fetchForecastDays(point, fcDates[0], fcDates[fcDates.length - 1], city);
+      forecast = r.days;
+      timezone = r.timezone;
+    } catch { /* averages below cover these dates */ }
   }
 
-  // Current weather — always, regardless of trip dates.
-  // FIX: always try WeatherAPI for current weather — the old daysUntil > 3
-  // guard meant active and imminent trips never got live chips here.
-  const currentEnd = new Date(today);
-  currentEnd.setDate(today.getDate() + 2);
-  let currentWeather: DayWeather[] = [];
-  try {
-    if (process.env.WEATHER_API_KEY) {
-      currentWeather = await fetchWeatherAPI(coords.lat, coords.lon, 3);
-    }
-    if (!currentWeather.length) {
-      currentWeather = await fetchForecast(
-        coords.lat, coords.lon,
-        today.toISOString().split('T')[0],
-        currentEnd.toISOString().split('T')[0],
-      );
-    }
-  } catch { /* bonus section — silently skip */ }
-
-  // Home comparison
-  let homeComparison: HomeComparison | undefined;
-  if (homeCity && homeCoords) {
-    const c = await buildHomeComparison(homeCity, homeCoords, city, tripDays, startDate, endDate);
-    if (c) homeComparison = c;
+  const have    = new Set(forecast.map(d => d.date));
+  const missing = dates.filter(d => !have.has(d));
+  let typical: DayWeather[] = [];
+  let years: number | undefined;
+  if (missing.length) {
+    const r = await fetchTypicalDays(point, missing[0], missing[missing.length - 1], city);
+    typical  = r.days.filter(d => missing.includes(d.date));
+    years    = r.years;
+    timezone ??= r.timezone;
   }
-
-  // Climate normals — Open-Meteo Climate API, free, no key required
-  let climateNormals: WeatherResult['climateNormals'];
-  try {
-    const [destN, homeN] = await Promise.all([
-      fetchClimateNormals(coords.lat, coords.lon, startDate, endDate),
-      homeCoords ? fetchClimateNormals(homeCoords.lat, homeCoords.lon, startDate, endDate) : Promise.resolve(null),
-    ]);
-    if (destN) {
-      climateNormals = {
-        destAvgTemp:     destN.avgTemp,
-        destAvgRainDays: destN.avgRainDays,
-        homeAvgTemp:     homeN?.avgTemp,
-        homeAvgRainDays: homeN?.avgRainDays,
-        source:          'EC_Earth3P_HR',
-        note:            'EC_Earth3P_HR climate model (CMIP6) — representative of current climate',
-      };
-    }
-  } catch { /* supplementary — silently degrade */ }
-
-  const { summary, packingNotes } = generateSummary(tripDays, mode);
 
   return {
-    mode, days: tripDays,
-    fetchedAt: new Date().toISOString(),
-    forecastAvailableFrom, historicalYears,
-    currentWeather: currentWeather.length ? currentWeather : undefined,
-    summary, packingNotes,
-    homeComparison,
-    climateNormals,
+    days: [...forecast, ...typical].sort((a, b) => a.date.localeCompare(b.date)),
+    timezone, years,
   };
+}
+
+// ─── Current conditions ───────────────────────────────────────────────────────
+
+async function fetchCurrent(point: Point): Promise<{ current: CurrentWeather; timezone: string | null } | null> {
+  const data = await getJson(omUrl('https://api.open-meteo.com/v1/forecast', point, {
+    current:       'temperature_2m,apparent_temperature,weather_code,wind_speed_10m',
+    forecast_days: '1',
+  }));
+  const c = data.current;
+  if (!c || !isNum(c.temperature_2m)) return null;
+  return {
+    current: {
+      time:    c.time,
+      temp:    Math.round(c.temperature_2m),
+      feels:   Math.round(c.apparent_temperature ?? c.temperature_2m),
+      ...wmo(c.weather_code),
+      code:    c.weather_code ?? 0,
+      windKph: round(c.wind_speed_10m),
+    },
+    timezone: data.timezone ?? null,
+  };
+}
+
+// ─── Sea temperature ──────────────────────────────────────────────────────────
+// Marine forecast for the next week; further out (or after the trip), the same
+// dates last year. Inland points come back empty — the row simply hides.
+
+async function fetchSeaTemp(point: Point, start: string, end: string): Promise<number | null> {
+  const today = todayUtc();
+  const soon  = addDays(today, 6);
+  let from: string;
+  let to: string;
+  if (start <= soon && end >= today) {
+    from = start > today ? start : today;
+    to   = end < soon ? end : soon;
+  } else {
+    const len = Math.min(dateRange(start, end).length, 14);
+    let y = +start.slice(0, 4) - 1;
+    from = withYear(start, y);
+    if (addDays(from, len - 1) >= today) from = withYear(start, --y);
+    to = addDays(from, len - 1);
+  }
+  try {
+    const data = await getJson(omUrl('https://marine-api.open-meteo.com/v1/marine', point, {
+      hourly: 'sea_surface_temperature', start_date: from, end_date: to,
+    }));
+    return one(mean(data.hourly?.sea_surface_temperature ?? []));
+  } catch { return null; }
+}
+
+// ─── Home's monthly highs (for "days like Ballina in July") ───────────────────
+// Climate barely moves, so it's fetched once per home location and kept on the user.
+
+async function homeMonthlyHighs(user: any, point: Point): Promise<number[] | null> {
+  const cached = user?.homeClimate;
+  if (cached?.monthlyHighs?.length === 12 &&
+      Math.abs(cached.lat - point.lat) < 0.05 && Math.abs(cached.lon - point.lon) < 0.05) {
+    return cached.monthlyHighs;
+  }
+  const last = new Date().getUTCFullYear() - 1;
+  const data = await getJson(omUrl('https://archive-api.open-meteo.com/v1/archive', point, {
+    daily: 'temperature_2m_max', start_date: `${last - 4}-01-01`, end_date: `${last}-12-31`,
+  }));
+  const buckets: number[][] = Array.from({ length: 12 }, () => []);
+  (data.daily.time as string[]).forEach((t, i) => {
+    const v = data.daily.temperature_2m_max[i];
+    if (isNum(v)) buckets[+t.slice(5, 7) - 1].push(v);
+  });
+  if (buckets.some(b => !b.length)) return null;
+  const monthlyHighs = buckets.map(b => Math.round(b.reduce((a, c) => a + c, 0) / b.length));
+  if (user?._id) {
+    await User.updateOne({ _id: user._id }, {
+      homeClimate: { lat: point.lat, lon: point.lon, monthlyHighs, fetchedAt: new Date() },
+    });
+  }
+  return monthlyHighs;
+}
+
+// ─── Inputs + where each day's weather is for ─────────────────────────────────
+
+interface StopInput {
+  city: string; countryCode?: string; iataCode?: string;
+  lat?: number; lng?: number;
+  from?: string; to?: string;   // additional destinations only
+}
+interface StayInput { name: string; lat: number; lng: number; checkIn?: string; checkOut?: string }
+interface HomeInput { city: string; countryCode?: string; lat?: number; lng?: number }
+
+export interface WeatherInputs {
+  start: string;
+  end:   string;
+  stops: StopInput[];           // [0] is the main destination
+  stays: StayInput[];
+  home:  HomeInput | null;
+}
+
+function stopInput(p: any): StopInput {
+  return {
+    city:        p.city,
+    countryCode: p.countryCode || undefined,
+    iataCode:    p.iataCode || undefined,
+    lat:         isNum(p.coordinates?.lat) ? p.coordinates.lat : undefined,
+    lng:         isNum(p.coordinates?.lng) ? p.coordinates.lng : undefined,
+    from:        ymdOf(p.arrivalDate),
+    to:          ymdOf(p.departureDate),
+  };
+}
+
+export function weatherInputs(trip: any, accommodation: any[], homeLocation: any): WeatherInputs {
+  return {
+    start: ymdOf(trip.startDate)!,
+    end:   ymdOf(trip.endDate)!,
+    stops: [trip.destination, ...(trip.additionalDestinations ?? [])]
+      .filter((p: any) => p?.city)
+      .map(stopInput),
+    stays: (accommodation ?? [])
+      .filter((a: any) => isNum(a?.coordinates?.lat) && isNum(a?.coordinates?.lng) && a.status !== 'cancelled')
+      .map((a: any) => ({
+        name: a.name || 'your stay',
+        lat: a.coordinates.lat, lng: a.coordinates.lng,
+        checkIn: ymdOf(a.checkIn), checkOut: ymdOf(a.checkOut),
+      })),
+    home: homeLocation?.city ? {
+      city:        homeLocation.city,
+      countryCode: homeLocation.countryCode || undefined,
+      lat:         isNum(homeLocation.coordinates?.lat) ? homeLocation.coordinates.lat : undefined,
+      lng:         isNum(homeLocation.coordinates?.lng) ? homeLocation.coordinates.lng : undefined,
+    } : null,
+  };
+}
+
+export const weatherKey = (inputs: WeatherInputs) =>
+  createHash('sha1').update(JSON.stringify({ v: WEATHER_VERSION, ...inputs })).digest('hex').slice(0, 16);
+
+interface GeoResult { name: string; latitude: number; longitude: number; feature_code?: string }
+
+// GeoNames feature codes for areas rather than places (island, archipelago,
+// admin division, region, peninsula, mountain, park, country).
+const BROAD_FEATURE = /^(ISL|ARCH|ADM|RGN|AREA|PEN|MT|PRK|RES|PCL|CONT)/;
+
+async function searchPlaces(name: string, countryCode?: string): Promise<GeoResult[]> {
+  const query = async (cc?: string) => {
+    const url = new URL('https://geocoding-api.open-meteo.com/v1/search');
+    url.searchParams.set('name', name);
+    url.searchParams.set('count', '10');
+    url.searchParams.set('language', 'en');
+    url.searchParams.set('format', 'json');
+    if (cc) url.searchParams.set('countryCode', cc);
+    try { return ((await getJson(url)).results ?? []) as GeoResult[]; } catch { return []; }
+  };
+  const scoped = countryCode ? await query(countryCode) : [];
+  return scoped.length ? scoped : query();
+}
+
+async function resolveStopPoint(
+  stop: StopInput, stopDates: string[], stays: StayInput[], singleStop: boolean,
+): Promise<WeatherPlace> {
+  const ref = isNum(stop.lat) && isNum(stop.lng) ? { lat: stop.lat, lon: stop.lng } : null;
+
+  // 1. The stay — the most exact point there is. Pick the one covering the most
+  //    of this stop's nights; on single-stop trips an undated stay still counts.
+  const scored = stays
+    .filter(s => !ref || distanceKm(ref, { lat: s.lat, lon: s.lng }) <= STAY_MAX_KM)
+    .map(s => ({
+      s,
+      nights: s.checkIn && s.checkOut
+        ? stopDates.filter(d => d >= s.checkIn! && d < s.checkOut!).length
+        : 0,
+      undated: !s.checkIn || !s.checkOut,
+    }))
+    .sort((a, b) => b.nights - a.nights);
+  const stay = scored.find(x => x.nights > 0) ?? (singleStop ? scored.find(x => x.undated) : undefined);
+  if (stay) return { label: stay.s.name, city: stop.city, kind: 'stay', lat: stay.s.lat, lon: stay.s.lng };
+
+  // 2. A populated place by that name.
+  const results = await searchPlaces(stop.city, stop.countryCode);
+  const top = results[0];
+  if (top && (top.feature_code?.startsWith('PPL') || !BROAD_FEATURE.test(top.feature_code ?? ''))) {
+    return { label: top.name, city: stop.city, kind: 'city', lat: top.latitude, lon: top.longitude };
+  }
+  if (!top && ref) return { label: stop.city, city: stop.city, kind: 'city', ...ref };
+
+  // 3. The name is an island, region or mountain — its centroid can sit on a
+  //    peak. An airport is a real, lived-in point on the same island.
+  const airport = airportByIata(stop.iataCode);
+  if (airport && (!top || distanceKm({ lat: top.latitude, lon: top.longitude }, { lat: airport.lat, lon: airport.lng }) <= STAY_MAX_KM)) {
+    return { label: airport.name, city: stop.city, kind: 'airport', lat: airport.lat, lon: airport.lng };
+  }
+  const airp = results.find(r => r.feature_code === 'AIRP');
+  if (airp) return { label: airp.name, city: stop.city, kind: 'airport', lat: airp.latitude, lon: airp.longitude };
+  const centre = top ? { lat: top.latitude, lon: top.longitude } : ref;
+  if (centre) {
+    const near = airports
+      .map(a => ({ a, km: distanceKm(centre, { lat: a.lat, lon: a.lng }) }))
+      .sort((x, y) => x.km - y.km)[0];
+    if (near && near.km <= STAY_MAX_KM) {
+      return { label: near.a.name, city: stop.city, kind: 'airport', lat: near.a.lat, lon: near.a.lng };
+    }
+  }
+
+  if (ref) return { label: stop.city, city: stop.city, kind: 'city', ...ref };
+  if (top) return { label: top.name, city: stop.city, kind: 'city', lat: top.latitude, lon: top.longitude };
+  throw new Error(`Could not locate "${stop.city}"`);
+}
+
+async function resolveHomePoint(home: HomeInput): Promise<Point | null> {
+  if (isNum(home.lat) && isNum(home.lng)) return { lat: home.lat, lon: home.lng };
+  const results = await searchPlaces(home.city, home.countryCode);
+  const best = results.find(r => r.feature_code?.startsWith('PPL')) ?? results[0];
+  return best ? { lat: best.latitude, lon: best.longitude } : null;
+}
+
+// ─── PUBLIC: fetch ────────────────────────────────────────────────────────────
+
+export async function fetchTripWeather(inputs: WeatherInputs, user?: any): Promise<WeatherResult> {
+  const { start, end, stops } = inputs;
+  if (!stops.length) throw new Error('No destination city on trip');
+  const dates = start && end ? dateRange(start, end) : [];
+  if (!dates.length) throw new Error('Trip has no valid dates');
+
+  // Day → stop: the additional destination whose dates cover it, else the main one.
+  const stopOf = (d: string) => {
+    for (let i = 1; i < stops.length; i++) {
+      const s = stops[i];
+      if (s.from && d >= s.from && (!s.to || d < s.to)) return i;
+    }
+    return 0;
+  };
+  const assign = dates.map(stopOf);
+  const used   = [...new Set(assign)];
+
+  const points = new Map<number, WeatherPlace>();
+  await Promise.all(used.map(async i => {
+    points.set(i, await resolveStopPoint(stops[i], dates.filter((_, k) => assign[k] === i), inputs.stays, used.length === 1));
+  }));
+
+  // Consecutive days at the same stop fetch together.
+  const runs: { stop: number; from: string; to: string }[] = [];
+  dates.forEach((d, k) => {
+    const last = runs[runs.length - 1];
+    if (last && last.stop === assign[k]) last.to = d;
+    else runs.push({ stop: assign[k], from: d, to: d });
+  });
+
+  const counts = used.map(i => ({ i, n: assign.filter(a => a === i).length })).sort((a, b) => b.n - a.n);
+  const main   = points.get(counts[0].i)!;
+  const today  = todayUtc();
+  const nowAt  = today >= start && today <= end ? points.get(assign[dates.indexOf(today)]) ?? main : main;
+
+  const homePoint = inputs.home ? await resolveHomePoint(inputs.home).catch(() => null) : null;
+
+  const [series, homeSeries, current, seaTemp, homeSea, monthlyHighs] = await Promise.all([
+    Promise.all(runs.map(r => fetchSeries(points.get(r.stop)!, r.from, r.to, stops[r.stop].city))),
+    homePoint ? fetchSeries(homePoint, start, end, inputs.home!.city).catch(() => null) : null,
+    fetchCurrent(nowAt).catch(() => null),
+    fetchSeaTemp(main, start, end),
+    homePoint ? fetchSeaTemp(homePoint, start, end) : null,
+    homePoint ? homeMonthlyHighs(user, homePoint).catch(() => null) : null,
+  ]);
+
+  const days = series.flatMap(s => s.days);
+  const sources = new Set(days.map(d => d.source));
+  const places = runs
+    .map(r => points.get(r.stop)!)
+    .filter((p, i, all) => all.indexOf(p) === i);
+
+  return {
+    version:   WEATHER_VERSION,
+    key:       weatherKey(inputs),
+    fetchedAt: new Date().toISOString(),
+    mode:      sources.size > 1 ? 'mixed' : sources.has('historical') ? 'historical' : 'forecast',
+    timezone:  current?.timezone ?? series[0]?.timezone ?? null,
+    places,
+    days,
+    historicalYears: series.map(s => s.years).find(isNum),
+    current:   current?.current,
+    seaTemp,
+    home: homeSeries?.days.length ? {
+      city:         inputs.home!.city,
+      days:         homeSeries.days,
+      seaTemp:      homeSea,
+      monthlyHighs,
+    } : undefined,
+    homeUnset: !inputs.home,
+  };
+}
+
+// ─── PUBLIC: cached read for a trip ───────────────────────────────────────────
+
+function isFresh(w: WeatherResult, inputs: WeatherInputs): boolean {
+  const age = Date.now() - Date.parse(w.fetchedAt);
+  if (!(age >= 0)) return false;
+  if (age < HOUR_MS) return true;   // never hammer the API, even when something below failed
+
+  const today = todayUtc();
+  // A typical day the forecast window has since reached is stale whatever its age.
+  const fcFrom = addDays(today, -PAST_FORECAST_DAYS);
+  const fcTo   = addDays(today, FORECAST_HORIZON_DAYS);
+  if (w.days.some(d => d.source === 'historical' && d.date >= fcFrom && d.date <= fcTo)) return false;
+
+  const active = today >= addDays(inputs.start, -1) && today <= inputs.end;
+  const ttl = active ? HOUR_MS
+    : w.days.some(d => d.source === 'forecast') ? 6 * HOUR_MS
+    : 7 * DAY_MS;
+  return age < ttl;
+}
+
+/**
+ * The trip's weather, from cache when it's still valid for the trip as it is
+ * now — dates, stops, stays and home all feed the cache key, so editing any of
+ * them refetches instead of serving the old trip's weather.
+ */
+export async function getTripWeather(
+  trip: any, user: any, opts: { force?: boolean } = {},
+): Promise<{ weather: WeatherResult; cached: boolean }> {
+  const logistics = await TripLogistics.findOne({ tripId: trip._id }).select('accommodation').lean() as any;
+  const inputs    = weatherInputs(trip, logistics?.accommodation ?? [], user?.homeLocation);
+  const cached    = trip.weather as WeatherResult | undefined;
+
+  if (!opts.force && cached?.version === WEATHER_VERSION && cached.key === weatherKey(inputs) && isFresh(cached, inputs)) {
+    return { weather: cached, cached: true };
+  }
+
+  const weather = await fetchTripWeather(inputs, user);
+  await Trip.findByIdAndUpdate(trip._id, { weather });
+  return { weather, cached: false };
 }

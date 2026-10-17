@@ -4,7 +4,7 @@ import connectDB from '@/lib/mongodb/connection';
 import Trip from '@/lib/mongodb/models/Trip';
 import User from '@/lib/mongodb/models/User';
 import TripExpense from '@/lib/mongodb/models/TripExpense';
-import { fetchTripWeather } from '@/lib/weather';
+import { getTripWeather } from '@/lib/weather';
 import { deliver, dropInvalid } from '@/lib/push/send';
 import { isDueNow } from '@/lib/push/plan';
 import { recipientOf } from '@/lib/push/context';
@@ -18,32 +18,12 @@ import { recipientOf } from '@/lib/push/context';
 // 2. Pre-warms weather cache for confirmed/active trips starting within 3 days.
 //    This ensures packing recommendations have accurate live forecast data
 //    before the user opens their packing list the evening before departure.
-//    Weather is only re-fetched when the cached data is older than 6 hours.
+//    getTripWeather only refetches when the cache is stale or the trip changed.
 //
 // Scheduled on Railway via a cron job hitting this endpoint every hour.
 // Protected by the x-cron-secret header.
 
-const WEATHER_TTL_MS  = 6 * 60 * 60 * 1000;   // 6 hours — matches GET route TTL
 const WEATHER_WINDOW  = 3;                      // days before departure
-
-async function resolveHomeCoords(
-  homeLocation: { city?: string; coordinates?: { lat: number; lng: number } } | undefined
-): Promise<{ lat: number; lon: number } | null> {
-  if (!homeLocation?.city) return null;
-  if (homeLocation.coordinates?.lat) {
-    return { lat: homeLocation.coordinates.lat, lon: homeLocation.coordinates.lng };
-  }
-  try {
-    const res  = await fetch(
-      `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(homeLocation.city)}&count=1&language=en&format=json`
-    );
-    const data = await res.json();
-    if (!data.results?.length) return null;
-    return { lat: data.results[0].latitude, lon: data.results[0].longitude };
-  } catch {
-    return null;
-  }
-}
 
 export async function POST(req: Request) {
   const secret = req.headers.get('x-cron-secret');
@@ -157,33 +137,11 @@ export async function POST(req: Request) {
   let weatherSkipped   = 0;
 
   for (const trip of nearTrips) {
-    const user = await User.findById(trip.userId).select('homeLocation');
-
-    // Skip if cache is still fresh — unless it predates the user having a
-    // home location set, in which case it's missing the home comparison and
-    // needs recomputing regardless of age.
-    const staleMissingHomeComparison = !!user?.homeLocation?.city && !trip.weather?.homeComparison;
-    if (trip.weather?.fetchedAt && !staleMissingHomeComparison) {
-      const age = Date.now() - new Date(trip.weather.fetchedAt).getTime();
-      if (age < WEATHER_TTL_MS) {
-        weatherSkipped++;
-        continue;
-      }
-    }
-
+    const user = await User.findById(trip.userId).select('homeLocation homeClimate');
     try {
-      const homeCoords = await resolveHomeCoords(user?.homeLocation);
-
-      const weather = await fetchTripWeather(
-        trip.destination.city,
-        trip.startDate.toISOString().split('T')[0],
-        trip.endDate.toISOString().split('T')[0],
-        user?.homeLocation?.city ?? undefined,
-        homeCoords,
-      );
-
-      await Trip.findByIdAndUpdate(trip._id, { weather });
-      weatherRefreshed++;
+      const { cached } = await getTripWeather(trip, user);
+      if (cached) weatherSkipped++;
+      else        weatherRefreshed++;
     } catch (err: any) {
       // Non-fatal — log and continue. A failed weather fetch shouldn't
       // block status transitions or other trip processing.

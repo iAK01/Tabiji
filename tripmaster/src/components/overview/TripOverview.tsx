@@ -22,6 +22,7 @@ import { totalFreeMinutes, freeLabelText } from '@/components/itinerary/Itinerar
 import { getLogisticsFacts } from '@/lib/logistics/facts';
 import { getTransportLabel } from '@/components/logistics/logistics.helpers';
 import { displayStatus } from '@/lib/trips/onTrip';
+import { summaryLine, wearHeadline, weatherHeadline, type WeatherResult } from '@/lib/weather-insights';
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 
@@ -38,19 +39,6 @@ const D = {
 };
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-
-interface WeatherDay {
-  date:         string;
-  label:        string;
-  condition:    string;
-  icon:         string;
-  tempAvg:      number;
-  tempMax:      number;
-  tempMin:      number;
-  chanceOfRain: number;
-  precipMm:     number;
-  windKph:      number;
-}
 
 interface GroundTransportLeg {
   status:     'sorted' | 'gap' | 'no_data' | 'not_applicable';
@@ -79,17 +67,7 @@ interface Props {
       returnLeg?:     GroundTransportLeg;
       homeCloseout?:  GroundTransportLeg;
     } | null;
-    weather?: {
-      mode?:         'forecast' | 'historical' | 'current';
-      summary?:      string;
-      packingNotes?: string[];
-      days?:         WeatherDay[];
-      currentWeather?: WeatherDay[];
-      homeComparison?: {
-        tempDeltaLabel?: string;
-        insights?: { icon: string; text: string }[];
-      };
-    };
+    weather?: WeatherResult;
   };
   coverPhotoUrl?:    string;
   coverPhotoCredit?: string;
@@ -268,19 +246,17 @@ export default function TripOverview({ trip, coverPhotoUrl, coverPhotoCredit, on
     daysUntil <= 3 ? 'warn' : 'empty';
 
   // ── Weather ───────────────────────────────────────────────────────────────
-  // currentWeather is always today's live conditions — prefer it over trip forecast/historical
-  const currentWeatherDay = trip.weather?.currentWeather?.[0] ?? null;
-  const weatherDay        = currentWeatherDay ?? trip.weather?.days?.[0] ?? null;
-  const isLiveWeather     = !!currentWeatherDay;
-
-  const isHistorical = trip.weather?.mode === 'historical';
-  const weatherDays: WeatherDay[] = trip.weather?.days ?? [];
-  const displayHigh = isHistorical && weatherDays.length
-    ? Math.round(weatherDays.reduce((s, d) => s + d.tempMax, 0) / weatherDays.length)
-    : weatherDay?.tempMax ?? 0;
-  const displayLow = isHistorical && weatherDays.length
-    ? Math.round(weatherDays.reduce((s, d) => s + d.tempMin, 0) / weatherDays.length)
-    : weatherDay?.tempMin ?? 0;
+  // Same reads as the Weather tab: now if fresh, else today's (or day one's) high.
+  const weather       = trip.weather?.days?.length ? trip.weather : null;
+  const weatherDay    = weatherHeadline(weather);
+  const isHistorical  = weather?.mode === 'historical';
+  const weatherDays   = weather?.days ?? [];
+  const weatherSpan   = (xs: number[]) => {
+    const lo = Math.min(...xs), hi = Math.max(...xs);
+    return lo === hi ? `${lo}` : `${lo}–${hi}`;
+  };
+  const weatherSummary = summaryLine(weatherDays);
+  const weatherWear    = weather ? wearHeadline(weather) : null;
   const tripMonth = new Date(trip.startDate).toLocaleDateString('en-IE', { month: 'long' });
 
   // ── Resources ─────────────────────────────────────────────────────────────
@@ -343,7 +319,7 @@ export default function TripOverview({ trip, coverPhotoUrl, coverPhotoCredit, on
                 color: 'white', lineHeight: 1, letterSpacing: '-0.03em',
                 textShadow: '0 2px 12px rgba(0,0,0,0.7)',
               }}>
-                {Math.round(weatherDay.tempAvg)}°
+                {weatherDay.temp}°
               </Typography>
               <Typography sx={{
                 fontFamily: D.body, fontSize: '0.6rem', fontWeight: 700,
@@ -351,7 +327,7 @@ export default function TripOverview({ trip, coverPhotoUrl, coverPhotoCredit, on
                 color: 'rgba(255,255,255,0.6)',
                 textShadow: '0 1px 4px rgba(0,0,0,0.7)',
               }}>
-                {isLiveWeather ? 'Now · ' : trip.weather?.mode === 'historical' ? 'Avg · ' : ''}{weatherDay.condition}
+                {weatherDay.kind === 'now' ? 'Now · ' : weatherDay.kind === 'typical' ? 'Typical · ' : ''}{weatherDay.condition}
               </Typography>
             </Box>
           </Box>
@@ -689,7 +665,7 @@ export default function TripOverview({ trip, coverPhotoUrl, coverPhotoCredit, on
               )}
 
               {/* ── WEATHER ── full width on desktop */}
-              {trip.weather && weatherDay && !dismissed.includes('weather') && (
+              {weather && weatherDay && !dismissed.includes('weather') && (
                 <Box sx={{
                   gridColumn: { md: '1 / -1' },
                   borderBottom: `1px solid ${D.rule}`,
@@ -710,27 +686,25 @@ export default function TripOverview({ trip, coverPhotoUrl, coverPhotoCredit, on
                             fontFamily: D.display, fontSize: { xs: '2.8rem', md: '4.5rem' },
                             lineHeight: 1, letterSpacing: '-0.04em', color: D.navy,
                           }}>
-                            {Math.round(weatherDay.tempAvg)}°
+                            {weatherDay.temp}°
                           </Typography>
                           <Box>
                             <Typography sx={{ fontFamily: D.display, fontSize: { xs: '0.9rem', md: '1.15rem' }, color: D.navy, lineHeight: 1.2 }}>
-                              {isHistorical ? 'Typical conditions' : weatherDay.condition}
+                              {weatherDay.kind === 'now' ? `Now · ${weatherDay.condition}` : isHistorical ? 'Typical conditions' : weatherDay.condition}
                             </Typography>
                             <Typography sx={{ fontFamily: D.body, fontSize: { xs: '0.72rem', md: '0.8rem' }, color: D.muted }}>
-                              {displayLow}° low · {displayHigh}° high{isHistorical && ` · Historical avg · ${tripMonth}`}
+                              Highs {weatherSpan(weatherDays.map(d => d.tempMax))}° · lows {weatherSpan(weatherDays.map(d => d.tempMin))}°{isHistorical && ` · typical for ${tripMonth}`}
                             </Typography>
                           </Box>
                         </Box>
-                        {trip.weather?.summary && (
+                        {weatherSummary && (
                           <Typography sx={{ fontFamily: D.body, fontSize: { xs: '0.8rem', md: '0.9rem' }, color: D.muted, mt: 1, lineHeight: 1.6 }}>
-                            {trip.weather.summary}
+                            {weatherSummary}
                           </Typography>
                         )}
-                        {trip.weather?.packingNotes?.[0] && (
+                        {weatherWear && (
                           <Typography sx={{ fontFamily: D.body, fontSize: { xs: '0.78rem', md: '0.88rem' }, color: D.green, fontWeight: 600, mt: 0.5 }}>
-                            {isHistorical
-                              ? trip.weather.packingNotes[0].replace('Rain expected on', 'Historically rains on').replace('One rainy day expected', 'Typically one rainy day')
-                              : trip.weather.packingNotes[0]}
+                            {weatherWear}
                           </Typography>
                         )}
                       </Box>

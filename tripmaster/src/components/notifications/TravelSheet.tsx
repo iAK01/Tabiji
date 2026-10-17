@@ -479,9 +479,11 @@ function Arrival({ trip, leg, legs, data }: { trip: any; leg: Leg; legs: Leg[]; 
     .filter((x: any) => x.time && x.time > after && x.s.metadata?.phase !== 'arrival')
     .sort((a: any, b: any) => a.time.localeCompare(b.time));
 
-  const weather = city === trip.destination?.city
-    ? (trip.weather?.days ?? []).find((w: any) => w.date === date)
-    : null;
+  // Each weather day carries its stop's city (v1 cached days don't — those were
+  // always the main destination), so a multi-city leg gets its own forecast and
+  // landing back home never shows the destination's.
+  const weather = (trip.weather?.days ?? []).find((w: any) =>
+    w.date === date && (w.city ?? trip.destination?.city) === city);
 
   return (
     <>

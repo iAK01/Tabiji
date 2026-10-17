@@ -26,6 +26,10 @@ const UserSchema = new Schema({
     emergency: String,
   },
 
+  // Monthly average highs at home — "days like Ballina in July" on the Weather
+  // tab. Cached per home location by src/lib/weather.ts; climate barely moves.
+  homeClimate: { type: Schema.Types.Mixed },
+
   preferredAirport: {
     iata:    String,
     name:    String,

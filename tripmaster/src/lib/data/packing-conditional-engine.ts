@@ -11,6 +11,8 @@
  * It does not touch the database — it only transforms the item list.
  */
 
+import { rainOutlook, type RainFields, type RainGear } from '@/lib/weather-insights';
+
 // ─── Context shape (assembled in generate route) ─────────────────────────────
 
 export interface WeatherContext {
@@ -19,9 +21,11 @@ export interface WeatherContext {
   minLow:     number;   // coldest overnight (worst case)
   maxHigh:    number;   // hottest daytime (worst case)
   tempRange:  number;   // maxHigh − minLow across entire trip
-  hasRain:    boolean;  // any day with chanceOfRain >= 40
-  heavyRain:  boolean;  // any day with chanceOfRain >= 60
-  rainDays:   number;   // count of days with chanceOfRain >= 40
+  hasRain:    boolean;  // at least one wet day (shared definition in weather-insights)
+  heavyRain:  boolean;  // at least one 10 mm+ forecast day
+  rainDays:   number;   // wet days — forecast counted, typical days by their odds
+  rainGear:   RainGear; // same call as the Weather tab's What to wear
+  rainNote:   string;   // names the days when there are only a few
 }
 
 export interface TripContext {
@@ -105,11 +109,10 @@ function item(
 // ─── Derive WeatherContext from stored trip.weather.days ──────────────────────
 
 export function deriveWeatherContext(
-  days: Array<{
+  days: Array<RainFields & {
+    date:          string;
     tempMax:       number;
     tempMin:       number;
-    chanceOfRain:  number;
-    precipMm?:     number;
   }> | null | undefined,
 ): WeatherContext | null {
   if (!days || days.length === 0) return null;
@@ -120,7 +123,7 @@ export function deriveWeatherContext(
   const avgLow    = Math.round(lows.reduce((a, b) => a + b, 0) / lows.length);
   const minLow    = Math.min(...lows);
   const maxHigh   = Math.max(...highs);
-  const rainDays  = days.filter(d => d.chanceOfRain >= 40).length;
+  const rain      = rainOutlook(days);
 
   return {
     avgHigh,
@@ -128,9 +131,11 @@ export function deriveWeatherContext(
     minLow,
     maxHigh,
     tempRange:  maxHigh - minLow,
-    hasRain:    rainDays > 0,
-    heavyRain:  days.some(d => d.chanceOfRain >= 60),
-    rainDays,
+    hasRain:    rain.gear !== 'none',
+    heavyRain:  rain.heavy > 0,
+    rainDays:   rain.wet,
+    rainGear:   rain.gear,
+    rainNote:   rain.text,
   };
 }
 
@@ -359,26 +364,29 @@ export function runPackingEngine(ctx: TripContext): EngineResult {
     }
 
     // ── 3c. RAIN ──
-    if (weather.hasRain) {
-      const reason = `Rain forecast on ${weather.rainDays} of ${weather.rainDays >= 3 ? 'your' : 'your'} trip days`;
+    // Scaled to how much of the trip is wet: one heavy day is an umbrella; a
+    // waterproof jacket needs rain most days or several heavy ones; shoes both.
+    if (weather.rainGear !== 'none') {
+      const reason = `Rain forecast on ${weather.rainDays} of your trip days`;
 
-      // Promote umbrella to essential and override advisory
       result.itemOverrides['Umbrella'] = {
         essential:       true,
-        advisoryNote:    `Rain on ${weather.rainDays} day${weather.rainDays !== 1 ? 's' : ''} — compact umbrella worth the space`,
+        advisoryNote:    weather.rainNote,
         conditionReason: reason,
       };
 
-      if (weather.heavyRain) {
+      if (weather.rainGear === 'jacket' || weather.rainGear === 'jacket+shoes') {
         result.itemsToAdd.push(item('Waterproof jacket', 'Clothes', {
           essential:       true,
-          conditionReason: `Heavy rain forecast (${weather.rainDays} days at 60%+ chance)`,
-          advisoryNote:    'An umbrella alone won\'t cut it — waterproof outer layer needed',
+          conditionReason: reason,
+          advisoryNote:    weather.rainNote,
         }));
+      }
 
+      if (weather.rainGear === 'jacket+shoes') {
         result.itemsToAdd.push(item('Waterproof shoes / shoe covers', 'Clothes', {
           conditionReason: reason,
-          advisoryNote:    'Heavy rain expected — keep your feet dry',
+          advisoryNote:    'Rain most days — keep your feet dry',
         }));
       }
     }

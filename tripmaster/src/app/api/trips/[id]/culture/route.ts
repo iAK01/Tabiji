@@ -7,6 +7,7 @@ import TripLogistics         from '@/lib/mongodb/models/TripLogistics';
 import User                  from '@/lib/mongodb/models/User';
 import { getFreeCultureAccess } from '@/lib/data/free-cultural-access';
 import { uploadFile }        from '@/lib/utils/storage';
+import { summaryLine, wetDayCount } from '@/lib/weather-insights';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -414,8 +415,9 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
   const hotelAddress = firstHotel?.address ?? null;
 
   // Weather context
-  const weatherSummary = trip.weather?.summary ?? null;
-  const rainyDays      = (trip.weather?.days ?? []).filter((d: any) => (d.precipMm ?? 0) > 1).length;
+  const weatherDays    = trip.weather?.days ?? [];
+  const weatherSummary = summaryLine(weatherDays);
+  const rainyDays      = wetDayCount(weatherDays);
 
   try {
     const briefing = await generateBriefing({
