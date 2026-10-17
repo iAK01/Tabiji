@@ -40,6 +40,7 @@ import { useFlushQueueOnReconnect } from '@/lib/offline/useFlushQueue';
 import { warmTrips } from '@/lib/offline/warm';
 import TripReadinessPanel from '@/components/dashboard/TripReadinessPanel';
 import { isOnTrip } from '@/lib/trips/onTrip';
+import NotificationBell from '@/components/notifications/NotificationBell';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -582,6 +583,7 @@ export default function Dashboard() {
                 fontFamily: D.body, fontSize: '0.85rem', fontWeight: 500, color: 'white' }}>
                 {session?.user?.name}
               </Typography>
+              <Box sx={{ color: 'white' }}><NotificationBell /></Box>
               <IconButton size="small" onClick={() => router.push('/profile')} sx={{ p: 0.5 }}>
                 <Avatar src={session?.user?.image ?? undefined}
                   sx={{ width: 32, height: 32, fontSize: '0.8rem', backgroundColor: D.green }}>

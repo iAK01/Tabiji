@@ -6,6 +6,7 @@ import { Box, Typography, IconButton, Tooltip } from '@mui/material';
 import { alpha }          from '@mui/material/styles';
 import DeleteIcon         from '@mui/icons-material/Delete';
 import LockIcon           from '@mui/icons-material/Lock';
+import NotificationsIcon  from '@mui/icons-material/Notifications';
 import NavigateButton     from '@/components/ui/NavigateButton';
 import DocumentViewer, { type ViewableFile } from '@/components/files/DocumentViewer';
 import {
@@ -36,9 +37,32 @@ interface Props {
   colSpan?:     number;
   linkedFiles?: LinkedFile[];
   startHour?:   number;
+  /** When this stop's notification goes out (from /api/trips/[id]/reminders). */
+  reminder?:    { local: string; sent: boolean } | null;
+  /** Ringed briefly when a notification link lands on this stop. */
+  highlighted?: boolean;
 }
 
-export function StopBlock({ stop, onDelete, onClick, onResize, pxPerMin, isMobile, colIndex = 0, totalCols = 1, colSpan = 1, linkedFiles = [], startHour = DAY_START_HOUR }: Props) {
+// Bell + the time the notification goes out, beside the stop's name.
+function ReminderMark({ reminder, size }: { reminder: { local: string; sent: boolean }; size: number }) {
+  return (
+    <Box
+      component="span"
+      title={reminder.sent ? `Reminder sent at ${reminder.local}` : `Reminder at ${reminder.local}`}
+      sx={{
+        display: 'inline-flex', alignItems: 'center', gap: 0.25, flexShrink: 0,
+        fontFamily: D.body, fontSize: size, fontWeight: 700, lineHeight: 1,
+        fontVariantNumeric: 'tabular-nums',
+        color: reminder.sent ? alpha(D.navy, 0.3) : alpha(D.navy, 0.6),
+      }}
+    >
+      <NotificationsIcon sx={{ fontSize: size + 1 }} />
+      {reminder.local}
+    </Box>
+  );
+}
+
+export function StopBlock({ stop, onDelete, onClick, onResize, pxPerMin, isMobile, colIndex = 0, totalCols = 1, colSpan = 1, linkedFiles = [], startHour = DAY_START_HOUR, reminder = null, highlighted = false }: Props) {
   const startMin = stopStartMinutes(stop);
   if (startMin === null) return null;
 
@@ -150,6 +174,7 @@ export function StopBlock({ stop, onDelete, onClick, onResize, pxPerMin, isMobil
     >
       <Box
         ref={setNodeRef}
+        data-stop-id={stop._id}
         onClick={isDragging || isResizing ? undefined : (e) => { e.stopPropagation(); onClick?.(); }}
         {...listeners}
         {...attributes}
@@ -173,7 +198,9 @@ export function StopBlock({ stop, onDelete, onClick, onResize, pxPerMin, isMobil
           borderLeft:      `6px solid ${cfg.color}`,
           boxShadow: isDragging || isResizing
             ? `0 12px 32px rgba(0,0,0,0.2), 0 0 0 2px ${cfg.color}`
-            : '0 2px 8px rgba(0,0,0,0.10), 0 0 0 1px rgba(0,0,0,0.04)',
+            : highlighted
+              ? `0 6px 20px rgba(0,0,0,0.22), 0 0 0 3px ${cfg.color}`
+              : '0 2px 8px rgba(0,0,0,0.10), 0 0 0 1px rgba(0,0,0,0.04)',
 
           display:    'flex',
           alignItems: 'stretch',
@@ -307,6 +334,7 @@ export function StopBlock({ stop, onDelete, onClick, onResize, pxPerMin, isMobil
               }}>
                 {timeLabel}
               </Typography>
+              {reminder && <ReminderMark reminder={reminder} size={isMobile ? 10 : 9} />}
               {isFact && <LockIcon sx={{ fontSize: 9, color: alpha(D.navy, 0.35), flexShrink: 0 }} />}
             </Box>
           ) : (
@@ -338,6 +366,7 @@ export function StopBlock({ stop, onDelete, onClick, onResize, pxPerMin, isMobil
                 }}>
                   {displayName}
                 </Typography>
+                {reminder && <ReminderMark reminder={reminder} size={isMobile ? 11 : 10} />}
                 {isFact && (
                   <LockIcon sx={{ fontSize: 10, color: alpha(D.navy, 0.35), flexShrink: 0 }} />
                 )}

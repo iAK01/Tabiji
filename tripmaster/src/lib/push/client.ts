@@ -95,6 +95,36 @@ export async function unsubscribeDevice(reg: ServiceWorkerRegistration): Promise
   await forget(endpoint);
 }
 
+/**
+ * Tapping a notification while the app is open: the worker asks the page to go
+ * to the notification's link instead of reloading it. Same page → pushState
+ * (tabs, sheets and deep-link params all read the URL, and it works offline);
+ * another page → a normal navigation.
+ */
+export function listenForNotificationOpens(): () => void {
+  if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return () => {};
+  const onMessage = (e: MessageEvent) => {
+    if (e.data?.type !== 'OPEN_URL' || typeof e.data.url !== 'string') return;
+    const url = new URL(e.data.url, window.location.origin);
+    if (url.pathname === window.location.pathname) {
+      window.history.pushState(null, '', url.pathname + url.search);
+    } else {
+      window.location.assign(url.href);
+    }
+    e.ports[0]?.postMessage({ opened: true });
+  };
+  navigator.serviceWorker.addEventListener('message', onMessage);
+  return () => navigator.serviceWorker.removeEventListener('message', onMessage);
+}
+
+/** The app icon badge — unread notifications. Home-screen apps only; a no-op elsewhere. */
+export function setAppBadge(count: number): void {
+  try {
+    if (count > 0) (navigator as any).setAppBadge?.(count)?.catch?.(() => {});
+    else (navigator as any).clearAppBadge?.()?.catch?.(() => {});
+  } catch { /* unsupported */ }
+}
+
 /** App open: re-send this device's subscription (never creates one). */
 export async function syncPushOnOpen(): Promise<void> {
   if (!pushSupported() || Notification.permission !== 'granted' || !navigator.onLine) return;

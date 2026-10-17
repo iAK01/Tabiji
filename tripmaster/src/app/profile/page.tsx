@@ -30,6 +30,7 @@ import { COUNTRY_LIST, getCountryMeta } from '@/lib/data/countries';
 import { MY_APPS_CATALOG, TRANSPORT_SERVICES } from '@/lib/data/ground-transport';
 import AirportSearch          from '@/components/ui/AirportSearch';
 import PushNotificationSetup  from '@/components/notifications/PushNotificationSetup';
+import NotificationSettings   from '@/components/notifications/NotificationSettings';
 import { Airport }            from '@/lib/data/airports';
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
@@ -449,6 +450,7 @@ export default function ProfilePage() {
             </SectionCard>
 
             <PushNotificationSetup />
+            <NotificationSettings />
 
             <SectionCard icon={HomeIcon} title="Home" ghost={HomeIcon}>
               {profile.homeLocation?.countryCode ? (

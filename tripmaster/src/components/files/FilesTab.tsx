@@ -70,6 +70,7 @@ import SmartExtractProgress from './SmartExtractProgress';
 import { useSmartExtract, type SmartExtractSource } from '@/lib/extract/useSmartExtract';
 import { isFileCached } from '@/lib/offline/fileCache';
 import { saveTripCache, getTripCache } from '@/lib/offline/db';
+import { useSearchParams } from 'next/navigation';
 
 // ─── Smart Extract ────────────────────────────────────────────────────────────
 // Mime types we can pull structured trip data out of (PDF + images natively,
@@ -1321,6 +1322,11 @@ export default function FilesTab({ tripId, fabTrigger }: FilesTabProps) {
   const [identifyFile,           setIdentifyFile]           = useState<TripFile | null>(null);
   const uploadExtract = useSmartExtract(tripId);
 
+  // Notification links: ?file=<id> opens a document, ?todo=<id> points at a to-do.
+  const searchParams = useSearchParams();
+  const [linkedViewer, setLinkedViewer] = useState<ViewableFile | null>(null);
+  const [highlightId,  setHighlightId]  = useState<string | null>(null);
+
   const dueDateRef = useRef<HTMLInputElement>(null);
   const dueTimeRef = useRef<HTMLInputElement>(null);
 
@@ -1366,6 +1372,33 @@ export default function FilesTab({ tripId, fabTrigger }: FilesTabProps) {
     }
     load();
   }, [tripId]);
+
+  useEffect(() => {
+    if (loading) return;
+    const fileId = searchParams.get('file');
+    const todoId = searchParams.get('todo');
+    if (!fileId && !todoId) return;
+    const params = new URLSearchParams(window.location.search);
+    params.delete('file');
+    params.delete('todo');
+    const qs = params.toString();
+    window.history.replaceState(null, '', qs ? `?${qs}` : window.location.pathname);
+
+    const target = files.find(f => f._id === (fileId ?? todoId));
+    if (!target) return;
+    if (fileId) {
+      if (target.gcsUrl) setLinkedViewer({ _id: target._id, name: target.name, mimeType: target.mimeType, gcsUrl: target.gcsUrl });
+      else if (target.linkUrl) window.open(target.linkUrl, '_blank', 'noopener');
+    }
+    setHighlightId(target._id);
+    setTimeout(() => document.getElementById(`resource-${target._id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 200);
+    setTimeout(() => setHighlightId(cur => (cur === target._id ? null : cur)), 4000);
+  }, [loading, files, searchParams]);
+
+  const highlightSx = (id: string) => ({
+    transition: 'background-color 0.4s, box-shadow 0.4s',
+    ...(highlightId === id && { backgroundColor: alpha('#55702C', 0.08), boxShadow: 'inset 4px 0 0 #55702C' }),
+  });
 
   const openDialog = (m: Mode) => {
     setMode(m);
@@ -1736,7 +1769,7 @@ export default function FilesTab({ tripId, fabTrigger }: FilesTabProps) {
               />
 
               {pendingTodos.map((todo, i) => (
-                <Box key={todo._id}>
+                <Box key={todo._id} id={`resource-${todo._id}`} sx={highlightSx(todo._id)}>
                   {i > 0 && <Divider />}
                   <ToDoCard file={todo} onDelete={handleDelete} onEdit={openEdit} onToggleComplete={handleToggleComplete} />
                 </Box>
@@ -1752,7 +1785,7 @@ export default function FilesTab({ tripId, fabTrigger }: FilesTabProps) {
                     </Box>
                   )}
                   {completedTodos.map((todo, i) => (
-                    <Box key={todo._id}>
+                    <Box key={todo._id} id={`resource-${todo._id}`} sx={highlightSx(todo._id)}>
                       {(i > 0 || pendingTodos.length > 0) && <Divider />}
                       <ToDoCard file={todo} onDelete={handleDelete} onEdit={openEdit} onToggleComplete={handleToggleComplete} />
                     </Box>
@@ -1781,7 +1814,7 @@ export default function FilesTab({ tripId, fabTrigger }: FilesTabProps) {
                   color={color}
                 />
                 {group.map((file, i) => (
-                  <Box key={file._id}>
+                  <Box key={file._id} id={`resource-${file._id}`} sx={highlightSx(file._id)}>
                     {i > 0 && <Divider />}
                     {file.resourceType === 'note'
                       ? <NoteCard    file={file} tripId={tripId} onDelete={handleDelete} onEdit={openEdit} />
@@ -2173,6 +2206,8 @@ export default function FilesTab({ tripId, fabTrigger }: FilesTabProps) {
           onFileUpdated={f => setFiles(prev => prev.map(x => x._id === f._id ? f : x))}
         />
       )}
+
+      <DocumentViewer file={linkedViewer} onClose={() => setLinkedViewer(null)} />
     </Box>
   );
 }

@@ -48,6 +48,10 @@ const UserSchema = new Schema({
   },
   pushSubscriptions: [{ type: Schema.Types.Mixed }],
 
+  // Notification settings — shape and defaults in src/lib/push/prefs.ts. Kept
+  // out of `preferences` because the profile save replaces that whole object.
+  notificationPrefs: { type: Schema.Types.Mixed },
+
   preferences: {
     units: { type: String, enum: ['metric', 'imperial'], default: 'metric' },
     language: { type: String, default: 'en' },

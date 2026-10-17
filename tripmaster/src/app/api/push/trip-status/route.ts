@@ -1,18 +1,13 @@
 import { NextResponse } from 'next/server';
 import { DateTime } from 'luxon';
-import webpush from 'web-push';
 import connectDB from '@/lib/mongodb/connection';
 import Trip from '@/lib/mongodb/models/Trip';
 import User from '@/lib/mongodb/models/User';
 import TripExpense from '@/lib/mongodb/models/TripExpense';
-import PushNotificationLog from '@/lib/mongodb/models/PushNotificationLog';
 import { fetchTripWeather } from '@/lib/weather';
-
-webpush.setVapidDetails(
-  process.env.VAPID_MAILTO!,
-  process.env.VAPID_PUBLIC_KEY!,
-  process.env.VAPID_PRIVATE_KEY!
-);
+import { deliver, dropInvalid } from '@/lib/push/send';
+import { isDueNow } from '@/lib/push/plan';
+import { recipientOf } from '@/lib/push/context';
 
 // ---- POST /api/push/trip-status ---------------------------------------------
 //
@@ -80,16 +75,6 @@ export async function POST(req: Request) {
   // completed mid-trip on short same-day journeys.
   const completeThreshold = now.minus({ hours: 48 }).toJSDate();
 
-  // Fetched before updating (not a blind updateMany) so the trips that just
-  // completed are on hand for the expense-reconciliation nudge below — this is
-  // the same active→completed transition that already exists; the only change
-  // here is knowing *which* trips it applied to, for a reason to check on them.
-  const justCompletedTrips = await Trip.find({
-    status:  'active',
-    deleted: false,
-    endDate: { $lt: completeThreshold },
-  });
-
   const completeResult = await Trip.updateMany(
     {
       status:  'active',
@@ -100,52 +85,55 @@ export async function POST(req: Request) {
   );
 
   // ── 2b. Expense reconciliation nudge ──────────────────────────────────────
-  // Work/mixed trips only, and only if there's actually something outstanding
-  // (anything not yet 'paid') — one-shot per trip via PushNotificationLog, same
-  // dedup pattern push/notify already uses for every other reminder type.
+  // Work/mixed trips that finished (48h+ ago, within the last week) with
+  // anything not yet 'paid'. Checked every run rather than only at the moment a
+  // trip completes, so quiet hours can hold it over without losing it — and
+  // trips left at 'planning' (never completed) still get it. Once only, via the
+  // notification log.
   let expenseNudgesSent = 0;
-  for (const trip of justCompletedTrips) {
-    const isWork = trip.tripType === 'work' || trip.tripType === 'mixed';
-    if (!isWork) continue;
+  const finished = await Trip.find({
+    deleted:  false,
+    tripType: { $in: ['work', 'mixed'] },
+    status:   { $nin: ['idea', 'cancelled'] },
+    endDate:  { $lt: completeThreshold, $gte: now.minus({ days: 7 }).toJSDate() },
+  }).lean() as any[];
 
-    const outstanding = await TripExpense.countDocuments({
-      tripId: trip._id, status: { $ne: 'paid' },
-    });
-    if (outstanding === 0) continue;
+  for (const trip of finished) {
+    try {
+      const outstanding = await TripExpense.countDocuments({
+        tripId: trip._id, status: { $ne: 'paid' },
+      });
+      if (outstanding === 0) continue;
 
-    const user = await User.findById(trip.userId).select('pushSubscriptions');
-    if (!user?.pushSubscriptions?.length) continue;
+      const user = await User.findById(trip.userId).lean() as any;
+      if (!user?.pushSubscriptions?.length) continue;
+      const recipient = recipientOf(user, trip);
+      const tripId    = String(trip._id);
+      if (recipient.prefs.mutedTrips.includes(tripId)) continue;
 
-    const key  = 'expense-reconciliation';
-    const type = 'expense_reconciliation';
-    const tripId = trip._id.toString();
-    const userId = trip.userId.toString();
+      const at = new Date(trip.endDate).getTime() + 48 * 60 * 60 * 1000;
+      const timing = { at, until: at + 7 * 24 * 60 * 60 * 1000, deferrable: true, zone: recipient.home.zone, category: 'expenses' as const };
+      if (!isDueNow(timing, recipient.prefs, now.toMillis())) continue;
 
-    const alreadySent = await PushNotificationLog.findOne({ userId, tripId, key, notificationType: type });
-    if (alreadySent) continue;
-
-    const payload = {
-      title: `${trip.name}: expenses to sort`,
-      body:  `${outstanding} expense${outstanding === 1 ? '' : 's'} still need${outstanding === 1 ? 's' : ''} reviewing and submitting.`,
-      url:   `/trips/${tripId}`,
-    };
-    const str = JSON.stringify(payload);
-    const invalidEndpoints: string[] = [];
-    let sent = 0;
-    for (const sub of user.pushSubscriptions) {
-      try {
-        await webpush.sendNotification(sub, str);
-        sent++;
-      } catch (err: any) {
-        if (err?.statusCode === 410 || err?.statusCode === 404) invalidEndpoints.push(sub.endpoint);
-      }
-    }
-    if (invalidEndpoints.length) {
-      await User.findByIdAndUpdate(trip.userId, { $pull: { pushSubscriptions: { endpoint: { $in: invalidEndpoints } } } });
-    }
-    if (sent > 0) {
-      await PushNotificationLog.create({ userId, tripId, key, notificationType: type });
-      expenseNudgesSent++;
+      const invalid: string[] = [];
+      const ok = await deliver({
+        userId:           recipient.userId,
+        tripId,
+        key:              'expense-reconciliation',
+        notificationType: 'expense_reconciliation',
+        category:         'expenses',
+        subscriptions:    user.pushSubscriptions,
+        payload: {
+          title: `${trip.name}: expenses to sort`,
+          body:  `${outstanding} expense${outstanding === 1 ? '' : 's'} still need${outstanding === 1 ? 's' : ''} reviewing and submitting.`,
+          url:   `/trips/${tripId}?tab=expenses`,
+          tag:   `expenses-${tripId}`,
+        },
+      }, invalid);
+      await dropInvalid(recipient.userId, invalid);
+      if (ok) expenseNudgesSent++;
+    } catch (err) {
+      console.error(`[trip-status] Expense nudge for trip ${trip._id} failed:`, err);
     }
   }
 

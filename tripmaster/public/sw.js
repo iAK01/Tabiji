@@ -508,6 +508,8 @@ async function clearUserCaches() {
 // queued action type instead of just one.
 
 // ── PUSH ─────────────────────────────────────────
+// Payload: { title, body, url, tag?, requireInteraction?, actions?, badgeCount? }
+// — built by src/lib/push/send.ts. Action buttons only show on Android/desktop.
 self.addEventListener('push', (event) => {
   if (!event.data) return;
 
@@ -518,36 +520,65 @@ self.addEventListener('push', (event) => {
     data = { title: 'Tabiji', body: event.data.text(), url: '/dashboard' };
   }
 
+  const actions = Array.isArray(data.actions) ? data.actions : [];
   const options = {
     body:    data.body    ?? '',
     icon:    data.icon    ?? '/icons/icon-192.png',
     badge:   data.badge   ?? '/icons/badge-72.png',
     tag:     data.tag     ?? 'tabiji-default',
-    data:    { url: data.url ?? '/dashboard' },
+    // A notification replacing an earlier one with the same tag still alerts.
+    renotify: !!data.tag,
+    data: {
+      url:     data.url ?? '/dashboard',
+      actions: Object.fromEntries(actions.map((a) => [a.action, { url: a.url, complete: a.complete }])),
+    },
     requireInteraction: data.requireInteraction ?? false,
-    actions: data.actions ?? [],
+    actions: actions.map((a) => ({ action: a.action, title: a.title })),
   };
 
-  event.waitUntil(
-    self.registration.showNotification(data.title ?? 'Tabiji', options)
-  );
+  const badge = typeof data.badgeCount === 'number' && self.navigator.setAppBadge
+    ? self.navigator.setAppBadge(data.badgeCount).catch(() => {})
+    : Promise.resolve();
+
+  event.waitUntil(Promise.all([
+    self.registration.showNotification(data.title ?? 'Tabiji', options),
+    badge,
+  ]));
 });
 
 // ── NOTIFICATION CLICK ───────────────────────────
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
 
-  const url = new URL(event.notification.data?.url ?? '/dashboard', self.location.origin);
+  const data   = event.notification.data || {};
+  const action = event.action && data.actions ? data.actions[event.action] : null;
 
   event.waitUntil((async () => {
-    // Maps directions, venue websites, documents: open them in their own app or
-    // browser instead of navigating the app's window away.
+    // "Done" on a to-do: tick it off without opening anything. Offline or
+    // failed → open the to-do instead, so it isn't silently lost.
+    if (action && action.complete) {
+      const done = await fetch(action.complete, {
+        method:      'PATCH',
+        headers:     { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body:        JSON.stringify({ completed: true }),
+      }).then((res) => res.ok, () => false);
+      if (done) return;
+    }
+
+    const url = new URL((action && action.url) || data.url || '/dashboard', self.location.origin);
+
+    // Maps directions, venue websites, airline check-in: open them in their own
+    // app or browser instead of navigating the app's window away.
     if (url.origin !== self.location.origin) return clients.openWindow(url.href);
 
+    // App already open: it switches to the right place itself (instant, and
+    // works offline). A page that doesn't answer gets a plain navigation.
     // navigate() only works on windows this worker controls, so ask for those.
     for (const client of await clients.matchAll({ type: 'window' })) {
       try {
         await client.focus();
+        if (await askToOpen(client, url.pathname + url.search)) return;
         await client.navigate(url.href);
         return;
       } catch { /* try the next window, or open a new one */ }
@@ -555,6 +586,16 @@ self.addEventListener('notificationclick', (event) => {
     return clients.openWindow(url.href);
   })());
 });
+
+// Asks an open page to show `url` (src/lib/push/client.ts listenForNotificationOpens).
+function askToOpen(client, url) {
+  return new Promise((resolve) => {
+    const channel = new MessageChannel();
+    const timer   = setTimeout(() => resolve(false), 1000);
+    channel.port1.onmessage = (e) => { clearTimeout(timer); resolve(!!(e.data && e.data.opened)); };
+    client.postMessage({ type: 'OPEN_URL', url }, [channel.port2]);
+  });
+}
 
 // ── SUBSCRIPTION CHANGE ──────────────────────────
 // The push service replaced or expired this device's subscription. Re-subscribe

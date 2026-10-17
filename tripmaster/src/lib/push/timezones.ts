@@ -24,7 +24,7 @@ export function countryTz(code: string | null | undefined): string | null {
   return COUNTRY_META[code]?.timezone ?? EXTRA_COUNTRY_TZ[code] ?? null;
 }
 
-function airportCountryCode(iata: string | null | undefined): string | null {
+export function airportCountryCode(iata: string | null | undefined): string | null {
   const country = airportByIata(iata)?.country.toLowerCase();
   if (!country) return null;
   return codeByName.get(country) ?? NAME_ALIASES[country] ?? null;
@@ -48,9 +48,32 @@ export function ymd(d: string | Date): string {
   return typeof d === 'string' ? d.slice(0, 10) : d.toISOString().slice(0, 10);
 }
 
+/**
+ * A stored time ("2026-07-22T18:00", or with the Z/offset JSON adds) read as
+ * wall-clock time in `zone` — the suffix is serialisation, not intent.
+ */
+export function wallClock(value: string | Date | null | undefined, zone: string): DateTime | null {
+  if (!value) return null;
+  const str   = typeof value === 'string' ? value : value.toISOString();
+  const naive = str.replace(/Z$/, '').replace(/[+-]\d{2}:?\d{2}$/, '');
+  const dt    = DateTime.fromISO(naive, { zone });
+  return dt.isValid ? dt : null;
+}
+
+/** A date (YYYY-MM-DD…) plus an "HH:MM" time, in `zone`. */
+export function atTime(date: string | Date | null | undefined, time: string | null | undefined, zone: string): DateTime | null {
+  if (!date || !time) return null;
+  const dt = DateTime.fromISO(`${ymd(date)}T${time.slice(0, 5)}:00`, { zone });
+  return dt.isValid ? dt : null;
+}
+
+type CityPlace = NonNullable<Place> & { city?: string | null };
+
 type ZonedTrip = {
-  destination?: Place;
-  additionalDestinations?: Array<NonNullable<Place> & { arrivalDate?: string | Date | null; departureDate?: string | Date | null }>;
+  startDate?:   string | Date | null;
+  origin?:      CityPlace | null;
+  destination?: CityPlace | null;
+  additionalDestinations?: Array<CityPlace & { arrivalDate?: string | Date | null; departureDate?: string | Date | null }>;
 };
 
 /**
@@ -78,22 +101,54 @@ export function tripZones(trip: ZonedTrip): (date?: string | Date | null) => str
   };
 }
 
+/** "DUB — Dublin" → "Dublin"; "Berlin Hbf, Berlin" → "Berlin Hbf". */
+export function placeCity(location: string | null | undefined): string {
+  if (!location) return '';
+  const afterCode = location.split(/\s+[—-]\s+/).pop() ?? location;
+  return afterCode.split(',')[0].trim();
+}
+
+// Half a time zone of longitude: closer than this to the trip's own airport, the
+// trip's (possibly city-precise) zone beats a country-level guess.
+const SAME_ZONE_LNG = 7.5;
+
 /**
- * Zone for a departure. Leaving from an airport in a country the trip isn't
- * based in (the flight out from home, a connection) → that country's zone.
- * Otherwise the trip's own zone for the date, which can be more precise than a
- * country-level guess.
+ * Zone for a departure or arrival point, most specific first: a city the trip
+ * stays in → that place's zone; the trip's starting point → home; an airport
+ * elsewhere (home airport, a connection) → its country's zone, unless it sits
+ * near the trip's own airport in the same country (one of several US zones);
+ * an unrecognised place before the trip starts → home; otherwise the trip's zone
+ * for that date.
  */
-export function departureZone(
+export function placeZone(
   trip: ZonedTrip,
   zoneFor: (date?: string | Date | null) => string,
   location: string | null | undefined,
   date: string | Date,
+  homeZone?: string,
 ): string {
-  const country = airportCountryCode(airportCodeIn(location));
-  const based = new Set(
-    [trip.destination?.countryCode, ...(trip.additionalDestinations ?? []).map(d => d.countryCode)].filter(Boolean),
-  );
-  if (country && !based.has(country)) return countryTz(country) ?? zoneFor(date);
+  const airport = airportByIata(airportCodeIn(location));
+  const city    = (airport?.city ?? placeCity(location)).toLowerCase();
+  const sameCity = (c?: string | null) => {
+    const other = c?.toLowerCase().trim();
+    return !!other && city.length >= 3 && (other.includes(city) || city.includes(other));
+  };
+
+  for (const d of [trip.destination, ...(trip.additionalDestinations ?? [])]) {
+    if (d && sameCity(d.city)) return placeTz(d) ?? zoneFor(date);
+  }
+  if (trip.origin && sameCity(trip.origin.city)) return placeTz(trip.origin) ?? homeZone ?? zoneFor(date);
+
+  if (airport) {
+    const country = airportCountryCode(airport.iata);
+    const based   = new Set([trip.destination?.countryCode, ...(trip.additionalDestinations ?? []).map(d => d.countryCode)].filter(Boolean));
+    if (country && based.has(country)) {
+      const ref = airportByIata(trip.destination?.iataCode);
+      if (!ref || Math.abs(ref.lng - airport.lng) < SAME_ZONE_LNG) return zoneFor(date);
+    }
+    return countryTz(country) ?? zoneFor(date);
+  }
+
+  if (homeZone && trip.startDate && ymd(date) < ymd(trip.startDate)) return homeZone;
   return zoneFor(date);
 }

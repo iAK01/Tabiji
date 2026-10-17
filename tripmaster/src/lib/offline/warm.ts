@@ -12,11 +12,13 @@ const APP_DATA  = [
   '/api/user/profile',
   '/api/user/my-apps',
   '/api/user/navigation-preferences',
+  '/api/user/notification-preferences',
+  '/api/user/notifications',
   '/api/packing/catalogue',
 ];
 const TRIP_DATA = [
   '', '/itinerary', '/logistics', '/files', '/packing', '/expenses',
-  '/transport', '/weather', '/intelligence', '/culture',
+  '/transport', '/weather', '/intelligence', '/culture', '/reminders',
 ];
 
 const DAY_MS       = 86_400_000;

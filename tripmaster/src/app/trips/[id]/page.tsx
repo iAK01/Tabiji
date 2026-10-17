@@ -58,6 +58,8 @@ import OfflineBoundary     from '@/components/ui/OfflineBoundary';
 import { COUNTRY_LIST }    from '@/lib/data/countries';
 import AirportSearch       from '@/components/ui/AirportSearch';
 import { isOnTrip, displayStatus } from '@/lib/trips/onTrip';
+import NotificationBell    from '@/components/notifications/NotificationBell';
+import TravelSheet         from '@/components/notifications/TravelSheet';
 
 const MapTab = dynamic(() => import('@/components/map/MapTab'), { ssr: false });
 
@@ -291,8 +293,8 @@ function TripPageInner() {
     const params = new URLSearchParams(Array.from(searchParams.entries()));
     if (next === 0) params.delete('tab');
     else params.set('tab', TAB_SLUGS[next] ?? 'overview');
-    // Sub-view params belong to the tab that set them
-    for (const k of ['day', 'section', 'view']) params.delete(k);
+    // Sub-view and deep-link params belong to the tab (or sheet) that set them
+    for (const k of ['day', 'section', 'view', 'stop', 'file', 'todo', 'expense', 'proof', 'sheet', 'i']) params.delete(k);
     const qs = params.toString();
     window.history.pushState(null, '', qs ? `?${qs}` : window.location.pathname);
   }, [searchParams]);
@@ -569,6 +571,7 @@ function TripPageInner() {
         </Typography>
       </Box>
 
+      <NotificationBell tripId={trip._id} tripName={trip.name} />
       <IconButton color="inherit" onClick={openEdit} size="small" sx={{ ml: 0.5 }}>
         <EditIcon fontSize="small" />
       </IconButton>
@@ -917,6 +920,9 @@ function TripPageInner() {
             </SpeedDial>
           );
         })()}
+
+        {/* ── Booking / arrival sheet — opened by notification links (?sheet=) ── */}
+        <TravelSheet trip={trip} />
 
         {/* ── Edit dialog ── */}
         <Dialog open={editOpen} onClose={() => setEditOpen(false)} maxWidth="sm" fullWidth fullScreen={isMobile}

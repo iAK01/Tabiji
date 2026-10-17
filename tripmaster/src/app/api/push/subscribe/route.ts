@@ -23,22 +23,23 @@ export async function POST(req: Request) {
 
   await connectDB();
 
-  // Remove any existing entry with this endpoint first (handles key rotation),
-  // then push the fresh subscription
+  // Drop any existing entry for this endpoint (and the one it replaces), then
+  // append the fresh subscription — in one atomic update, so two of these
+  // arriving together (app open + profile page) can't store the device twice.
   const stale = [subscription.endpoint, oldEndpoint].filter(e => typeof e === 'string');
-  await User.findOneAndUpdate(
-    { email: session.user.email },
-    {
-      $pull: { pushSubscriptions: { endpoint: { $in: stale } } },
-    }
-  );
-
   const user = await User.findOneAndUpdate(
     { email: session.user.email },
-    {
-      $push: { pushSubscriptions: subscription },
-    },
-    { new: true, select: 'pushSubscriptions' }
+    [{
+      $set: {
+        pushSubscriptions: {
+          $concatArrays: [
+            { $filter: { input: { $ifNull: ['$pushSubscriptions', []] }, cond: { $not: [{ $in: ['$$this.endpoint', stale] }] } } },
+            [{ $literal: subscription }],
+          ],
+        },
+      },
+    }],
+    { new: true, select: 'pushSubscriptions', updatePipeline: true }
   );
 
   return NextResponse.json({ success: true, devices: user?.pushSubscriptions?.length ?? 0 });

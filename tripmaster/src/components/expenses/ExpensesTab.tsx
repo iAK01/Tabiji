@@ -5,7 +5,7 @@ import {
   Box, Typography, Paper, Button, Chip, IconButton,
   Dialog, DialogTitle, DialogContent, DialogActions,
   TextField, Select, MenuItem, FormControl, InputLabel,
-  CircularProgress, Alert, Snackbar, useMediaQuery, useTheme,
+  CircularProgress, Alert, Snackbar, useMediaQuery, useTheme, alpha,
 } from '@mui/material';
 import AddIcon        from '@mui/icons-material/Add';
 import ReceiptIcon    from '@mui/icons-material/Receipt';
@@ -22,6 +22,7 @@ import { EXPENSE_CATEGORIES as CATEGORIES, EXPENSE_PAYERS as PAYERS, EXPENSE_STA
 import { getProofSlots, FUEL_RECEIPT_SLOT, type ProofSlot } from '@/lib/logistics/expenseProofs';
 import { compressImageFile } from '@/lib/utils/imageCompression';
 import { useUrlParam } from '@/lib/hooks/useUrlParam';
+import { useSearchParams } from 'next/navigation';
 
 const EXPENSE_VIEWS = ['expenses', 'documents'] as const;
 
@@ -94,6 +95,11 @@ export default function ExpensesTab({ tripId, trip, fabTrigger }: ExpensesTabPro
   const [dragActive, setDragActive] = useState(false);
   const dragCounter = useRef(0); // dragenter/dragleave fire per child element — a counter avoids flicker
 
+  // Notification links: ?expense=<id>&proof=<slot key> opens that expense with
+  // the missing proof picked out.
+  const searchParams = useSearchParams();
+  const [focusProof, setFocusProof] = useState<string | null>(null);
+
   useEffect(() => {
     (async () => {
       try {
@@ -147,6 +153,27 @@ export default function ExpensesTab({ tripId, trip, fabTrigger }: ExpensesTabPro
     setDialogOpen(true);
   };
 
+  useEffect(() => {
+    if (loading) return;
+    const expenseId = searchParams.get('expense');
+    if (!expenseId) return;
+    const proof  = searchParams.get('proof');
+    const params = new URLSearchParams(window.location.search);
+    params.delete('expense');
+    params.delete('proof');
+    const qs = params.toString();
+    window.history.replaceState(null, '', qs ? `?${qs}` : window.location.pathname);
+
+    const e = expenses.find(x => x._id === expenseId);
+    if (!e) return;
+    openEdit(e);
+    if (!proof) return;
+    setFocusProof(proof);
+    setTimeout(() => document.querySelector(`[data-proof-slot="${proof}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 350);
+    setTimeout(() => setFocusProof(cur => (cur === proof ? null : cur)), 6000);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, expenses, searchParams]);
+
   const addProofFiles = (key: string, files: FileList | null) => {
     if (!files || files.length === 0) return;
     setProofUploads(prev => ({ ...prev, [key]: [...(prev[key] ?? []), ...Array.from(files)] }));
@@ -166,7 +193,11 @@ export default function ExpensesTab({ tripId, trip, fabTrigger }: ExpensesTabPro
     const pending  = proofUploads[slot.key] ?? [];
     const has      = existing.length > 0 || pending.length > 0;
     return (
-      <Box key={slot.key} sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+      <Box key={slot.key} data-proof-slot={slot.key} sx={{
+        display: 'flex', flexDirection: 'column', gap: 0.5,
+        transition: 'background-color 0.4s, box-shadow 0.4s', borderRadius: 1,
+        ...(focusProof === slot.key && { backgroundColor: alpha('#C4714A', 0.1), boxShadow: `0 0 0 2px ${alpha('#C4714A', 0.6)}`, p: 0.75 }),
+      }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
           {has
             ? <CheckCircleIcon sx={{ fontSize: 16, color: 'success.main', flexShrink: 0 }} />

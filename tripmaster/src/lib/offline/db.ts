@@ -213,6 +213,20 @@ async function dispatchQueuedAction(action: any): Promise<boolean> {
         });
         break;
 
+      case 'SET_NOTIFICATION_PREFS':
+        res = await fetch('/api/user/notification-preferences', {
+          method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(action.payload),
+        });
+        break;
+
+      case 'MARK_NOTIFICATIONS_READ':
+        res = await fetch('/api/user/notifications', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'read' }),
+        });
+        break;
+
       default:
         // Unrecognised action type — drop it rather than block the queue forever.
         return true;

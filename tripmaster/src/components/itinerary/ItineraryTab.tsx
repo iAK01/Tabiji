@@ -86,6 +86,12 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
 
   const nowLineRef = useRef<HTMLDivElement>(null);
 
+  // When each stop's notification goes out — same planner the sender uses.
+  const [reminders,     setReminders]     = useState<Array<{ local: string; sent: boolean; ref?: { stopId?: string; collection?: string; index?: number; phase?: string } }>>([]);
+  // A notification link (?stop=) landing on a stop: ring it for a moment.
+  const [highlightStop, setHighlightStop] = useState<string | null>(null);
+  const deepLinkedRef = useRef(false);
+
   // ── Pick the initial day: ?day=<dayNumber> if present, else today ────────────
   // Only on the initial load — must not re-fire every time `days` changes (e.g. after
   // adding a stop), or the active day tab snaps back mid-edit.
@@ -124,9 +130,50 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
     if (idx !== -1) setActiveDayIdx(prev => (prev === idx ? prev : idx));
   }, [searchParams, days]);
 
+  // ── Notification link to a stop: open its day, scroll to it, ring it ─────────
+  useEffect(() => {
+    const stopId = searchParams.get('stop');
+    if (!stopId || days.length === 0) return;
+    const idx = days.findIndex(d => d.stops.some(s => s._id === stopId));
+    // Drop the param either way so it doesn't fire again; keep tab and day.
+    const params = new URLSearchParams(window.location.search);
+    params.delete('stop');
+    if (idx !== -1 && days[idx].dayNumber != null) params.set('day', String(days[idx].dayNumber));
+    window.history.replaceState(null, '', `${pathname}?${params.toString()}`);
+    if (idx === -1) return;
+    deepLinkedRef.current = true;
+    setActiveDayIdx(idx);
+    setHighlightStop(stopId);
+    setTimeout(() => {
+      document.querySelector(`[data-stop-id="${stopId}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 250);
+    setTimeout(() => setHighlightStop(cur => (cur === stopId ? null : cur)), 4000);
+  }, [days, searchParams, pathname]);
+
+  // ── Reminder times for the bells — refreshed shortly after any change ────────
+  useEffect(() => {
+    if (days.length === 0) return;
+    const t = setTimeout(() => {
+      fetch(`/api/trips/${tripId}/reminders`)
+        .then(r => (r.ok ? r.json() : null))
+        .then(data => { if (data) setReminders(data.reminders ?? []); })
+        .catch(() => {});
+    }, 1500);
+    return () => clearTimeout(t);
+  }, [days, tripId]);
+
+  const reminderFor = (stop: Stop) => {
+    const lr = (stop as any).logisticsRef as { collection: string; index: number } | undefined;
+    return reminders.find(r =>
+      (!!r.ref?.stopId && r.ref.stopId === stop._id) ||
+      (stop.source === 'logistics' && !!lr && r.ref?.collection === lr.collection && r.ref?.index === lr.index &&
+        (!r.ref.phase || r.ref.phase === (stop as any).metadata?.phase)),
+    ) ?? null;
+  };
+
   // ── Scroll to current time when viewing today ─────────────────────────────────
   useEffect(() => {
-    if (!nowLineRef.current) return;
+    if (!nowLineRef.current || deepLinkedRef.current) return;
     const activeDay = days[activeDayIdx];
     if (!activeDay) return;
     const todayStr = new Date().toDateString();
@@ -953,6 +1000,8 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
                             ? filesByStop.get(`${(stop as any).logisticsRef.collection}:${String((stop as any).logisticsRef.index)}`) ?? []
                             : []
                         }
+                        reminder={reminderFor(stop)}
+                        highlighted={!!stop._id && highlightStop === stop._id}
                       />
                       <TravelConnector stop={stop} pxPerMin={pxPerMin} startHour={effectiveStartHour} />
                     </Box>

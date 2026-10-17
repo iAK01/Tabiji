@@ -6,7 +6,7 @@ import { SessionProvider } from 'next-auth/react';
 import { useEffect } from 'react';
 import theme from '@/theme';
 import { registerServiceWorker } from '@/lib/offline/sw';
-import { syncPushOnOpen } from '@/lib/push/client';
+import { listenForNotificationOpens, syncPushOnOpen } from '@/lib/push/client';
 import OfflineIndicator from '@/components/ui/OfflineIndicator';
 import 'mapbox-gl/dist/mapbox-gl.css';
 
@@ -19,6 +19,7 @@ export default function RootLayout({
   useEffect(() => {
     registerServiceWorker();
     syncPushOnOpen();
+    return listenForNotificationOpens();
   }, []);
 
   return (
