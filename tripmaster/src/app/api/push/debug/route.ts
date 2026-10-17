@@ -21,7 +21,7 @@ export async function GET() {
 
   const [trips, recentLogs] = await Promise.all([
     Trip.find({ userId: user._id, deleted: false })
-      .select('title status startDate endDate destination.timezone')
+      .select('name status startDate endDate destination.timezone')
       .sort({ startDate: -1 })
       .limit(10)
       .lean(),
@@ -42,7 +42,7 @@ export async function GET() {
     subscriptionEndpoints,
     trips: trips.map((t: any) => ({
       id: t._id,
-      title: t.title,
+      name: t.name,
       status: t.status,
       startDate: t.startDate,
       endDate: t.endDate,

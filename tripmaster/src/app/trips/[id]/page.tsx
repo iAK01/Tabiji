@@ -291,7 +291,8 @@ function TripPageInner() {
     const params = new URLSearchParams(Array.from(searchParams.entries()));
     if (next === 0) params.delete('tab');
     else params.set('tab', TAB_SLUGS[next] ?? 'overview');
-    params.delete('day');   // day belongs to the itinerary tab only
+    // Sub-view params belong to the tab that set them
+    for (const k of ['day', 'section', 'view']) params.delete(k);
     const qs = params.toString();
     window.history.pushState(null, '', qs ? `?${qs}` : window.location.pathname);
   }, [searchParams]);

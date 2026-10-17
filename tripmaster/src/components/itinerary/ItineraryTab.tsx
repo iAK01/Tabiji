@@ -100,7 +100,8 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
     }
     const todayStr = new Date().toDateString();
     const idx = days.findIndex(d => new Date(d.date).toDateString() === todayStr);
-    if (idx !== -1) setActiveDayIdx(idx);
+    // Write it to the URL too, so the address bar always names the day on screen
+    selectDay(idx !== -1 ? idx : 0);
   }, [days, searchParams]);
 
   // ── Keep the active day in the URL so refresh / back / deep-links land right ──

@@ -21,6 +21,9 @@ import { sendOrQueue, pendingId } from '@/lib/offline/writes';
 import { EXPENSE_CATEGORIES as CATEGORIES, EXPENSE_PAYERS as PAYERS, EXPENSE_STATUSES as STATUSES, getPayerLabel, payerNameMissing, type TripPayerNames } from '@/lib/logistics/expenseConstants';
 import { getProofSlots, FUEL_RECEIPT_SLOT, type ProofSlot } from '@/lib/logistics/expenseProofs';
 import { compressImageFile } from '@/lib/utils/imageCompression';
+import { useUrlParam } from '@/lib/hooks/useUrlParam';
+
+const EXPENSE_VIEWS = ['expenses', 'documents'] as const;
 
 const D = {
   navy: '#1D2642', terra: '#C4714A', green: '#6B7C5C',
@@ -87,7 +90,7 @@ export default function ExpensesTab({ tripId, trip, fabTrigger }: ExpensesTabPro
 
   const [zipping, setZipping] = useState(false);
   const [snackbarMsg, setSnackbarMsg] = useState('');
-  const [view, setView] = useState<'expenses' | 'documents'>('expenses');
+  const [view, setView] = useUrlParam('view', EXPENSE_VIEWS, 'expenses');
   const [dragActive, setDragActive] = useState(false);
   const dragCounter = useRef(0); // dragenter/dragleave fire per child element — a counter avoids flicker
 

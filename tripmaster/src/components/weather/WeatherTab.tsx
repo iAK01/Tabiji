@@ -25,6 +25,7 @@ import ExpandLessIcon       from '@mui/icons-material/ExpandLess';
 import ArrowUpwardIcon      from '@mui/icons-material/ArrowUpward';
 import ArrowDownwardIcon    from '@mui/icons-material/ArrowDownward';
 import HorizontalRuleIcon   from '@mui/icons-material/HorizontalRule';
+import { useUrlParam } from '@/lib/hooks/useUrlParam';
 
 // ─── Design tokens ─────────────────────────────────────────────────────────────
 
@@ -103,6 +104,7 @@ interface Props {
 }
 
 type DisplayMode = 'planning' | 'forecast' | 'now';
+const WEATHER_VIEWS: readonly DisplayMode[] = ['planning', 'forecast', 'now'];
 
 // ─── Weather helpers ───────────────────────────────────────────────────────────
 
@@ -963,7 +965,7 @@ export default function WeatherTab({ tripId, destinationCity, startDate, endDate
   const [refreshing,  setRefreshing]  = useState(false);
   const [error,       setError]       = useState<string | null>(null);
   const [cachedAge,   setCachedAge]   = useState<string | null>(null);
-  const [displayMode, setDisplayMode] = useState<DisplayMode | null>(null);
+  const [displayMode, setDisplayMode] = useUrlParam('view', WEATHER_VIEWS, null);
 
   // ── Derive trip timing ──────────────────────────────────────────────────────
   const today = new Date(); today.setHours(0, 0, 0, 0);

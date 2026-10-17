@@ -40,6 +40,9 @@ import AccomCard          from './AccomCard';
 import VenueCard          from './VenueCard';
 import TripDateTimePicker from '@/components/ui/TripDateTimePicker';
 import GettingThereStrip  from './GettingThereStrip';
+import { useUrlParam } from '@/lib/hooks/useUrlParam';
+
+const LOGISTICS_SECTIONS = ['transport', 'accommodation', 'venues', 'documents'] as const;
 
 // ── Shared helpers ─────────────────────────────────────────────────────────────
 import {
@@ -57,7 +60,10 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
   const theme  = useTheme();
   const mobile = useMediaQuery(theme.breakpoints.down('sm'));
 
-  const [section,   setSection]   = useState(0);
+  // Section lives in the URL (?section=accommodation) so links and refresh land on it
+  const [sectionSlug, setSectionSlug] = useUrlParam('section', LOGISTICS_SECTIONS, 'transport');
+  const section    = LOGISTICS_SECTIONS.indexOf(sectionSlug);
+  const setSection = (i: number) => setSectionSlug(LOGISTICS_SECTIONS[i] ?? 'transport');
   const [logistics, setLogistics] = useState<any>(null);
   const [saving,    setSaving]    = useState(false);
 

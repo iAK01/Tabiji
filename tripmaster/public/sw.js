@@ -537,20 +537,40 @@ self.addEventListener('push', (event) => {
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
 
-  const url = event.notification.data?.url ?? '/dashboard';
+  const url = new URL(event.notification.data?.url ?? '/dashboard', self.location.origin);
 
-  event.waitUntil(
-    clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
-      for (const client of clientList) {
-        if ('focus' in client) {
-          client.focus();
-          client.navigate(url);
-          return;
-        }
-      }
-      if (clients.openWindow) {
-        return clients.openWindow(url);
-      }
-    })
-  );
+  event.waitUntil((async () => {
+    // Maps directions, venue websites, documents: open them in their own app or
+    // browser instead of navigating the app's window away.
+    if (url.origin !== self.location.origin) return clients.openWindow(url.href);
+
+    // navigate() only works on windows this worker controls, so ask for those.
+    for (const client of await clients.matchAll({ type: 'window' })) {
+      try {
+        await client.focus();
+        await client.navigate(url.href);
+        return;
+      } catch { /* try the next window, or open a new one */ }
+    }
+    return clients.openWindow(url.href);
+  })());
+});
+
+// ── SUBSCRIPTION CHANGE ──────────────────────────
+// The push service replaced or expired this device's subscription. Re-subscribe
+// with the same key and tell the server so reminders keep arriving without the
+// app being opened first (opening it re-syncs too — src/lib/push/client.ts).
+self.addEventListener('pushsubscriptionchange', (event) => {
+  event.waitUntil((async () => {
+    const old = event.oldSubscription;
+    const sub = event.newSubscription
+      || (old && old.options && await self.registration.pushManager.subscribe(old.options));
+    if (!sub) return;
+    await fetch('/api/push/subscribe', {
+      method:      'POST',
+      headers:     { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body:        JSON.stringify({ subscription: sub.toJSON(), oldEndpoint: old ? old.endpoint : undefined }),
+    });
+  })().catch(() => {}));
 });

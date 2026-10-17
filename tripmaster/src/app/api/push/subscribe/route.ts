@@ -4,16 +4,19 @@ import connectDB from '@/lib/mongodb/connection';
 import User from '@/lib/mongodb/models/User';
 
 // ─── POST /api/push/subscribe ─────────────────────────────────────────────────
-// Body: { subscription: PushSubscription }
+// Body: { subscription: PushSubscription, oldEndpoint?: string }
 // Saves the subscription to the user's pushSubscriptions array.
-// Deduplicates by endpoint so re-subscribing the same device is idempotent.
+// Deduplicates by endpoint so re-subscribing the same device is idempotent; the
+// app re-sends its subscription on every open, so this is also how a dropped
+// one gets restored. oldEndpoint is the subscription this one replaces.
+// Returns how many devices the user now has registered.
 export async function POST(req: Request) {
   const session = await getServerSession();
   if (!session?.user?.email) {
     return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
   }
 
-  const { subscription } = await req.json();
+  const { subscription, oldEndpoint } = await req.json();
   if (!subscription?.endpoint) {
     return NextResponse.json({ error: 'Invalid subscription' }, { status: 400 });
   }
@@ -22,21 +25,23 @@ export async function POST(req: Request) {
 
   // Remove any existing entry with this endpoint first (handles key rotation),
   // then push the fresh subscription
+  const stale = [subscription.endpoint, oldEndpoint].filter(e => typeof e === 'string');
   await User.findOneAndUpdate(
     { email: session.user.email },
     {
-      $pull: { pushSubscriptions: { endpoint: subscription.endpoint } },
+      $pull: { pushSubscriptions: { endpoint: { $in: stale } } },
     }
   );
 
-  await User.findOneAndUpdate(
+  const user = await User.findOneAndUpdate(
     { email: session.user.email },
     {
       $push: { pushSubscriptions: subscription },
-    }
+    },
+    { new: true, select: 'pushSubscriptions' }
   );
 
-  return NextResponse.json({ success: true });
+  return NextResponse.json({ success: true, devices: user?.pushSubscriptions?.length ?? 0 });
 }
 
 // ─── DELETE /api/push/subscribe ───────────────────────────────────────────────

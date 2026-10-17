@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Box, Typography, Button, Paper, Chip, CircularProgress, alpha,
 } from '@mui/material';
@@ -9,116 +9,96 @@ import NotificationsOffIcon     from '@mui/icons-material/NotificationsOff';
 import NotificationsActiveIcon  from '@mui/icons-material/NotificationsActive';
 import SendIcon                 from '@mui/icons-material/Send';
 import RefreshIcon              from '@mui/icons-material/Refresh';
+import {
+  pushSupported, pushRegistration, syncSubscription, unsubscribeDevice,
+} from '@/lib/push/client';
 
-type PermissionState = 'unsupported' | 'prompt' | 'granted' | 'denied';
-
-function urlBase64ToUint8Array(base64String: string): ArrayBuffer {
-  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
-  const base64  = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
-  const raw     = window.atob(base64);
-  const bytes   = new Uint8Array(raw.length);
-  for (let i = 0; i < raw.length; i++) {
-    bytes[i] = raw.charCodeAt(i);
-  }
-return Uint8Array.from([...raw].map(c => c.charCodeAt(0))).buffer as ArrayBuffer;
-}
+type Status = 'checking' | 'unsupported' | 'blocked' | 'off' | 'on';
+type Busy   = null | 'enable' | 'test' | 'resubscribe' | 'disable';
 
 export default function PushNotificationSetup() {
-  const [permission,    setPermission]    = useState<PermissionState>('prompt');
-  const [subscribed,    setSubscribed]    = useState(false);
-  const [enabling,      setEnabling]      = useState(false);
-  const [sending,       setSending]       = useState(false);
-  const [resubscribing, setResubscribing] = useState(false);
-  const [testResult,    setTestResult]    = useState<string | null>(null);
-  const [error,         setError]         = useState<string | null>(null);
+  const [status,  setStatus]  = useState<Status>('checking');
+  const [devices, setDevices] = useState<number | null>(null);
+  const [busy,    setBusy]    = useState<Busy>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const [error,   setError]   = useState<string | null>(null);
+  const regRef = useRef<ServiceWorkerRegistration | null>(null);
 
   // ── Check current state on mount ─────────────────────────────────────────
+  // Asks the browser, then re-sends any subscription to the server — so "Active"
+  // means the server has this device too, and one it had lost is restored.
   useEffect(() => {
-    if (!('Notification' in window) || !('serviceWorker' in navigator) || !('PushManager' in window)) {
-      setPermission('unsupported');
-      return;
-    }
+    let cancelled = false;
+    (async () => {
+      if (!pushSupported()) { setStatus('unsupported'); return; }
+      if (Notification.permission === 'denied') { setStatus('blocked'); return; }
 
-    setPermission(Notification.permission as PermissionState);
-
-    // Check if already subscribed
-    navigator.serviceWorker.ready.then(reg => {
-      reg.pushManager.getSubscription().then(sub => {
-        setSubscribed(!!sub);
-      });
-    });
-  }, []);
-
-  // ── Enable notifications ──────────────────────────────────────────────────
-  const handleEnable = async () => {
-    setEnabling(true);
-    setError(null);
-
-    try {
-      // Request permission
-      const result = await Notification.requestPermission();
-      setPermission(result as PermissionState);
-
-      if (result !== 'granted') {
-        setError('Permission denied — you\'ll need to enable notifications in your browser settings.');
-        setEnabling(false);
+      const reg = await pushRegistration();
+      if (cancelled) return;
+      regRef.current = reg;
+      if (!reg || Notification.permission !== 'granted' || !(await reg.pushManager.getSubscription())) {
+        if (!cancelled) setStatus('off');
         return;
       }
 
-      // Get service worker registration
-      const reg = await navigator.serviceWorker.ready;
+      try {
+        const n = await syncSubscription(reg);
+        if (cancelled) return;
+        setDevices(n);
+        setStatus(n === null ? 'off' : 'on');
+      } catch (err: any) {
+        if (cancelled) return;
+        setStatus('on');
+        setError(err?.message ?? 'Couldn\'t confirm with the server');
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
-      // Subscribe to push
-      const sub = await reg.pushManager.subscribe({
-        userVisibleOnly:      true,
-        applicationServerKey: urlBase64ToUint8Array(process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY!),
-      });
+  const start = (what: Busy) => { setBusy(what); setMessage(null); setError(null); };
 
-      // Save subscription to server
-      const res = await fetch('/api/push/subscribe', {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ subscription: sub.toJSON() }),
-      });
+  const registration = async () => {
+    const reg = regRef.current ?? await pushRegistration();
+    if (!reg) throw new Error('The app hasn\'t finished installing — reload and try again');
+    regRef.current = reg;
+    return reg;
+  };
 
-      if (!res.ok) throw new Error('Failed to save subscription');
+  // ── Enable notifications ──────────────────────────────────────────────────
+  const handleEnable = async () => {
+    start('enable');
+    try {
+      const result = await Notification.requestPermission();
+      if (result === 'denied') { setStatus('blocked'); return; }
+      if (result !== 'granted') { setError('Permission wasn\'t granted.'); return; }
 
-      setSubscribed(true);
+      setDevices(await syncSubscription(await registration(), { create: true }));
+      setStatus('on');
+      setMessage('This device is subscribed.');
     } catch (err: any) {
       setError(err?.message ?? 'Something went wrong');
     } finally {
-      setEnabling(false);
+      setBusy(null);
     }
   };
 
   // ── Disable notifications ─────────────────────────────────────────────────
   const handleDisable = async () => {
-    setError(null);
+    start('disable');
     try {
-      const reg = await navigator.serviceWorker.ready;
-      const sub = await reg.pushManager.getSubscription();
-      if (sub) {
-        const endpoint = sub.endpoint;
-        await sub.unsubscribe();
-        await fetch('/api/push/subscribe', {
-          method:  'DELETE',
-          headers: { 'Content-Type': 'application/json' },
-          body:    JSON.stringify({ endpoint }),
-        });
-      }
-      setSubscribed(false);
-      setPermission('prompt');
+      await unsubscribeDevice(await registration());
+      setStatus('off');
+      setDevices(null);
     } catch (err: any) {
       setError(err?.message ?? 'Something went wrong');
+    } finally {
+      setBusy(null);
     }
   };
 
   // ── Send test notification ────────────────────────────────────────────────
   const handleTest = async () => {
-    setSending(true);
-    setTestResult(null);
-    setError(null);
-
+    start('test');
     try {
       const res  = await fetch('/api/push/test', { method: 'POST' });
       const data = await res.json();
@@ -126,62 +106,36 @@ export default function PushNotificationSetup() {
       if (!res.ok) {
         setError(data.error ?? 'Failed to send');
       } else {
-        setTestResult(`Sent to ${data.sent} device${data.sent !== 1 ? 's' : ''}${data.failed ? ` · ${data.failed} failed` : ''}`);
+        setMessage(`Sent to ${data.sent} device${data.sent !== 1 ? 's' : ''}${data.failed ? ` · ${data.failed} failed` : ''}`);
       }
     } catch {
       setError('Something went wrong');
     } finally {
-      setSending(false);
+      setBusy(null);
     }
   };
 
   // ── Re-subscribe this device ─────────────────────────────────────────────
-  // Unsubscribes the current service-worker registration and creates a fresh
-  // subscription for this origin. Use this after moving to a new domain.
+  // Swaps this device's subscription for a brand-new one — for when the test
+  // doesn't arrive even though the device shows as subscribed.
   const handleResubscribe = async () => {
-    setResubscribing(true);
-    setTestResult(null);
-    setError(null);
-
+    start('resubscribe');
     try {
-      const reg = await navigator.serviceWorker.ready;
-
-      // Remove existing subscription from push manager + server
-      const existing = await reg.pushManager.getSubscription();
-      if (existing) {
-        await fetch('/api/push/subscribe', {
-          method:  'DELETE',
-          headers: { 'Content-Type': 'application/json' },
-          body:    JSON.stringify({ endpoint: existing.endpoint }),
-        });
-        await existing.unsubscribe();
-      }
-
-      // Create a fresh subscription for the current origin
-      const sub = await reg.pushManager.subscribe({
-        userVisibleOnly:      true,
-        applicationServerKey: urlBase64ToUint8Array(process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY!),
-      });
-
-      const res = await fetch('/api/push/subscribe', {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ subscription: sub.toJSON() }),
-      });
-
-      if (!res.ok) throw new Error('Failed to save subscription');
-
-      setSubscribed(true);
-      setTestResult('Re-subscribed — this device is now registered for notifications.');
+      setDevices(await syncSubscription(await registration(), { fresh: true }));
+      setStatus('on');
+      setMessage('Re-subscribed — this device is subscribed.');
     } catch (err: any) {
-      setError(err?.message ?? 'Something went wrong');
+      // The old subscription may already be gone — show what's actually true.
+      const still = await regRef.current?.pushManager.getSubscription().catch(() => null);
+      setStatus(still ? 'on' : 'off');
+      setError(`${err?.message ?? 'Couldn\'t re-subscribe'}${still ? '' : ' — tap Enable notifications'}`);
     } finally {
-      setResubscribing(false);
+      setBusy(null);
     }
   };
 
   // ── Unsupported ───────────────────────────────────────────────────────────
-  if (permission === 'unsupported') {
+  if (status === 'unsupported') {
     return (
       <Paper elevation={0} sx={{ p: 2.5, border: '1px solid', borderColor: 'divider', borderRadius: 2 }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
@@ -197,76 +151,83 @@ export default function PushNotificationSetup() {
     );
   }
 
+  const on = status === 'on';
+
   return (
-    <Paper elevation={0} sx={{ p: 2.5, border: '1px solid', borderColor: subscribed ? '#55702C' : 'divider', borderRadius: 2, backgroundColor: subscribed ? alpha('#55702C', 0.03) : 'background.paper' }}>
+    <Paper elevation={0} sx={{ p: 2.5, border: '1px solid', borderColor: on ? '#55702C' : 'divider', borderRadius: 2, backgroundColor: on ? alpha('#55702C', 0.03) : 'background.paper' }}>
 
       {/* ── Header ── */}
       <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1.5, mb: 2 }}>
-        <Box sx={{ width: 40, height: 40, borderRadius: 2, backgroundColor: alpha(subscribed ? '#55702C' : '#6b7280', 0.1),
+        <Box sx={{ width: 40, height: 40, borderRadius: 2, backgroundColor: alpha(on ? '#55702C' : '#6b7280', 0.1),
           display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-          {subscribed
+          {on
             ? <NotificationsActiveIcon sx={{ color: '#55702C' }} />
             : <NotificationsIcon sx={{ color: 'text.disabled' }} />}
         </Box>
         <Box sx={{ flexGrow: 1 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
             <Typography variant="body1" fontWeight={800}>Push Notifications</Typography>
-            {subscribed && (
+            {on && (
               <Chip label="Active" size="small"
                 sx={{ height: 20, fontSize: '0.68rem', fontWeight: 700, backgroundColor: alpha('#55702C', 0.12), color: '#55702C' }} />
             )}
-            {permission === 'denied' && (
+            {status === 'blocked' && (
               <Chip label="Blocked" size="small"
                 sx={{ height: 20, fontSize: '0.68rem', fontWeight: 700, backgroundColor: alpha('#dc2626', 0.1), color: '#dc2626' }} />
             )}
           </Box>
-          <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.78rem' }}>
-            {subscribed
-              ? 'You\'ll be notified before flights, check-ins, and key itinerary events.'
-              : 'Get notified before flights, check-ins, and key itinerary events.'}
+          <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.78rem', display: 'block' }}>
+            {status === 'checking'
+              ? 'Checking this device…'
+              : on
+                ? `This device is subscribed${devices ? ` · ${devices} device${devices !== 1 ? 's' : ''} registered` : ''}`
+                : 'Get notified before flights, check-ins, and key itinerary events.'}
           </Typography>
         </Box>
       </Box>
 
       {/* ── Actions ── */}
       <Box sx={{ display: 'flex', gap: 1.5, flexWrap: 'wrap' }}>
-        {!subscribed && permission !== 'denied' && (
+        {status === 'checking' && <CircularProgress size={20} sx={{ color: '#55702C' }} />}
+
+        {status === 'off' && (
           <Button
             variant="contained"
             onClick={handleEnable}
-            disabled={enabling}
-            startIcon={enabling ? <CircularProgress size={16} sx={{ color: 'white' }} /> : <NotificationsActiveIcon />}
+            disabled={busy !== null}
+            startIcon={busy === 'enable' ? <CircularProgress size={16} sx={{ color: 'white' }} /> : <NotificationsActiveIcon />}
             sx={{ fontWeight: 700, backgroundColor: '#55702C', '&:hover': { backgroundColor: '#455f24' } }}
           >
-            {enabling ? 'Enabling…' : 'Enable notifications'}
+            {busy === 'enable' ? 'Enabling…' : 'Enable notifications'}
           </Button>
         )}
 
-        {subscribed && (
+        {on && (
           <>
             <Button
               variant="outlined"
               onClick={handleTest}
-              disabled={sending}
-              startIcon={sending ? <CircularProgress size={16} /> : <SendIcon />}
+              disabled={busy !== null}
+              startIcon={busy === 'test' ? <CircularProgress size={16} /> : <SendIcon />}
               sx={{ fontWeight: 700, borderColor: '#55702C', color: '#55702C',
                 '&:hover': { borderColor: '#455f24', backgroundColor: alpha('#55702C', 0.05) } }}
             >
-              {sending ? 'Sending…' : 'Send test notification'}
+              {busy === 'test' ? 'Sending…' : 'Send test notification'}
             </Button>
             <Button
               variant="outlined"
               onClick={handleResubscribe}
-              disabled={resubscribing}
-              startIcon={resubscribing ? <CircularProgress size={16} /> : <RefreshIcon />}
+              disabled={busy !== null}
+              startIcon={busy === 'resubscribe' ? <CircularProgress size={16} /> : <RefreshIcon />}
               sx={{ fontWeight: 700, borderColor: 'divider', color: 'text.secondary',
                 '&:hover': { backgroundColor: alpha('#000', 0.04) } }}
             >
-              {resubscribing ? 'Re-subscribing…' : 'Re-subscribe this device'}
+              {busy === 'resubscribe' ? 'Re-subscribing…' : 'Re-subscribe this device'}
             </Button>
             <Button
               variant="text"
               onClick={handleDisable}
+              disabled={busy !== null}
               startIcon={<NotificationsOffIcon />}
               color="error"
               sx={{ fontWeight: 700 }}
@@ -276,7 +237,7 @@ export default function PushNotificationSetup() {
           </>
         )}
 
-        {permission === 'denied' && (
+        {status === 'blocked' && (
           <Typography variant="body2" color="error.main" fontWeight={600} sx={{ fontSize: '0.82rem' }}>
             Notifications are blocked. Go to your browser settings → Site settings → Notifications and allow this site.
           </Typography>
@@ -284,9 +245,9 @@ export default function PushNotificationSetup() {
       </Box>
 
       {/* ── Feedback ── */}
-      {testResult && (
+      {message && (
         <Typography variant="caption" sx={{ display: 'block', mt: 1.5, color: '#55702C', fontWeight: 700 }}>
-          ✓ {testResult}
+          ✓ {message}
         </Typography>
       )}
       {error && (
