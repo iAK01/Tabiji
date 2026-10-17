@@ -50,6 +50,8 @@ import StyleIcon             from '@mui/icons-material/Style';
 import CoffeeIcon            from '@mui/icons-material/Coffee';
 import CategoryIcon          from '@mui/icons-material/Category';
 import DirectionsWalkIcon    from '@mui/icons-material/DirectionsRun';
+import AirlineSeatIcon       from '@mui/icons-material/AirlineSeatReclineNormal';
+import { PACKING_CATEGORIES } from '@/lib/data/packing-categories';
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 
@@ -83,6 +85,7 @@ const CATEGORY_ICONS: Record<string, React.ElementType> = {
   'Medicines':          MedicationIcon,
   'Work Gear':          BusinessCenterIcon,
   'Luggage':            LuggageIcon,
+  'Plane / Train':      AirlineSeatIcon,
   'Accessories':        StyleIcon,
   'Coffee':             CoffeeIcon,
   'Other':              CategoryIcon,
@@ -90,12 +93,7 @@ const CATEGORY_ICONS: Record<string, React.ElementType> = {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const CATEGORIES = [
-  'Documents', 'Electronics', 'Tech Accessories', 'Clothes', 'Sport / Outdoor',
-  'Footwear', 'Baby / Kids', 'Entertainment', 'Hobby / Creative', 'Health & Recovery',
-  'Food / Supplements', 'Toiletries', 'Medicines', 'Work Gear', 'Luggage',
-  'Accessories', 'Coffee', 'Other',
-];
+const CATEGORIES = PACKING_CATEGORIES;
 
 const TRIP_TYPES = ['always', 'work', 'leisure', 'mixed'] as const;
 

@@ -22,6 +22,7 @@ import InfoOutlinedIcon  from '@mui/icons-material/InfoOutlined';
 import TuneIcon          from '@mui/icons-material/Tune';
 import AssignmentTurnedInIcon from '@mui/icons-material/AssignmentTurnedIn';
 import { sendOrQueue } from '@/lib/offline/writes';
+import { PACKING_CATEGORIES } from '@/lib/data/packing-categories';
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 
@@ -37,10 +38,7 @@ const D = {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const CATEGORIES = [
-  'Documents', 'Electronics', 'Clothes', 'Toiletries',
-  'Medicines', 'Work Gear', 'Luggage', 'Accessories', 'Other',
-];
+const CATEGORIES = PACKING_CATEGORIES;
 
 const TRIP_TYPES      = ['always', 'work', 'leisure', 'mixed'];
 const TRANSPORT_TYPES = ['plane', 'train', 'car', 'ferry', 'bus'];
