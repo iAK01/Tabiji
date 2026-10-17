@@ -64,6 +64,8 @@ export interface Stop {
   type: string;
   reference?: string;
   address?: string;
+  // Which trip location chip was picked — several rooms at one venue share an address
+  locationName?: string;
   coordinates?: { lat: number; lng: number };
   scheduledStart?: string;
   scheduledEnd?: string;

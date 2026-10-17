@@ -4,7 +4,7 @@ import { useEffect, useState, useRef, useCallback } from 'react';
 import {
   Box, Typography, Paper, Button, Chip, CircularProgress,
   Dialog, DialogTitle, DialogContent, DialogActions,
-  TextField, Select, MenuItem, FormControl, InputLabel,
+  TextField, Select, MenuItem, ListSubheader, FormControl, InputLabel,
   IconButton, Divider, LinearProgress, alpha, Fab,
   useTheme, useMediaQuery, Menu, Autocomplete,
   Switch, FormControlLabel,
@@ -58,6 +58,12 @@ import VisibilityIcon         from '@mui/icons-material/Visibility';
 import WifiOffIcon            from '@mui/icons-material/WifiOff';
 import AutoFixHighIcon        from '@mui/icons-material/AutoFixHigh';
 import ContentPasteGoIcon     from '@mui/icons-material/ContentPasteGo';
+import DirectionsBoatIcon     from '@mui/icons-material/DirectionsBoat';
+import AirportShuttleIcon     from '@mui/icons-material/AirportShuttle';
+import LocalParkingIcon       from '@mui/icons-material/LocalParking';
+import DescriptionIcon        from '@mui/icons-material/Description';
+import ReceiptLongIcon        from '@mui/icons-material/ReceiptLong';
+import { DOCUMENT_TYPE_GROUPS, DOCUMENT_TYPES } from '@/lib/files/documentTypes';
 import DocumentViewer, { type ViewableFile } from './DocumentViewer';
 import SmartExtractModal from './SmartExtractModal';
 import SmartExtractProgress from './SmartExtractProgress';
@@ -282,19 +288,38 @@ type Mode = 'file' | 'link' | 'contact' | 'note' | 'todo';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const FILE_TYPES = [
-  { value: 'boarding_pass',      label: 'Boarding pass',            Icon: FlightIcon },
-  { value: 'train_ticket',       label: 'Train / rail ticket',      Icon: TrainIcon },
-  { value: 'hotel_confirmation', label: 'Accommodation confirmation', Icon: HotelIcon },
-  { value: 'car_hire',           label: 'Car hire',                Icon: DirectionsCarIcon },
-  { value: 'event_brief',        label: 'Event brief / schedule',  Icon: EventIcon },
-  { value: 'ticket',             label: 'Event ticket',            Icon: ConfirmationNumberIcon },
-  { value: 'reservation',        label: 'Reservation (restaurant, tour…)', Icon: EventIcon },
-  { value: 'visa',               label: 'Visa',                    Icon: BadgeIcon },
-  { value: 'insurance',          label: 'Insurance',               Icon: HealthAndSafetyIcon },
-  { value: 'passport',           label: 'Passport copy',           Icon: BadgeIcon },
-  { value: 'other',              label: 'Other',                   Icon: InsertDriveFileIcon },
-] as const;
+const FILE_TYPE_ICON: Record<string, typeof FlightIcon> = {
+  flight_booking: FlightIcon, boarding_pass: FlightIcon, train_ticket: TrainIcon,
+  bus_ticket: DirectionsBusIcon, ferry_ticket: DirectionsBoatIcon, car_hire: DirectionsCarIcon,
+  airport_transfer: AirportShuttleIcon, airport_parking: LocalParkingIcon, rail_pass: TrainIcon,
+  hotel_confirmation: HotelIcon,
+  event_brief: EventIcon, ticket: ConfirmationNumberIcon, attraction_ticket: ConfirmationNumberIcon,
+  tour_voucher: ConfirmationNumberIcon, reservation: EventIcon,
+  passport: BadgeIcon, visa: BadgeIcon, travel_authorization: BadgeIcon,
+  driving_permit: DirectionsCarIcon, invitation_letter: DescriptionIcon,
+  insurance: HealthAndSafetyIcon, vaccination: LocalHospitalIcon, medical: LocalHospitalIcon,
+  trip_itinerary: DescriptionIcon, emergency_contacts: LocalHospitalIcon,
+  receipt: ReceiptLongIcon, travel_approval: DescriptionIcon,
+  other: InsertDriveFileIcon,
+};
+
+// { value, label, Icon } — for ALL_TYPES / TypeIcon. Source of truth: src/lib/files/documentTypes.ts
+const FILE_TYPES = DOCUMENT_TYPES.map(t => ({
+  value: t.value,
+  label: t.label,
+  Icon:  FILE_TYPE_ICON[t.value] ?? InsertDriveFileIcon,
+}));
+
+const FILE_GROUP_COLOUR: Record<string, string> = {
+  'Transport':           '#C9521B',
+  'Accommodation':       '#5c35a0',
+  'Events & activities': '#1D2642',
+  'Entry & ID':          '#b45309',
+  'Health & insurance':  '#0891b2',
+  'Trip reference':      '#55702C',
+  'Money & work':        '#6b7280',
+  'Other':               '#6b7280',
+};
 
 const LINK_TYPES = [
   { value: 'primary',            label: 'Primary',             Icon: FolderOpenIcon },
@@ -328,7 +353,7 @@ const NOTE_TYPES = [
   { value: 'recommendation', label: 'Recommendation', Icon: StarIcon },
 ] as const;
 
-type FileTypeValue    = typeof FILE_TYPES[number]['value'];
+type FileTypeValue    = string;
 type LinkTypeValue    = typeof LINK_TYPES[number]['value'];
 type ContactTypeValue = typeof CONTACT_TYPES[number]['value'];
 type NoteTypeValue    = typeof NOTE_TYPES[number]['value'];
@@ -336,10 +361,10 @@ type NoteTypeValue    = typeof NOTE_TYPES[number]['value'];
 const ALL_TYPES = [...FILE_TYPES, ...LINK_TYPES, ...CONTACT_TYPES, ...NOTE_TYPES];
 
 const TYPE_COLOUR: Record<string, string> = {
-  boarding_pass: '#C9521B', train_ticket: '#0369a1', hotel_confirmation: '#5c35a0',
-  ticket: '#C9521B', reservation: '#55702C',
-  car_hire: '#55702C', event_brief: '#1D2642', visa: '#b45309', insurance: '#0891b2',
-  passport: '#b45309', event_website: '#0891b2', artist_lineup: '#7c3aed',
+  ...Object.fromEntries(
+    DOCUMENT_TYPE_GROUPS.flatMap(g => g.types.map(t => [t.value, FILE_GROUP_COLOUR[g.group] ?? '#6b7280'])),
+  ),
+  event_website: '#0891b2', artist_lineup: '#7c3aed',
   venue: '#55702C', booking_reference: '#C9521B', useful_info: '#6b7280',
   artist: '#7c3aed', venue_manager: '#55702C', event_manager: '#1D2642',
   tour_manager: '#0369a1', production: '#374151', promoter: '#C9521B',
@@ -1737,9 +1762,6 @@ export default function FilesTab({ tripId, fabTrigger }: FilesTabProps) {
             </Paper>
           )}
 
-          {/* ── Drop zone ── */}
-          <DropZone onFile={f => { setMode('file'); handleFileSelected(f); }} />
-
           {/* ── Grouped resources ── */}
           {sortedKeys.map(type => {
             const group    = grouped.get(type) ?? [];
@@ -1772,6 +1794,9 @@ export default function FilesTab({ tripId, fabTrigger }: FilesTabProps) {
               </Paper>
             );
           })}
+
+          {/* ── Drop zone — below the list, not in front of it ── */}
+          <DropZone onFile={f => { setMode('file'); handleFileSelected(f); }} />
         </>
       )}
 
@@ -2030,8 +2055,16 @@ export default function FilesTab({ tripId, fabTrigger }: FilesTabProps) {
                 <FormControl fullWidth disabled={uploading}>
                   <InputLabel sx={{ fontFamily: D.body }}>Document type</InputLabel>
                   <Select value={fileForm.type} label="Document type" sx={{ fontFamily: D.body }}
+                    MenuProps={{ sx: { '& .MuiPaper-root': { maxHeight: 420 } } }}
                     onChange={e => setFileForm(p => ({ ...p, type: e.target.value as FileTypeValue }))}>
-                    {FILE_TYPES.map(({ value, label }) => <MenuItem key={value} value={value} sx={{ fontFamily: D.body }}>{label}</MenuItem>)}
+                    {DOCUMENT_TYPE_GROUPS.flatMap(g => [
+                      <ListSubheader key={g.group} sx={{ fontFamily: D.display, fontSize: '0.7rem', letterSpacing: '0.06em', textTransform: 'uppercase', color: 'text.disabled', lineHeight: 2.4, backgroundColor: D.paper }}>
+                        {g.group}
+                      </ListSubheader>,
+                      ...g.types.map(t => (
+                        <MenuItem key={t.value} value={t.value} sx={{ fontFamily: D.body, pl: 3 }}>{t.label}</MenuItem>
+                      )),
+                    ])}
                   </Select>
                 </FormControl>
 

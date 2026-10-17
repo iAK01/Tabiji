@@ -6,7 +6,7 @@ import {
   LinearProgress, Chip, Checkbox,
   Collapse, Dialog, DialogTitle, DialogContent, DialogActions,
   TextField, Select, MenuItem, FormControl, InputLabel,
-  IconButton, Divider, useTheme, useMediaQuery, Alert,
+  IconButton, Divider, useTheme, useMediaQuery, Alert, Badge,
   Switch, FormControlLabel, ToggleButton, ToggleButtonGroup,
 } from '@mui/material';
 import AddIcon           from '@mui/icons-material/Add';
@@ -21,6 +21,7 @@ import WbSunnyIcon       from '@mui/icons-material/WbSunny';
 import InfoOutlinedIcon  from '@mui/icons-material/InfoOutlined';
 import TuneIcon          from '@mui/icons-material/Tune';
 import AssignmentTurnedInIcon from '@mui/icons-material/AssignmentTurnedIn';
+import { sendOrQueue } from '@/lib/offline/writes';
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 
@@ -65,6 +66,20 @@ interface PackingItem {
 }
 
 type IndexedItem = PackingItem & { _idx: number };
+
+// The list with a manually added item, shaped as the POST /packing route creates it —
+// shown straight away when the add is queued offline.
+function withManualItem(
+  list: PackingList,
+  item: { name: string; category: string; quantity: number; advisoryNote: string },
+): PackingList {
+  const added: PackingItem = {
+    name: item.name, category: item.category || 'Other', quantity: item.quantity || 1,
+    quantityType: 'fixed', essential: false, packed: false, packedAt: null,
+    preTravelAction: false, preTravelNote: '', advisoryNote: item.advisoryNote || '', source: 'manual',
+  };
+  return { ...list, items: [...list.items, added], totalItems: list.items.length + 1 };
+}
 
 interface PackingList {
   _id:              string;
@@ -192,8 +207,14 @@ export default function PackingTab({ tripId, tripType, nights, startDate, fabTri
   useEffect(() => {
     fetch(`/api/trips/${tripId}/packing`)
       .then(r => r.json())
-      .then(d => { setPacking(d.packing ?? null); setLoading(false); });
+      .then(d => { setPacking(d.packing ?? null); setLoading(false); })
+      .catch(() => setLoading(false));
   }, [tripId]);
+
+  // Optimistic packing list written into the saved copy when a change is queued offline.
+  const savedPacking = (next: PackingList) => ({
+    [`/api/trips/${tripId}/packing`]: (saved: any) => ({ ...saved, packing: next }),
+  });
 
   const tripStartsInDays = startDate
     ? Math.floor((new Date(startDate).getTime() - Date.now()) / 86400000)
@@ -226,13 +247,19 @@ export default function PackingTab({ tripId, tripType, nights, startDate, fabTri
       i === originalIndex ? { ...item, packed: newPackedValue } : item
     );
     const packedCount = updated.filter(i => i.packed).length;
-    setPacking(p => p ? { ...p, items: updated, packedItems: packedCount,
-      packingProgress: Math.round((packedCount / updated.length) * 100) } : p);
+    const optimistic  = { ...packing, items: updated, packedItems: packedCount,
+      packingProgress: Math.round((packedCount / updated.length) * 100) };
+    setPacking(optimistic);
     try {
-      const res  = await fetch(`/api/trips/${tripId}/packing`, {
-        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ itemIndex: originalIndex, packed: newPackedValue }),
-      });
+      const res = await sendOrQueue(
+        { type: 'TOGGLE_PACKED', tripId, payload: { itemIndex: originalIndex, packed: newPackedValue } },
+        () => fetch(`/api/trips/${tripId}/packing`, {
+          method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ itemIndex: originalIndex, packed: newPackedValue }),
+        }),
+        savedPacking(optimistic),
+      );
+      if (!res) return;
       const data = await res.json();
       if (data.packing) setPacking(data.packing);
     } catch {
@@ -315,12 +342,20 @@ export default function PackingTab({ tripId, tripType, nights, startDate, fabTri
   };
 
   const addItem = async () => {
-    const res  = await fetch(`/api/trips/${tripId}/packing`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(newItem),
-    });
-    const data = await res.json();
-    setPacking(data.packing);
+    const res = await sendOrQueue(
+      { type: 'ADD_PACKING_ITEM', tripId, payload: newItem },
+      () => fetch(`/api/trips/${tripId}/packing`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newItem),
+      }),
+      packing ? savedPacking(withManualItem(packing, newItem)) : undefined,
+    ).catch(() => null);
+    if (res) {
+      const data = await res.json();
+      setPacking(data.packing);
+    } else if (packing) {
+      setPacking(withManualItem(packing, newItem));
+    }
     setAddOpen(false);
     setNewItem({ name: '', category: 'Other', quantity: 1, advisoryNote: '' });
   };
@@ -439,65 +474,47 @@ export default function PackingTab({ tripId, tripType, nights, startDate, fabTri
   return (
     <Box>
 
-      {/* ── Weather alert ── */}
-      {ws && (ws.hasRain || ws.minLow <= 8 || ws.maxHigh >= 22) && (
-        <Alert severity="info" icon={<WbSunnyIcon fontSize="small" />}
-          sx={{ mb: 2, fontFamily: D.body, '& .MuiAlert-message': { fontFamily: D.body, fontSize: '0.82rem' } }}>
-          This list was tailored to the forecast: {[
-            ws.minLow  <= 8  && `lows of ${ws.minLow}°C`,
-            ws.maxHigh >= 22 && `highs of ${ws.maxHigh}°C`,
-            ws.hasRain       && `rain on ${ws.rainDays} day${ws.rainDays !== 1 ? 's' : ''}`,
-          ].filter(Boolean).join(', ')}.
-          {showLiveRefresh && ' Live forecast now available — refresh to update.'}
-        </Alert>
-      )}
-
-      {showLiveRefresh && !ws && (
-        <Alert severity="info" icon={<WbSunnyIcon fontSize="small" />}
-          action={
-            <Button size="small" color="inherit" onClick={generate} disabled={generating}
-              startIcon={generating ? <CircularProgress size={14} color="inherit" /> : <RefreshIcon fontSize="small" />}
-              sx={{ fontFamily: D.body, fontWeight: 700, fontSize: '0.75rem' }}>
-              {generating ? 'Refreshing…' : 'Refresh'}
-            </Button>
-          }
-          sx={{ mb: 2, '& .MuiAlert-message': { fontFamily: D.body, fontSize: '0.82rem' } }}>
-          Your trip is in {tripStartsInDays} day{tripStartsInDays !== 1 ? 's' : ''} — live weather now available.
-        </Alert>
-      )}
-
-      {/* ── Progress card ── */}
+      {/* ── Progress header — compact, so the list starts near the top ── */}
       <Paper elevation={0} sx={{
-        p: { xs: 2.5, sm: 3 }, mb: 2.5,
+        px: 2, py: 1.5, mb: 2,
         backgroundColor: D.paper,
         border: `1.5px solid rgba(44,62,80,0.08)`,
         borderRadius: 2.5,
       }}>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.25 }}>
           <Typography sx={{
-            fontFamily: D.display,
-            fontSize: { xs: '1.8rem', sm: '2.2rem' },
-            letterSpacing: '-0.02em',
-            color: D.navy,
+            fontFamily: D.display, fontSize: '1.05rem', letterSpacing: '-0.01em',
+            color: D.navy, flex: 1, minWidth: 0,
+            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
           }}>
             {nights} nights · {tripType}
           </Typography>
-          <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-            <Button size="small" variant="outlined" startIcon={<FilterListIcon />}
-              onClick={() => setFilterOpen(p => !p)}
-              color={filter !== 'all' ? 'primary' : 'inherit'}
-              sx={{ fontFamily: D.body, fontWeight: 700, fontSize: '0.72rem' }}>
-              {filter === 'all' ? 'Filter' : filter}
-            </Button>
-            <IconButton size="small" onClick={generate} disabled={generating} aria-label="Regenerate list">
-              <RefreshIcon fontSize="small" />
-            </IconButton>
-          </Box>
+          <Button size="small" variant="outlined" startIcon={<AddIcon />} onClick={() => setAddOpen(true)}
+            sx={{
+              fontFamily: D.body, fontWeight: 700, fontSize: '0.72rem', flexShrink: 0,
+              borderColor: 'rgba(44,62,80,0.18)', color: D.navy,
+              ...(mobile && { minHeight: 36 }),
+            }}>
+            Add
+          </Button>
+          <Button size="small" variant="outlined" startIcon={<FilterListIcon />}
+            onClick={() => setFilterOpen(p => !p)}
+            color={filter !== 'all' ? 'primary' : 'inherit'}
+            sx={{ fontFamily: D.body, fontWeight: 700, fontSize: '0.72rem', flexShrink: 0, ...(mobile && { minHeight: 36 }) }}>
+            {filter === 'all' ? 'Filter' : filter}
+          </Button>
+          <IconButton size="small" onClick={generate} disabled={generating}
+            aria-label="Regenerate list"
+            title={showLiveRefresh ? 'Live forecast available — refresh' : 'Regenerate list'}>
+            <Badge variant="dot" color="warning" invisible={!showLiveRefresh}>
+              {generating ? <CircularProgress size={16} /> : <RefreshIcon fontSize="small" />}
+            </Badge>
+          </IconButton>
         </Box>
 
         {/* Filter chips */}
         <Collapse in={filterOpen}>
-          <Box sx={{ display: 'flex', gap: 1, mb: 2, flexWrap: 'wrap' }}>
+          <Box sx={{ display: 'flex', gap: 1, mb: 1.25, flexWrap: 'wrap' }}>
             {(['all', 'unpacked', 'packed'] as const).map(f => (
               <Chip key={f}
                 label={f.charAt(0).toUpperCase() + f.slice(1)}
@@ -509,69 +526,44 @@ export default function PackingTab({ tripId, tripType, nights, startDate, fabTri
           </Box>
         </Collapse>
 
-        {/* Progress bar + typographic counter */}
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 1 }}>
-          <LinearProgress variant="determinate" value={packing.packingProgress}
-            color={allDone ? 'success' : 'primary'}
-            sx={{ flex: 1, height: 8, borderRadius: 4, backgroundColor: 'action.hover',
-              '& .MuiLinearProgress-bar': { borderRadius: 4 } }} />
-          {/* Typographic counter — Archivo Black, terracotta */}
-          <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 0.4, flexShrink: 0 }}>
-            <Typography sx={{
-              fontFamily: D.display,
-              fontSize: '1.25rem',
-              letterSpacing: '-0.03em',
-              lineHeight: 1,
-              color: allDone ? D.green : D.terra,
-            }}>
-              {packing.packedItems}
-            </Typography>
-            <Typography sx={{ fontFamily: D.body, fontSize: '0.72rem', color: 'text.disabled', fontWeight: 600 }}>
-              /{packing.totalItems}
-            </Typography>
+        {/* Progress bar + counter + summary chips on one row */}
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap' }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flex: '1 1 220px', minWidth: 0 }}>
+            <LinearProgress variant="determinate" value={packing.packingProgress}
+              color={allDone ? 'success' : 'primary'}
+              sx={{ flex: 1, height: 8, borderRadius: 4, backgroundColor: 'action.hover',
+                '& .MuiLinearProgress-bar': { borderRadius: 4 } }} />
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.4, flexShrink: 0 }}>
+              {allDone && <CheckCircleIcon color="success" sx={{ fontSize: '1rem' }} />}
+              <Typography sx={{
+                fontFamily: D.display, fontSize: '1.1rem', letterSpacing: '-0.03em', lineHeight: 1,
+                color: allDone ? D.green : D.terra,
+              }}>
+                {packing.packedItems}
+              </Typography>
+              <Typography sx={{ fontFamily: D.body, fontSize: '0.72rem', color: 'text.disabled', fontWeight: 600 }}>
+                /{packing.totalItems}
+              </Typography>
+            </Box>
           </Box>
-        </Box>
-
-        {allDone && (
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mt: 2,
-            backgroundColor: 'success.light', borderRadius: 2, px: 2, py: 1.5 }}>
-            <CheckCircleIcon color="success" />
-            <Typography sx={{ fontFamily: D.body, fontWeight: 700, color: 'success.dark' }}>
-              All packed — you're ready to go!
-            </Typography>
+          <Box sx={{ display: 'flex', gap: 0.75, flexWrap: 'wrap' }}>
+            <Chip label={`${indexedItems.filter(i => i.essential).length} essentials`}
+              size="small" color="primary"
+              sx={{ fontFamily: D.body, fontWeight: 700 }} />
+            {preTravelItems.length > 0 && (
+              <Chip icon={<WarningAmberIcon />}
+                label={`${preTravelItems.length} pre-travel action${preTravelItems.length !== 1 ? 's' : ''}`}
+                size="small" color="warning" onClick={() => setPreTravel(true)}
+                sx={{ fontFamily: D.body, cursor: 'pointer', fontWeight: 700 }} />
+            )}
+            {indexedItems.filter(i => i.source === 'manual').length > 0 && (
+              <Chip label={`${indexedItems.filter(i => i.source === 'manual').length} manual`}
+                size="small" variant="outlined"
+                sx={{ fontFamily: D.body, fontWeight: 600 }} />
+            )}
           </Box>
-        )}
-
-        {/* Summary chips */}
-        <Box sx={{ display: 'flex', gap: 1, mt: 2, flexWrap: 'wrap' }}>
-          <Chip label={`${indexedItems.filter(i => i.essential).length} essentials`}
-            size="small" color="primary"
-            sx={{ fontFamily: D.body, fontWeight: 700 }} />
-          {preTravelItems.length > 0 && (
-            <Chip icon={<WarningAmberIcon />}
-              label={`${preTravelItems.length} pre-travel action${preTravelItems.length !== 1 ? 's' : ''}`}
-              size="small" color="warning" onClick={() => setPreTravel(true)}
-              sx={{ fontFamily: D.body, cursor: 'pointer', fontWeight: 700 }} />
-          )}
-          {indexedItems.filter(i => i.source === 'manual').length > 0 && (
-            <Chip label={`${indexedItems.filter(i => i.source === 'manual').length} manual`}
-              size="small" variant="outlined"
-              sx={{ fontFamily: D.body, fontWeight: 600 }} />
-          )}
         </Box>
       </Paper>
-
-      {/* ── Add item button ── */}
-      <Button variant="outlined" startIcon={<AddIcon />} onClick={() => setAddOpen(true)}
-        fullWidth={mobile} size={mobile ? 'large' : 'medium'}
-        sx={{
-          fontFamily: D.body, fontWeight: 700,
-          mb: 2.5, py: mobile ? 1.5 : 1,
-          borderColor: 'rgba(44,62,80,0.18)', color: D.navy,
-          '&:hover': { borderColor: 'rgba(44,62,80,0.45)', backgroundColor: 'rgba(44,62,80,0.04)' },
-        }}>
-        Add item
-      </Button>
 
       {/* ── Category sections ── */}
       {Object.entries(grouped).map(([category, catItems]) => {
@@ -709,6 +701,19 @@ export default function PackingTab({ tripId, tripType, nights, startDate, fabTri
           </Paper>
         );
       })}
+
+      {/* ── Weather alert ── */}
+      {ws && (ws.hasRain || ws.minLow <= 8 || ws.maxHigh >= 22) && (
+        <Alert severity="info" icon={<WbSunnyIcon fontSize="small" />}
+          sx={{ mt: 1, mb: 2, fontFamily: D.body, '& .MuiAlert-message': { fontFamily: D.body, fontSize: '0.82rem' } }}>
+          This list was tailored to the forecast: {[
+            ws.minLow  <= 8  && `lows of ${ws.minLow}°C`,
+            ws.maxHigh >= 22 && `highs of ${ws.maxHigh}°C`,
+            ws.hasRain       && `rain on ${ws.rainDays} day${ws.rainDays !== 1 ? 's' : ''}`,
+          ].filter(Boolean).join(', ')}.
+          {showLiveRefresh && ' Live forecast now available — refresh to update.'}
+        </Alert>
+      )}
 
       {/* ════════════════════════════════════════════════════════════════════
           Dialogs

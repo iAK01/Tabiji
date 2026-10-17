@@ -11,7 +11,7 @@
 import { useState, useEffect } from 'react';
 import {
   Box, Typography, Button, Paper, Tabs, Tab, TextField,
-  Select, MenuItem, FormControl, InputLabel, Chip, IconButton,
+  Select, MenuItem, FormControl, InputLabel, Chip,
   Dialog, DialogTitle, DialogContent, DialogActions,
   Menu, useMediaQuery, useTheme, Alert, Switch, FormControlLabel,
 } from '@mui/material';
@@ -28,7 +28,8 @@ import AirlineSearch     from '@/components/ui/AirlineSearch';
 import AddressSearch     from '@/components/ui/AddressSearch';
 import BookingLinks      from '@/components/logistics/BookingLinks';
 import type { ResolvedAddress } from '@/components/ui/AddressSearch';
-import { saveTripCache, getTripCache, queueAction } from '@/lib/offline/db';
+import { saveTripCache, getTripCache } from '@/lib/offline/db';
+import { sendOrQueue, pendingId } from '@/lib/offline/writes';
 import { EXPENSE_PAYERS, getPayerLabel } from '@/lib/logistics/expenseConstants';
 import DocumentViewer from '@/components/files/DocumentViewer';
 import type { ViewableFile } from '@/components/files/DocumentViewer';
@@ -48,7 +49,7 @@ import {
   BLANK_TRANSPORT, BLANK_ACCOM, BLANK_VENUE,
   toDateOnly, addDays,
   detectTransportGaps, classifyDirection, destinationReachedBy,
-  type TransportType, type VenueType,
+  type TransportType,
   type LogisticsTabProps, type MenuKind, type GapPromptItem,
 } from './logistics.helpers';
 
@@ -212,6 +213,11 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
   }, [fabTrigger]);
 
   // ── Saves ───────────────────────────────────────────────────────────────────
+  // Optimistic logistics written into the saved copy when a change is queued offline.
+  const savedLogistics = (updated: any) => ({
+    [`/api/trips/${tripId}/logistics`]: (saved: any) => ({ ...saved, logistics: updated }),
+  });
+
   const saveTransport = async () => {
     setSaving(true);
     const isEdit  = editTransportIdx !== null;
@@ -263,8 +269,14 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
       : (TRANSPORT_TYPES.find(t => t.value === justSavedLeg.type)?.label ?? justSavedLeg.type);
     const transportEntryId = String(isEdit ? editTransportIdx : updated.transportation.length - 1);
 
-    if (!navigator.onLine) {
-      await queueAction({ type: isEdit ? 'EDIT_TRANSPORT' : 'ADD_TRANSPORT', tripId, payload: justSavedLeg, index: editTransportIdx });
+    const url    = isEdit ? `/api/trips/${tripId}/logistics/transport/${editTransportIdx}` : `/api/trips/${tripId}/logistics/transport`;
+    const method = isEdit ? 'PUT' : 'POST';
+    const res    = await sendOrQueue(
+      { type: isEdit ? 'EDIT_TRANSPORT' : 'ADD_TRANSPORT', tripId, payload: justSavedLeg, index: editTransportIdx },
+      () => fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(justSavedLeg) }),
+      savedLogistics(updated),
+    );
+    if (!res) {
       await createLinkedExpense({
         date: (justSavedLeg.departureTime || '').split('T')[0], amount: justSavedLeg.cost,
         category: justSavedLeg.type,
@@ -274,10 +286,6 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
       setSaving(false);
       return;
     }
-
-    const url    = isEdit ? `/api/trips/${tripId}/logistics/transport/${editTransportIdx}` : `/api/trips/${tripId}/logistics/transport`;
-    const method = isEdit ? 'PUT' : 'POST';
-    const res    = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(justSavedLeg) });
     const data   = await res.json();
     setLogistics(data.logistics);
 
@@ -311,8 +319,14 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
 
     const accomEntryId = String(isEdit ? editAccomIdx : updated.accommodation.length - 1);
 
-    if (!navigator.onLine) {
-      await queueAction({ type: isEdit ? 'EDIT_ACCOM' : 'ADD_ACCOM', tripId, payload: accom, index: editAccomIdx });
+    const url    = isEdit ? `/api/trips/${tripId}/logistics/accommodation/${editAccomIdx}` : `/api/trips/${tripId}/logistics/accommodation`;
+    const method = isEdit ? 'PUT' : 'POST';
+    const res    = await sendOrQueue(
+      { type: isEdit ? 'EDIT_ACCOM' : 'ADD_ACCOM', tripId, payload: accom, index: editAccomIdx },
+      () => fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(accom) }),
+      savedLogistics(updated),
+    );
+    if (!res) {
       await createLinkedExpense({
         date: accom.checkIn, amount: accom.cost, category: accom.type,
         label: accom.name || 'Accommodation', collection: 'accommodation', entryId: accomEntryId,
@@ -325,10 +339,6 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
       setSaving(false);
       return;
     }
-
-    const url    = isEdit ? `/api/trips/${tripId}/logistics/accommodation/${editAccomIdx}` : `/api/trips/${tripId}/logistics/accommodation`;
-    const method = isEdit ? 'PUT' : 'POST';
-    const res    = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(accom) });
     const data   = await res.json();
     setLogistics(data.logistics);
     await createLinkedExpense({
@@ -357,8 +367,14 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
 
     const venueEntryId = String(isEdit ? editVenueIdx : updated.venues.length - 1);
 
-    if (!navigator.onLine) {
-      await queueAction({ type: isEdit ? 'EDIT_VENUE' : 'ADD_VENUE', tripId, payload: venue, index: editVenueIdx });
+    const url    = isEdit ? `/api/trips/${tripId}/logistics/venues/${editVenueIdx}` : `/api/trips/${tripId}/logistics/venues`;
+    const method = isEdit ? 'PUT' : 'POST';
+    const res    = await sendOrQueue(
+      { type: isEdit ? 'EDIT_VENUE' : 'ADD_VENUE', tripId, payload: venue, index: editVenueIdx },
+      () => fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(venue) }),
+      savedLogistics(updated),
+    );
+    if (!res) {
       await createLinkedExpense({
         date: venue.date, amount: venue.cost, category: venue.type,
         label: venue.name || 'Venue', collection: 'venue', entryId: venueEntryId,
@@ -371,10 +387,6 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
       setSaving(false);
       return;
     }
-
-    const url    = isEdit ? `/api/trips/${tripId}/logistics/venues/${editVenueIdx}` : `/api/trips/${tripId}/logistics/venues`;
-    const method = isEdit ? 'PUT' : 'POST';
-    const res    = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(venue) });
     const data   = await res.json();
     setLogistics(data.logistics);
     await createLinkedExpense({
@@ -410,19 +422,21 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
     setLogistics(updated);
     await saveTripCache(tripId, { ...(await getTripCache(tripId)), logistics: updated });
 
-    if (!navigator.onLine) {
-      await queueAction({ type: 'DELETE_LOGISTICS_ITEM', tripId, payload: { kind, index } });
-      setDeleteTarget(null);
-      return;
-    }
-
     const urlMap = {
       transport: `/api/trips/${tripId}/logistics/transport/${index}`,
       accom:     `/api/trips/${tripId}/logistics/accommodation/${index}`,
       venue:     `/api/trips/${tripId}/logistics/venues/${index}`,
     };
 
-    const res  = await fetch(urlMap[kind], { method: 'DELETE' });
+    const res = await sendOrQueue(
+      { type: 'DELETE_LOGISTICS_ITEM', tripId, payload: { kind, index } },
+      () => fetch(urlMap[kind], { method: 'DELETE' }),
+      savedLogistics(updated),
+    );
+    if (!res) {
+      setDeleteTarget(null);
+      return;
+    }
     const data = await res.json();
     setLogistics(data.logistics);
     setDeleteTarget(null);
@@ -479,20 +493,23 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
       gratuity: '', notes: '', payer, status: 'captured',
       linkedTo: { collection: opts.collection, entryId: opts.entryId, label: opts.label },
     };
-    if (!navigator.onLine) {
-      await queueAction({ type: 'ADD_EXPENSE', tripId, payload, receiptBlob: null, receiptName: null, receiptType: null });
-      return;
-    }
-    const fd = new FormData();
-    fd.append('date', payload.date);
-    fd.append('category', payload.category);
-    fd.append('amount', payload.amount);
-    fd.append('currency', payload.currency);
-    fd.append('payer', payload.payer);
-    fd.append('status', payload.status);
-    fd.append('linkedTo', JSON.stringify(payload.linkedTo));
+    const pending = { _id: pendingId(), ...payload, amount: parseFloat(payload.amount), _pending: true };
     try {
-      await fetch(`/api/trips/${tripId}/expenses`, { method: 'POST', body: fd });
+      await sendOrQueue(
+        { type: 'ADD_EXPENSE', tripId, payload, receiptBlob: null, receiptName: null, receiptType: null },
+        () => {
+          const fd = new FormData();
+          fd.append('date', payload.date);
+          fd.append('category', payload.category);
+          fd.append('amount', payload.amount);
+          fd.append('currency', payload.currency);
+          fd.append('payer', payload.payer);
+          fd.append('status', payload.status);
+          fd.append('linkedTo', JSON.stringify(payload.linkedTo));
+          return fetch(`/api/trips/${tripId}/expenses`, { method: 'POST', body: fd });
+        },
+        { [`/api/trips/${tripId}/expenses`]: saved => saved && { ...saved, expenses: [pending, ...(saved.expenses ?? [])] } },
+      );
     } catch {
       // Best-effort — a failed expense link shouldn't block or roll back the logistics save.
     }
@@ -939,9 +956,6 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
   // ─────────────────────────────────────────────────────────────────────────────
   return (
     <Box>
-      {/* ── Getting There AI strip ── */}
-      <GettingThereStrip tripId={tripId} trip={trip} />
-
       {/* ── Section tabs ── */}
       <Tabs
         value={section}
@@ -1027,18 +1041,24 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
         const backRaw   = allTransport.map((t: any, i: number) => ({ t, i })).filter(({ t }: { t: any; i: number }) => classifyDirection(t, trip) === 'back');
         const thereItems = sortedByTime(thereRaw);
         const backItems  = sortedByTime(backRaw);
+        const bookingLinks = (
+          <BookingLinks
+            originIata={trip.origin?.iataCode}
+            destIata={trip.destination?.iataCode}
+            originCity={trip.origin?.city ?? ''}
+            destCity={trip.destination?.city ?? ''}
+            startDate={trip.startDate}
+            endDate={trip.endDate}
+            fallbackOriginIata={fallbackOriginIata}
+            fallbackOriginCity={fallbackOriginCity}
+          />
+        );
+        // Bookings lead; booking links and the ground-transport plan are
+        // supporting material and sit underneath. With nothing booked yet,
+        // booking *is* the job, so the links come first.
         return (
           <Box>
-            <BookingLinks
-              originIata={trip.origin?.iataCode}
-              destIata={trip.destination?.iataCode}
-              originCity={trip.origin?.city ?? ''}
-              destCity={trip.destination?.city ?? ''}
-              startDate={trip.startDate}
-              endDate={trip.endDate}
-              fallbackOriginIata={fallbackOriginIata}
-              fallbackOriginCity={fallbackOriginCity}
-            />
+            {allTransport.length === 0 && bookingLinks}
             {allTransport.length === 0 ? (
               <Alert severity="info" sx={{ mb: 2, fontFamily: D.body }}>No transport added yet.</Alert>
             ) : (<>
@@ -1077,6 +1097,11 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
             >
               Add transport
             </Button>
+
+            <Box sx={{ mt: 4 }}>
+              <GettingThereStrip tripId={tripId} trip={trip} />
+              {allTransport.length > 0 && bookingLinks}
+            </Box>
           </Box>
         );
       })()}

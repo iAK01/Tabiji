@@ -569,6 +569,14 @@ function PlanningView({
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
 
+      {/* Day strip */}
+      <Box>
+        <SectionLabel>
+          {isHistorical ? 'Typical daily conditions' : 'Day-by-day forecast'}
+        </SectionLabel>
+        <DayGrid days={weather.days} />
+      </Box>
+
       {/* Historical notice */}
       {isHistorical && (
         <Alert
@@ -669,14 +677,6 @@ function PlanningView({
         <StatStrip days={weather.days} />
       </Paper>
 
-      {/* Day strip */}
-      <Box>
-        <SectionLabel>
-          {isHistorical ? 'Typical daily conditions' : 'Day-by-day forecast'}
-        </SectionLabel>
-        <DayGrid days={weather.days} />
-      </Box>
-
       {/* Home comparison — most valuable in planning mode */}
       {weather.homeComparison ? (
         <Box>
@@ -702,7 +702,7 @@ function PlanningView({
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // ─── FORECAST VIEW ─────────────────────────────────────────────────────────────
-// Hero: best and worst day called out. Day grid is the main content.
+// Day grid is the main content and leads; best/worst days follow it.
 // Use when trip is 1–14 days out (live forecast data available).
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -724,6 +724,22 @@ function ForecastView({
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
+
+      {/* Day grid — main content in forecast mode */}
+      <Box>
+        <SectionLabel>All {days.length} days</SectionLabel>
+        <DayGrid days={days} />
+      </Box>
+
+      {/* Summary */}
+      {weather.summary && (
+        <Typography sx={{
+          fontSize: '1.2rem', color: D.muted,
+          lineHeight: 1.5, fontFamily: D.body,
+        }}>
+          {weather.summary}
+        </Typography>
+      )}
 
       {/* Best / worst hero */}
       {hasDual && (
@@ -772,22 +788,6 @@ function ForecastView({
           ))}
         </Box>
       )}
-
-      {/* Summary */}
-      {weather.summary && (
-        <Typography sx={{
-          fontSize: '1.2rem', color: D.muted,
-          lineHeight: 1.5, fontFamily: D.body,
-        }}>
-          {weather.summary}
-        </Typography>
-      )}
-
-      {/* Day grid — main content in forecast mode */}
-      <Box>
-        <SectionLabel>All {days.length} days</SectionLabel>
-        <DayGrid days={days} />
-      </Box>
 
       {/* Packing notes */}
       {weather.packingNotes && weather.packingNotes.length > 0 && (

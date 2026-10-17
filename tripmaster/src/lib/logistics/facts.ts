@@ -92,6 +92,7 @@ interface GroundTransportLeg {
   firstStop?:   { name: string };
   steps?:       { label: string; searchTerms?: string | null; estimatedDuration?: string | null }[];
   isMultiCity?: boolean;
+  userPlan?:    { note: string };
 }
 
 function parseDurMins(dur: string | null | undefined): number {
@@ -102,7 +103,7 @@ function parseDurMins(dur: string | null | undefined): number {
 }
 
 function groundGapLabel(leg: GroundTransportLeg | undefined | null, fallback: string): string | null {
-  if (!leg || leg.status !== 'gap') return null;
+  if (!leg || leg.status !== 'gap' || leg.userPlan) return null;
   const bookable = (leg.steps ?? []).filter(s => s.searchTerms);
   if (!bookable.length) return leg.firstStop?.name ? `Get to ${leg.firstStop.name}` : fallback;
   if (leg.isMultiCity && bookable.length > 1) {

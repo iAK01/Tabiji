@@ -10,6 +10,7 @@ import TripFile              from '@/lib/mongodb/models/TripFile';
 import TripLogistics         from '@/lib/mongodb/models/TripLogistics';
 import { geocodeNear }       from '@/lib/geo/geocode';
 import { resolveCheckIn, checkInHint } from '@/lib/itinerary/checkInTiming';
+import { DOCUMENT_TYPE_VALUES, DOC_TYPE_EXTRACT } from '@/lib/files/documentTypes';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -104,6 +105,7 @@ function buildPrompt(ctx: {
   sourceLabel: string;
   inlineText: string | null;
   fileTypeHint: string | null;
+  fileTypeGuidance: string;
 }): string {
   return `You are extracting structured trip data from material a traveller collected for their trip. It could be a conference schedule, an itinerary, a booking confirmation, a hotel email, a spreadsheet, a photo of a printed programme, or free-form notes.
 
@@ -114,7 +116,7 @@ Context:
 - Local timezone: ${ctx.tz}
 - Source: ${ctx.sourceLabel}
 ${ctx.userContext ? `- The traveller's own note about this: "${ctx.userContext}" — this is an instruction. Honour it: it may tell you which parts to keep or skip, whose booking this is, dates that apply, etc.` : ''}
-${ctx.fileTypeHint ? `- The traveller has tagged this file as: "${ctx.fileTypeHint}" — trust that unless the content clearly contradicts it` : ''}
+${ctx.fileTypeHint ? `- The traveller has tagged this file as: "${ctx.fileTypeHint}" (${ctx.fileTypeGuidance}). Trust that unless the content clearly contradicts it.` : ''}
 
 Extract everything relevant in these four groups:
 1. Accommodation — hotels, guesthouses, apartments, any place to stay. Capture the check-in/check-out DATES and, if the material states them, the earliest check-in TIME and latest check-out TIME the property allows (e.g. "Check-in: from 15:00").
@@ -142,8 +144,8 @@ Valid itinerary stop types: flight, meeting, meal, breakfast, activity, sightsee
 Valid transport types: flight, train, bus, ferry, car, car_hire, taxi, private_transfer, parking
 
 Also classify the whole document so the app knows where it belongs:
-- "documentType": one of boarding_pass, train_ticket, hotel_confirmation, car_hire, event_brief, ticket, reservation, visa, insurance, passport, other
-  (hotel_confirmation = any lodging: hotel, apartment, hostel, B&B, Booking.com/Airbnb confirmation)
+- "documentType": one of ${DOCUMENT_TYPE_VALUES.join(', ')}
+  Notes: hotel_confirmation = any lodging (hotel, apartment, hostel, B&B, Booking.com/Airbnb). flight_booking = the reservation/e-ticket you get when booking; boarding_pass = the day-of-travel pass with a gate & seat. trip_itinerary = a whole-trip plan covering several bookings. If it is a personal/admin document (passport, visa, ESTA/eTA/ETIAS, insurance, vaccination cert, medical letter, driving permit, invitation letter, receipt, travel approval) pick that type and return EMPTY arrays for all four groups unless the document also plainly contains a booking.
 - "summary": ONE plain sentence a traveller would understand, e.g. "Booking.com confirmation — Hotel Mondial, Cologne, check-in 24 Sep, check-out 27 Sep, ref XYZ123". If it is not a real trip document, say so.
 
 Return ONLY valid JSON, no markdown, no commentary:
@@ -189,6 +191,16 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
   let userContext    = (body.context ?? '').trim().slice(0, 500);
   const fileTypeHint = (body.fileType && body.fileType !== 'other') ? body.fileType : null;
+  const EXTRACT_GUIDANCE: Record<string, string> = {
+    transport:     'its contents are a booked journey — extract it under transport',
+    accommodation: 'its contents are a place to stay — extract it under accommodation',
+    events:        'its contents are a scheduled event or activity — extract it as a venue and/or itinerary stop',
+    everything:    'it may cover the whole trip — extract accommodation, venues, itinerary stops and transport',
+    reference:     'it is a personal/admin document — extract NOTHING unless it plainly also contains a booking',
+  };
+  const fileTypeGuidance = fileTypeHint
+    ? (EXTRACT_GUIDANCE[DOC_TYPE_EXTRACT[fileTypeHint] ?? 'everything'] ?? '')
+    : '';
 
   // ── Resolve the source ──────────────────────────────────────────────────────
   let resolved: Resolved;
@@ -243,6 +255,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     sourceLabel: claudeInput.label,
     inlineText:  claudeInput.kind === 'text' ? claudeInput.text : null,
     fileTypeHint,
+    fileTypeGuidance,
   });
 
   // ── Build the message content ──────────────────────────────────────────────
@@ -284,10 +297,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
     const parsed = JSON.parse(jsonMatch[0]);
 
-    const VALID_DOC_TYPES = new Set([
-      'boarding_pass', 'train_ticket', 'hotel_confirmation', 'car_hire', 'event_brief',
-      'ticket', 'reservation', 'visa', 'insurance', 'passport', 'other',
-    ]);
+    const VALID_DOC_TYPES = new Set(DOCUMENT_TYPE_VALUES);
     const classification = {
       documentType: VALID_DOC_TYPES.has(parsed.documentType) ? parsed.documentType : (fileTypeHint ?? 'other'),
       summary:      typeof parsed.summary === 'string' ? parsed.summary.slice(0, 300) : '',

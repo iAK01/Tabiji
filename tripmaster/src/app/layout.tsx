@@ -5,6 +5,8 @@ import CssBaseline from '@mui/material/CssBaseline';
 import { SessionProvider } from 'next-auth/react';
 import { useEffect } from 'react';
 import theme from '@/theme';
+import { registerServiceWorker } from '@/lib/offline/sw';
+import OfflineIndicator from '@/components/ui/OfflineIndicator';
 import 'mapbox-gl/dist/mapbox-gl.css';
 
 export default function RootLayout({
@@ -14,9 +16,7 @@ export default function RootLayout({
 }) {
 
   useEffect(() => {
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/sw.js');
-    }
+    registerServiceWorker();
   }, []);
 
   return (
@@ -36,6 +36,7 @@ export default function RootLayout({
           <ThemeProvider theme={theme}>
             <CssBaseline />
             {children}
+            <OfflineIndicator />
           </ThemeProvider>
         </SessionProvider>
       </body>

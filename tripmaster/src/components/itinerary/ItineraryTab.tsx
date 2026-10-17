@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { useSearchParams, useRouter, usePathname } from 'next/navigation';
+import { useSearchParams, usePathname } from 'next/navigation';
 import {
   DndContext, DragEndEvent,
   PointerSensor, TouchSensor,
@@ -10,7 +10,7 @@ import {
 import { restrictToVerticalAxis } from '@dnd-kit/modifiers';
 import {
   Box, Typography, Paper, Button,
-  IconButton, Chip, CircularProgress, Tooltip,
+  IconButton, Chip, CircularProgress, Tooltip, Menu, MenuItem,
 } from '@mui/material';
 import { alpha }              from '@mui/material/styles';
 import { useTheme, useMediaQuery } from '@mui/material';
@@ -19,11 +19,11 @@ import RouteIcon          from '@mui/icons-material/Route';
 import DirectionsWalkIcon from '@mui/icons-material/DirectionsWalk';
 import LockIcon           from '@mui/icons-material/Lock';
 import HotelIcon          from '@mui/icons-material/Hotel';
-import ExpandMoreIcon     from '@mui/icons-material/ExpandMore';
 import CalendarMonthIcon  from '@mui/icons-material/CalendarMonth';
 import NavigateButton     from '@/components/ui/NavigateButton';
 import ExportCalendarDialog from '@/components/calendar/ExportCalendarDialog';
-import { saveTripCache, getTripCache, queueAction } from '@/lib/offline/db';
+import { saveTripCache, getTripCache } from '@/lib/offline/db';
+import { sendOrQueue } from '@/lib/offline/writes';
 import {
   DAY_START_HOUR, DAY_END_HOUR,
   PX_PER_MIN_MOBILE, PX_PER_MIN_DESKTOP,
@@ -32,7 +32,7 @@ import {
 import type { Day, Stop, KnownLocation } from './Itinerary.config';
 import {
   stopStartMinutes, stopDuration, formatTime,
-  freeSlots, freeLabelText, computeStopColumns,
+  freeSlots, freeLabelText, computeStopColumns, isUntimed,
 } from './Itinerary.helpers';
 import { HourRuler, GridLines, FreeGap, TravelConnector } from './Timelinechrome';
 import { StopBlock }            from './Stopblock';
@@ -61,7 +61,6 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
 
   const searchParams = useSearchParams();
-  const router       = useRouter();
   const pathname     = usePathname();
 
   const pxPerMin  = isMobile ? PX_PER_MIN_MOBILE : PX_PER_MIN_DESKTOP;
@@ -72,7 +71,8 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
   const [filesByStop,    setFilesByStop]    = useState<Map<string, Array<{ _id: string; name: string; mimeType?: string; gcsUrl?: string }>>>(new Map());
   const [activeDayIdx,   setActiveDayIdx]   = useState(0);
   const [calculating,    setCalculating]    = useState(false);
-  const [showAllChips,   setShowAllChips]   = useState(false);
+  const [quickAddAnchor, setQuickAddAnchor] = useState<HTMLElement | null>(null);
+  const [showAllDay,     setShowAllDay]     = useState(false);
   const [knownLocations, setKnownLocations] = useState<KnownLocation[]>([]);
   const [accoms,         setAccoms]         = useState<Accom[]>([]);
   const [drawer, setDrawer] = useState<{
@@ -110,7 +110,9 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
     const params = new URLSearchParams(Array.from(searchParams.entries()));
     params.set('tab', 'itinerary');
     if (dn != null) params.set('day', String(dn));
-    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+    // Native replaceState (synced into useSearchParams by Next) — router.replace would
+    // re-request the page from the server, which fails offline.
+    window.history.replaceState(null, '', `${pathname}?${params.toString()}`);
   };
 
   // React to the day param changing under us (back/forward button).
@@ -223,12 +225,31 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
   const openDrawer = (time: string, type = 'activity', editStop?: Stop) =>
     setDrawer({ open: true, time, type, editStop });
 
+  const handleStopClick = (stop: Stop) => {
+    // Fact from a booking → send the user to the Logistics
+    // record, the only place it can actually be changed.
+    if (stop.source === 'logistics' && stop.locked) {
+      onSwitchToLogistics?.();
+      return;
+    }
+    // Everything else (incl. derived logistics stops) → edit here.
+    if (stop._id) {
+      const t = stopStartMinutes(stop);
+      openDrawer(t !== null ? formatTime(t) : '09:00', stop.type, stop);
+    }
+  };
+
   useEffect(() => {
     if (!fabTrigger) return;
     if (fabTrigger.action === 'stop') openDrawer('09:00', 'activity');
   }, [fabTrigger]);
 
   // ── CRUD ─────────────────────────────────────────────────────────────────────
+  // Optimistic days written into the saved itinerary when a change is queued offline.
+  const savedDays = (updatedDays: Day[]) => ({
+    [`/api/trips/${tripId}/itinerary`]: (saved: any) => ({ ...saved, days: updatedDays }),
+  });
+
   const addStop = async (stop: Partial<Stop>) => {
     const day         = days[activeDayIdx];
     const updatedDays = [...days];
@@ -246,18 +267,19 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
     setDays(updatedDays);
     await saveTripCache(tripId, { ...(await getTripCache(tripId)), itinerary: updatedDays });
 
-    if (!navigator.onLine) {
-      await queueAction({ type: 'ADD_STOP', tripId, payload: { dayDate: day.date, stop } });
-      return;
-    }
-    const res  = await fetch(`/api/trips/${tripId}/itinerary/stops`, {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({
-        dayDate: day.date,
-        stop: { ...stop, scheduledStart: `${day.date.split('T')[0]}T${stop.scheduledStart}:00` },
+    const res = await sendOrQueue(
+      { type: 'ADD_STOP', tripId, payload: { dayDate: day.date, stop } },
+      () => fetch(`/api/trips/${tripId}/itinerary/stops`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({
+          dayDate: day.date,
+          stop: { ...stop, scheduledStart: `${day.date.split('T')[0]}T${stop.scheduledStart}:00` },
+        }),
       }),
-    });
+      savedDays(updatedDays),
+    );
+    if (!res) return;
     const data = await res.json();
     setDays(data.days);
   };
@@ -277,15 +299,16 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
     setDays(updatedDays);
     await saveTripCache(tripId, { ...(await getTripCache(tripId)), itinerary: updatedDays });
 
-    if (!navigator.onLine) {
-      await queueAction({ type: 'RESCHEDULE_STOP', tripId, payload: { stopId: stop._id, ...stop, scheduledStart: newScheduledStart } });
-      return;
-    }
-    const res  = await fetch(`/api/trips/${tripId}/itinerary/stops/${stop._id}`, {
-      method:  'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ ...stop, scheduledStart: newScheduledStart }),
-    });
+    const res = await sendOrQueue(
+      { type: 'RESCHEDULE_STOP', tripId, payload: { stopId: stop._id, ...stop, scheduledStart: newScheduledStart } },
+      () => fetch(`/api/trips/${tripId}/itinerary/stops/${stop._id}`, {
+        method:  'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ ...stop, scheduledStart: newScheduledStart }),
+      }),
+      savedDays(updatedDays),
+    );
+    if (!res) return;
     const data = await res.json();
     setDays(data.days);
   };
@@ -298,11 +321,12 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
     setDays(updatedDays);
     await saveTripCache(tripId, { ...(await getTripCache(tripId)), itinerary: updatedDays });
 
-    if (!navigator.onLine) {
-      await queueAction({ type: 'DELETE_STOP', tripId, stopId });
-      return;
-    }
-    const res  = await fetch(`/api/trips/${tripId}/itinerary/stops/${stopId}`, { method: 'DELETE' });
+    const res = await sendOrQueue(
+      { type: 'DELETE_STOP', tripId, stopId },
+      () => fetch(`/api/trips/${tripId}/itinerary/stops/${stopId}`, { method: 'DELETE' }),
+      savedDays(updatedDays),
+    );
+    if (!res) return;
     const data = await res.json();
     setDays(data.days);
   };
@@ -321,15 +345,16 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
     setDays(updatedDays);
     await saveTripCache(tripId, { ...(await getTripCache(tripId)), itinerary: updatedDays });
 
-    if (!navigator.onLine) {
-      await queueAction({ type: 'RESCHEDULE_STOP', tripId, payload: { stopId, scheduledStart: newScheduledStart } });
-      return;
-    }
-    const res  = await fetch(`/api/trips/${tripId}/itinerary/stops/${stopId}`, {
-      method:  'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ scheduledStart: newScheduledStart }),
-    });
+    const res = await sendOrQueue(
+      { type: 'RESCHEDULE_STOP', tripId, payload: { stopId, scheduledStart: newScheduledStart } },
+      () => fetch(`/api/trips/${tripId}/itinerary/stops/${stopId}`, {
+        method:  'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ scheduledStart: newScheduledStart }),
+      }),
+      savedDays(updatedDays),
+    );
+    if (!res) return;
     const data = await res.json();
     setDays(data.days);
   };
@@ -354,15 +379,16 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
 
     if (!stop._id) return;
 
-    if (!navigator.onLine) {
-      await queueAction({ type: 'RESCHEDULE_STOP', tripId, payload: { stopId: stop._id, scheduledStart: newScheduledStart, duration: newDuration } });
-      return;
-    }
-    const res  = await fetch(`/api/trips/${tripId}/itinerary/stops/${stop._id}`, {
-      method:  'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ scheduledStart: newScheduledStart, duration: newDuration }),
-    });
+    const res = await sendOrQueue(
+      { type: 'RESCHEDULE_STOP', tripId, payload: { stopId: stop._id, scheduledStart: newScheduledStart, duration: newDuration } },
+      () => fetch(`/api/trips/${tripId}/itinerary/stops/${stop._id}`, {
+        method:  'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ scheduledStart: newScheduledStart, duration: newDuration }),
+      }),
+      savedDays(updatedDays),
+    );
+    if (!res) return;
     const data = await res.json();
     setDays(data.days);
   };
@@ -408,12 +434,14 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
 
   const calculateTravel = async () => {
     setCalculating(true);
-    if (!navigator.onLine) {
-      await queueAction({ type: 'CALCULATE_TRAVEL', tripId });
+    const res = await sendOrQueue(
+      { type: 'CALCULATE_TRAVEL', tripId },
+      () => fetch(`/api/trips/${tripId}/itinerary/calculate-travel`, { method: 'POST' }),
+    );
+    if (!res) {
       setCalculating(false);
       return;
     }
-    const res  = await fetch(`/api/trips/${tripId}/itinerary/calculate-travel`, { method: 'POST' });
     const data = await res.json();
     setDays(data.days);
     await saveTripCache(tripId, { ...(await getTripCache(tripId)), itinerary: data.days });
@@ -434,6 +462,10 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
 
   const activeDay        = days[activeDayIdx];
   const freeLabel        = activeDay ? freeLabelText(activeDay.stops) : '';
+  const timedStops       = activeDay?.stops.filter(s => !isUntimed(s)) ?? [];
+  const allDayStops      = activeDay?.stops.filter(isUntimed) ?? [];
+  const ALL_DAY_COLLAPSED = 6;
+  const shownAllDay      = showAllDay ? allDayStops : allDayStops.slice(0, ALL_DAY_COLLAPSED);
 
   // Which accommodation covers the day being viewed — the persistent "you're
   // based here" anchor a business traveller wants without hunting through Logistics.
@@ -441,8 +473,6 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
   const basedAt = activeDayYmd
     ? accoms.find(a => a.checkIn <= activeDayYmd && activeDayYmd <= a.checkOut) ?? null
     : null;
-  const visibleChipCount = isMobile ? 4 : 5;
-  const visibleChips     = showAllChips ? QUICK_ADD_TYPES : QUICK_ADD_TYPES.slice(0, visibleChipCount);
 
   // Per-day effective timeline bounds — expands upward for early flights, downward for late-night events
   const stopMins = activeDay?.stops
@@ -550,7 +580,7 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
       <Box sx={{
         display: 'grid',
         gridTemplateColumns: `repeat(${days.length}, 1fr)`,
-        mb: 3,
+        mb: 2,
         borderRadius: '12px',
         overflow: 'hidden',
         border: `1px solid ${D.rule}`,
@@ -570,7 +600,7 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
               onClick={() => selectDay(i)}
               sx={{
                 textAlign:       'center',
-                py:              isMobile ? 1.25 : 1.5,
+                py:              1,
                 px:              0.5,
                 cursor:          'pointer',
                 backgroundColor: active ? D.navy : 'transparent',
@@ -597,7 +627,7 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
               {/* Day number */}
               <Typography sx={{
                 fontFamily: D.display,
-                fontSize:   isMobile ? '1.8rem' : '2.2rem',
+                fontSize:   isMobile ? '1.4rem' : '1.6rem',
                 lineHeight: 1,
                 color:      active ? '#ffffff' : D.navy,
               }}>
@@ -629,170 +659,121 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
         })}
       </Box>
 
-      {/* ── Day header ── */}
+      {/* ── Day header — one line, so the timeline starts near the top ── */}
       {activeDay && (
-        <Box sx={{
-          display: 'flex', justifyContent: 'space-between',
-          alignItems: 'flex-start', mb: 2, gap: 1,
-        }}>
-          <Box>
-            {/* Day number large */}
-            <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1 }}>
-              <Typography sx={{
-                fontFamily: D.display,
-                fontSize:   { xs: '2rem', sm: '2.4rem' },
-                lineHeight: 1, color: D.navy,
-              }}>
-                Day {activeDay.dayNumber}
-              </Typography>
-              <Typography sx={{
-                fontFamily: D.body,
-                fontSize:   { xs: '0.9rem', sm: '1rem' },
-                fontWeight: 600,
-                color:      D.muted,
-                lineHeight: 1,
-              }}>
-                {new Date(activeDay.date).toLocaleDateString('en-IE', {
-                  weekday: 'long', day: 'numeric', month: 'long',
-                })}
-              </Typography>
-            </Box>
-
-            {/* Stat chips */}
-            <Box sx={{ display: 'flex', gap: 0.75, mt: 1, flexWrap: 'wrap' }}>
-              <Chip
-                size="small"
-                label={`${activeDay.stops.filter(s => s.source !== 'logistics').length} planned`}
-                sx={{
-                  backgroundColor: alpha(D.green, 0.12),
-                  color: D.green, fontWeight: 700,
-                  fontFamily: D.body, fontSize: '0.7rem',
-                }}
-              />
-              <Chip
-                size="small"
-                label={freeLabel}
-                sx={{
-                  backgroundColor: alpha(D.navy, 0.07),
-                  color: D.navy, fontWeight: 700,
-                  fontFamily: D.body, fontSize: '0.7rem',
-                }}
-              />
-              {activeDay.stops.filter(s => s.source === 'logistics').length > 0 && (
-                <Chip
-                  size="small"
-                  icon={<LockIcon sx={{ fontSize: '11px !important' }} />}
-                  label={`${activeDay.stops.filter(s => s.source === 'logistics').length} from logistics`}
-                  sx={{
-                    backgroundColor: alpha(D.terra, 0.10),
-                    color: D.terra, fontWeight: 700,
-                    fontFamily: D.body, fontSize: '0.7rem',
-                    '& .MuiChip-icon': { color: D.terra },
-                  }}
-                />
-              )}
-            </Box>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5, flexWrap: 'wrap' }}>
+          <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1, minWidth: 0 }}>
+            <Typography sx={{
+              fontFamily: D.display, fontSize: { xs: '1.3rem', sm: '1.5rem' },
+              lineHeight: 1, color: D.navy, whiteSpace: 'nowrap',
+            }}>
+              Day {activeDay.dayNumber}
+            </Typography>
+            <Typography sx={{
+              fontFamily: D.body, fontSize: { xs: '0.8rem', sm: '0.9rem' }, fontWeight: 600,
+              color: D.muted, lineHeight: 1, whiteSpace: 'nowrap',
+            }}>
+              {new Date(activeDay.date).toLocaleDateString('en-IE', {
+                weekday: isMobile ? 'short' : 'long', day: 'numeric', month: isMobile ? 'short' : 'long',
+              })}
+            </Typography>
           </Box>
 
-          {!isMobile && (
-            <Button
-              variant="outlined" size="small"
-              startIcon={<AddIcon />}
-              onClick={() => openDrawer('09:00', 'meeting')}
-              sx={{ flexShrink: 0, fontFamily: D.body, fontWeight: 700, mt: 0.5 }}
-            >
-              Quick add
-            </Button>
-          )}
+          {/* Stat chips */}
+          <Box sx={{ display: 'flex', gap: 0.75, flexWrap: 'wrap', flex: 1, minWidth: 0 }}>
+            <Chip
+              size="small"
+              label={`${activeDay.stops.filter(s => s.source !== 'logistics').length} planned`}
+              sx={{
+                backgroundColor: alpha(D.green, 0.12),
+                color: D.green, fontWeight: 700,
+                fontFamily: D.body, fontSize: '0.7rem',
+              }}
+            />
+            <Chip
+              size="small"
+              label={freeLabel}
+              sx={{
+                backgroundColor: alpha(D.navy, 0.07),
+                color: D.navy, fontWeight: 700,
+                fontFamily: D.body, fontSize: '0.7rem',
+              }}
+            />
+            {activeDay.stops.filter(s => s.source === 'logistics').length > 0 && (
+              <Chip
+                size="small"
+                icon={<LockIcon sx={{ fontSize: '11px !important' }} />}
+                label={`${activeDay.stops.filter(s => s.source === 'logistics').length} from logistics`}
+                sx={{
+                  backgroundColor: alpha(D.terra, 0.10),
+                  color: D.terra, fontWeight: 700,
+                  fontFamily: D.body, fontSize: '0.7rem',
+                  '& .MuiChip-icon': { color: D.terra },
+                }}
+              />
+            )}
+          </Box>
+
+          {/* Quick add — pick a type, drawer opens pre-set */}
+          <Button
+            variant="outlined" size="small"
+            startIcon={<AddIcon />}
+            onClick={e => setQuickAddAnchor(e.currentTarget)}
+            sx={{ flexShrink: 0, fontFamily: D.body, fontWeight: 700, ...(isMobile && { minHeight: 36 }) }}
+          >
+            Quick add
+          </Button>
+          <Menu
+            anchorEl={quickAddAnchor}
+            open={!!quickAddAnchor}
+            onClose={() => setQuickAddAnchor(null)}
+            anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+            transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+          >
+            {QUICK_ADD_TYPES.map(t => {
+              const c = STOP_CONFIG[t];
+              return (
+                <MenuItem
+                  key={t}
+                  onClick={() => { setQuickAddAnchor(null); openDrawer('09:00', t); }}
+                  sx={{ fontFamily: D.body, fontWeight: 600, fontSize: '0.88rem', color: c.color, gap: 1 }}
+                >
+                  <c.Icon sx={{ fontSize: 18 }} />
+                  {c.label.replace(/^\S+\s*/, '') || c.label}
+                </MenuItem>
+              );
+            })}
+          </Menu>
         </Box>
       )}
 
-      {/* ── "Based at" anchor — the hotel for the day being viewed ── */}
+      {/* ── "Based at" — one slim line: the hotel for the day being viewed ── */}
       {basedAt && (
         <Box sx={{
           display: 'flex', alignItems: 'center', gap: 1,
-          mb: 2, px: 1.5, py: 1,
-          borderRadius: '10px',
+          mb: 1.5, px: 1.25, py: 0.5,
+          borderRadius: '8px',
           border: `1px solid ${alpha('#5c35a0', 0.25)}`,
           backgroundColor: alpha('#5c35a0', 0.06),
         }}>
-          <HotelIcon sx={{ fontSize: 18, color: '#5c35a0', flexShrink: 0 }} />
-          <Box sx={{ minWidth: 0, flex: 1 }}>
-            <Typography sx={{
-              fontFamily: D.body, fontSize: '0.6rem', fontWeight: 800,
-              letterSpacing: '0.1em', textTransform: 'uppercase', color: alpha('#5c35a0', 0.7),
-              lineHeight: 1,
-            }}>
-              Based at
-            </Typography>
-            <Typography sx={{
-              fontFamily: D.display, fontSize: '0.9rem', color: D.navy, lineHeight: 1.25,
-              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', mt: 0.35,
-            }}>
-              {basedAt.name}
-            </Typography>
-            {basedAt.address && (
-              <Typography sx={{
-                fontFamily: D.body, fontSize: '0.72rem', color: D.muted, lineHeight: 1.3,
-                whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-              }}>
-                {basedAt.address}
-              </Typography>
-            )}
-          </Box>
+          <HotelIcon sx={{ fontSize: 16, color: '#5c35a0', flexShrink: 0 }} />
+          <Typography sx={{
+            fontFamily: D.body, fontSize: '0.8rem', color: D.navy, lineHeight: 1.3,
+            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: 1, minWidth: 0,
+          }}>
+            <Box component="span" sx={{ fontWeight: 800 }}>{basedAt.name}</Box>
+            {basedAt.address && <Box component="span" sx={{ color: D.muted }}> · {basedAt.address}</Box>}
+          </Typography>
           {(basedAt.address || basedAt.coordinates) && (
             <NavigateButton
               destination={{ name: basedAt.name, address: basedAt.address, coordinates: basedAt.coordinates ?? null }}
               suggestedMode="driving"
               size="small"
-              sx={{ flexShrink: 0, minWidth: 40, minHeight: 40 }}
+              sx={{ flexShrink: 0, minWidth: 32, minHeight: 32 }}
             />
           )}
         </Box>
       )}
-
-      {/* ── Quick add chip row ── */}
-      <Box sx={{ display: 'flex', gap: 0.75, mb: 2.5, flexWrap: 'wrap', alignItems: 'center' }}>
-        {visibleChips.map(t => {
-          const c = STOP_CONFIG[t];
-          return (
-            <Chip
-              key={t}
-              label={c.label}
-              size={isMobile ? 'medium' : 'small'}
-              onClick={() => openDrawer('09:00', t)}
-              sx={{
-                border:      `1.5px solid ${alpha(c.color, 0.35)}`,
-                color:       c.color,
-                fontFamily:  D.body,
-                fontWeight:  700,
-                backgroundColor: 'transparent',
-                '&:hover':  { backgroundColor: c.bg },
-                '&:active': { backgroundColor: c.bg },
-                ...(isMobile && { height: 36, '& .MuiChip-label': { px: 1.5, fontSize: '0.78rem' } }),
-              }}
-            />
-          );
-        })}
-        {isMobile && (
-          <Chip
-            size="medium"
-            label={showAllChips ? 'Less' : `+${QUICK_ADD_TYPES.length - visibleChipCount} more`}
-            onClick={() => setShowAllChips(v => !v)}
-            icon={<ExpandMoreIcon sx={{
-              fontSize: 16,
-              transform:  showAllChips ? 'rotate(180deg)' : 'none',
-              transition: 'transform 0.2s',
-            }} />}
-            sx={{
-              height: 36,
-              backgroundColor: alpha('#000', 0.04),
-              color: D.muted, fontFamily: D.body,
-              '& .MuiChip-label': { px: 1, fontSize: '0.78rem' },
-            }}
-          />
-        )}
-      </Box>
 
       {/* ── Timeline ── */}
       {activeDay && (
@@ -802,6 +783,66 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
           borderRadius: '2px',
           border: `1px solid ${D.rule}`,
         }}>
+          {/* ── All-day strip — venues/places known only by date, no time ── */}
+          {allDayStops.length > 0 && (
+            <Box sx={{ display: 'flex', borderBottom: `1px solid ${D.rule}`, backgroundColor: alpha(D.navy, 0.02) }}>
+              <Box sx={{
+                flexShrink: 0, width: 58, borderRight: `1px solid ${D.rule}`,
+                display: 'flex', justifyContent: 'center', pt: 1.4,
+              }}>
+                <Typography sx={{
+                  fontFamily: D.body, fontSize: '0.58rem', fontWeight: 800,
+                  letterSpacing: '0.08em', textTransform: 'uppercase',
+                  color: D.muted, lineHeight: 1.2, textAlign: 'center',
+                }}>
+                  All day
+                </Typography>
+              </Box>
+              <Box sx={{ flex: 1, minWidth: 0, display: 'flex', flexWrap: 'wrap', gap: 0.75, p: 1 }}>
+                {shownAllDay.map((stop, i) => {
+                  const c      = STOP_CONFIG[stop.type] ?? STOP_CONFIG.other;
+                  const isFact = stop.source === 'logistics' && stop.locked;
+                  return (
+                    <Box
+                      key={stop._id ?? i}
+                      onClick={() => handleStopClick(stop)}
+                      sx={{
+                        display: 'inline-flex', alignItems: 'center', gap: 0.5,
+                        maxWidth: '100%', px: 1, py: 0.5,
+                        borderRadius: '6px',
+                        borderLeft: `3px solid ${c.color}`,
+                        backgroundColor: '#ffffff',
+                        boxShadow: '0 0 0 1px rgba(0,0,0,0.06)',
+                        cursor: 'pointer',
+                        '&:hover': { boxShadow: `0 0 0 1.5px ${alpha(c.color, 0.5)}` },
+                      }}
+                    >
+                      <Typography sx={{
+                        fontFamily: D.body, fontSize: '0.75rem', fontWeight: 700, color: D.navy,
+                        whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                      }}>
+                        {stop.name?.trim() || 'Unnamed stop'}
+                      </Typography>
+                      {isFact && <LockIcon sx={{ fontSize: 10, color: alpha(D.navy, 0.35), flexShrink: 0 }} />}
+                    </Box>
+                  );
+                })}
+                {allDayStops.length > ALL_DAY_COLLAPSED && (
+                  <Chip
+                    size="small"
+                    label={showAllDay ? 'Less' : `+${allDayStops.length - ALL_DAY_COLLAPSED} more`}
+                    onClick={() => setShowAllDay(v => !v)}
+                    sx={{
+                      alignSelf: 'center',
+                      backgroundColor: alpha('#000', 0.04),
+                      color: D.muted, fontFamily: D.body, fontWeight: 700, fontSize: '0.7rem',
+                    }}
+                  />
+                )}
+              </Box>
+            </Box>
+          )}
+
           <DndContext
             sensors={sensors}
             modifiers={[restrictToVerticalAxis]}
@@ -888,30 +929,21 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
                 })()}
 
                 {(() => {
-                  const cols = computeStopColumns(activeDay.stops);
-                  return activeDay.stops.map((stop, i) => (
+                  // Short blocks render at a minimum height — reserve that in the layout
+                  const minMins = Math.ceil((isMobile ? 40 : 32) / pxPerMin);
+                  const cols    = computeStopColumns(timedStops, minMins);
+                  return timedStops.map((stop, i) => (
                     <Box key={stop._id ?? i}>
                       <StopBlock
                         stop={stop}
                         onDelete={stop._id ? () => deleteStop(stop._id!) : undefined}
-                        onClick={() => {
-                          // Fact from a booking → send the user to the Logistics
-                          // record, the only place it can actually be changed.
-                          if (stop.source === 'logistics' && stop.locked) {
-                            onSwitchToLogistics?.();
-                            return;
-                          }
-                          // Everything else (incl. derived logistics stops) → edit here.
-                          if (stop._id) {
-                            const t = stopStartMinutes(stop);
-                            openDrawer(t ? formatTime(t) : '09:00', stop.type, stop);
-                          }
-                        }}
+                        onClick={() => handleStopClick(stop)}
                         onResize={(newStartMin, newDuration) => resizeStop(stop, newStartMin, newDuration)}
                         pxPerMin={pxPerMin}
                         isMobile={isMobile}
                         colIndex={cols[i].col}
                         totalCols={cols[i].totalCols}
+                        colSpan={cols[i].span}
                         startHour={effectiveStartHour}
                         linkedFiles={
                           (stop._id && filesByStop.get(stop._id)?.length)
@@ -927,7 +959,7 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
                 })()}
 
                 {/* Empty state */}
-                {activeDay.stops.length === 0 && (
+                {timedStops.length === 0 && (
                   <Box sx={{
                     position: 'absolute', inset: 0,
                     display: 'flex', flexDirection: 'column',

@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, useCallback, Suspense } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import {
   Box, Container, Typography, AppBar, Toolbar, IconButton,
-  Tabs, Tab, Chip, Button, Paper, CircularProgress, Tooltip, alpha,
+  Tabs, Tab, Button, Paper, CircularProgress, Tooltip, alpha,
   Dialog, DialogTitle, DialogContent, DialogActions,
   TextField, Select, MenuItem, FormControl, InputLabel,
   List, ListItem, ListItemText, Divider,
@@ -49,11 +49,15 @@ import CloudIcon           from '@mui/icons-material/Cloud';
 import GrainIcon           from '@mui/icons-material/Grain';
 
 import dynamic             from 'next/dynamic';
-import { saveTripCache, getTripCache, queueAction } from '@/lib/offline/db';
+import { saveTripCache, getTripCache } from '@/lib/offline/db';
+import { sendOrQueue, savedTripPatch } from '@/lib/offline/writes';
 import { useFlushQueueOnReconnect } from '@/lib/offline/useFlushQueue';
 import { autoCacheTripFiles } from '@/lib/offline/fileCache';
+import { warmTrip }        from '@/lib/offline/warm';
+import OfflineBoundary     from '@/components/ui/OfflineBoundary';
 import { COUNTRY_LIST }    from '@/lib/data/countries';
 import AirportSearch       from '@/components/ui/AirportSearch';
+import { isOnTrip, displayStatus } from '@/lib/trips/onTrip';
 
 const MapTab = dynamic(() => import('@/components/map/MapTab'), { ssr: false });
 
@@ -279,6 +283,9 @@ function TripPageInner() {
   // ── Tab ↔ URL ────────────────────────────────────────────────────────────────
   // Tab change pushes a history entry so the browser / hardware back button steps
   // back through tabs instead of leaving the trip. ?tab is dropped for Overview.
+  // Native pushState (which Next syncs into useSearchParams) rather than router.push:
+  // router.push re-requests this dynamic page from the server, which offline turns
+  // every tab tap into a full reload.
   const setActiveTab = useCallback((next: number) => {
     setActiveTabState(next);
     const params = new URLSearchParams(Array.from(searchParams.entries()));
@@ -286,8 +293,8 @@ function TripPageInner() {
     else params.set('tab', TAB_SLUGS[next] ?? 'overview');
     params.delete('day');   // day belongs to the itinerary tab only
     const qs = params.toString();
-    router.push(qs ? `?${qs}` : window.location.pathname, { scroll: false });
-  }, [router, searchParams]);
+    window.history.pushState(null, '', qs ? `?${qs}` : window.location.pathname);
+  }, [searchParams]);
 
   // URL → state, for back/forward navigation.
   useEffect(() => {
@@ -327,9 +334,10 @@ function TripPageInner() {
     loadTrip();
   }, [id]);
 
-  // ── Pre-cache all uploaded files for offline access ───────────────────────
+  // ── Save this trip for offline: page, every tab's data, uploaded files ────
   useEffect(() => {
     if (!id) return;
+    warmTrip(String(id)).catch(() => {});
     fetch(`/api/trips/${id}/files`)
       .then(r => r.json())
       .then(data => autoCacheTripFiles(String(id), data.files ?? []))
@@ -397,18 +405,20 @@ function TripPageInner() {
       },
     };
 
-    if (!navigator.onLine) {
-      await queueAction({ type: 'UPDATE_TRIP', tripId: trip._id, payload });
+    const res = await sendOrQueue(
+      { type: 'UPDATE_TRIP', tripId: trip._id, payload },
+      () => fetch(`/api/trips/${trip._id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      }),
+      savedTripPatch(trip._id, payload),
+    );
+    if (!res) {
       setTrip({ ...trip, ...payload });
       setEditOpen(false);
       return;
     }
-
-    const res  = await fetch(`/api/trips/${trip._id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
     const data = await res.json();
     setTrip(data.trip);
     setEditOpen(false);
@@ -498,9 +508,8 @@ function TripPageInner() {
     ? Math.ceil((new Date(trip.startDate).getTime() - Date.now()) / 86400000)
     : null;
 
-  const isActive = trip.status === 'active';
-  const isPast   = trip.status === 'completed' ||
-    (!!trip.endDate && new Date(trip.endDate) < new Date(new Date().setHours(0, 0, 0, 0)));
+  // Status flips to 'active' 2 days early for push reminders — the on-trip UI waits for the start date
+  const isActive = isOnTrip(trip);
 
   const heroWeatherDay = trip.weather?.currentWeather?.[0] ?? trip.weather?.days?.[0];
 
@@ -548,14 +557,14 @@ function TripPageInner() {
       }}>
         <Box sx={{
           width: 6, height: 6, borderRadius: '50%',
-          backgroundColor: STATUS_DOT[trip.status] ?? alpha('#fff', 0.4),
+          backgroundColor: STATUS_DOT[displayStatus(trip) ?? ''] ?? alpha('#fff', 0.4),
           flexShrink: 0,
         }} />
         <Typography sx={{
           fontFamily: D.body, color: 'white', fontSize: '0.63rem',
           fontWeight: 800, textTransform: 'capitalize', letterSpacing: '0.05em',
         }}>
-          {trip.status}
+          {displayStatus(trip)}
         </Typography>
       </Box>
 
@@ -595,7 +604,7 @@ function TripPageInner() {
           )}
 
           {/* Every other tab — full-bleed cover photo, utility row sitting on top of it */}
-          {activeTab !== 0 && <Box sx={{ position: 'relative', height: { xs: 248, sm: 288, md: 320 }, overflow: 'hidden', bgcolor: D.navy }}>
+          {activeTab !== 0 && <Box sx={{ position: 'relative', height: { xs: 150, sm: 170, md: 180 }, overflow: 'hidden', bgcolor: D.navy }}>
 
             {/* Photo background */}
             {trip.coverPhotoUrl && (
@@ -642,10 +651,10 @@ function TripPageInner() {
               {/* Large: current tab name */}
               <Typography sx={{
                 fontFamily: D.display,
-                fontSize: { xs: '3rem', sm: '4rem', md: '5rem' },
+                fontSize: { xs: '2rem', sm: '2.4rem', md: '2.8rem' },
                 color: 'white', lineHeight: 1, letterSpacing: '-0.03em',
                 textShadow: '0 3px 20px rgba(0,0,0,0.7)',
-                mb: 0.75,
+                mb: 0.5,
               }}>
                 {tabConfig[activeTab]?.label}
               </Typography>
@@ -683,7 +692,7 @@ function TripPageInner() {
             {(heroWeatherDay || localTime) && (
               <Box sx={{
                 position: 'absolute', top: { xs: 56, sm: 60 }, right: { xs: 16, sm: 24 }, zIndex: 2,
-                display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 1.5,
+                display: 'flex', alignItems: 'flex-start', gap: 2.5,
               }}>
                 {heroWeatherDay && (
                   <Box sx={{ textAlign: 'right' }}>
@@ -729,7 +738,7 @@ function TripPageInner() {
                 value={activeTab}
                 onChange={(_, val) => {
                   setActiveTab(val);
-                  if (trip.status === 'active') {
+                  if (isActive) {
                     requestAnimationFrame(() => requestAnimationFrame(() => {
                       tabContentRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
                     }));
@@ -764,13 +773,13 @@ function TripPageInner() {
         {/* ── Tab content ── */}
         {activeTab === 0 ? (
           <>
-            {trip.status === 'active' && (
+            {isActive && (
               <Container maxWidth="lg" sx={{ pt: { xs: 2, sm: 2.5 }, px: { xs: 2, sm: 3 } }}>
                 <OnTripScreen tripId={trip._id} trip={trip} />
               </Container>
             )}
             <Box
-              ref={trip.status === 'active' ? tabContentRef : undefined}
+              ref={isActive ? tabContentRef : undefined}
               sx={{ scrollMarginTop: '66px' }}
             >
               <TripOverview
@@ -793,7 +802,7 @@ function TripPageInner() {
                         value={activeTab}
                         onChange={(_, val) => {
                           setActiveTab(val);
-                          if (trip.status === 'active') {
+                          if (isActive) {
                             requestAnimationFrame(() => requestAnimationFrame(() => {
                               tabContentRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
                             }));
@@ -829,9 +838,8 @@ function TripPageInner() {
           </>
         ) : (
           <Container maxWidth="lg" sx={{ py: { xs: 3, sm: 4 }, px: { xs: 2, sm: 3 } }}>
-            {trip.status === 'active' && <OnTripScreen tripId={trip._id} trip={trip} />}
             <Box
-              ref={trip.status === 'active' ? tabContentRef : undefined}
+              ref={isActive ? tabContentRef : undefined}
               sx={{ scrollMarginTop: '66px' }}
             >
               {activeTab === 1 && <LogisticsTab tripId={trip._id} trip={tripWithDefaults} fabTrigger={fabTrigger} />}
@@ -846,7 +854,11 @@ function TripPageInner() {
                   endDate={trip.endDate}
                 />
               )}
-              {activeTab === 6 && <MapTab tripId={trip._id} trip={trip} />}
+              {activeTab === 6 && (
+                <OfflineBoundary message="Map unavailable offline">
+                  <MapTab tripId={trip._id} trip={trip} />
+                </OfflineBoundary>
+              )}
               {activeTab === 7 && <FilesTab tripId={trip._id} fabTrigger={fabTrigger} />}
               {activeTab === EXPENSES_TAB_INDEX && isWorkTrip(trip.tripType) && (
                 <ExpensesTab tripId={trip._id} trip={tripWithDefaults} fabTrigger={fabTrigger} />

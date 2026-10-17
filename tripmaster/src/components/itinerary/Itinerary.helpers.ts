@@ -1,16 +1,17 @@
 import { DAY_START_HOUR, DAY_END_HOUR, SNAP_MINS } from './Itinerary.config';
 import type { Stop } from './Itinerary.config';
 
-// Handles both ISO timestamp (with T) and bare HH:MM, plus fallback stop.time
+// Handles both ISO timestamp (with T) and bare HH:MM, plus fallback stop.time.
+// Malformed values (e.g. "2026-10-22T:00" from an empty venue time) → null, not midnight.
 export function stopStartMinutes(stop: Stop): number | null {
   const timeStr = stop.scheduledStart
     ? stop.scheduledStart.includes('T')
-      ? stop.scheduledStart.split('T')[1]?.slice(0, 5)
+      ? stop.scheduledStart.split('T')[1]
       : stop.scheduledStart
     : stop.time;
-  if (!timeStr) return null;
-  const [h, m] = timeStr.split(':').map(Number);
-  return h * 60 + m;
+  const m = timeStr?.match(/^(\d{1,2}):(\d{2})/);
+  if (!m) return null;
+  return Number(m[1]) * 60 + Number(m[2]);
 }
 
 // Prefer explicit duration, then derive from scheduledEnd - scheduledStart, fallback 60
@@ -79,38 +80,65 @@ export function freeLabelText(stops: Stop[]): string {
   return freeH > 0 ? `${freeH}h${freeM > 0 ? ` ${freeM}m` : ''} free` : `${freeM}m free`;
 }
 
-// Column layout for overlapping stops
-// Returns per-stop { col, totalCols } so the timeline can render them side-by-side.
-export function computeStopColumns(stops: Stop[]): Array<{ col: number; totalCols: number }> {
+// Column layout for overlapping stops (calendar-style).
+// Stops that transitively overlap form a cluster; every stop in a cluster shares
+// the same column count, so neighbours never disagree about widths and cover
+// each other. Each stop then widens rightwards across columns that are free for
+// its whole duration (`span`). `minMins` is the visual minimum height in minutes
+// — short blocks render taller than their duration and must reserve that space.
+export function computeStopColumns(
+  stops: Stop[],
+  minMins = 0,
+): Array<{ col: number; totalCols: number; span: number }> {
   const n = stops.length;
   const intervals = stops.map(stop => {
     const start = stopStartMinutes(stop) ?? 0;
-    return { start, end: start + Math.max(stopDuration(stop), 1) };
+    return { start, end: start + Math.max(stopDuration(stop), minMins, 1) };
   });
+  const overlaps = (a: number, b: number) =>
+    intervals[a].start < intervals[b].end && intervals[b].start < intervals[a].end;
 
-  // Greedy column assignment: each stop takes the first column whose last occupant has ended
-  const cols = new Array<number>(n).fill(0);
-  const colEnds: number[] = [];
-  const byStart = [...Array(n).keys()].sort((a, b) => intervals[a].start - intervals[b].start);
+  // Earlier first; on ties the longer stop takes the left column
+  const order = [...Array(n).keys()].sort((a, b) =>
+    intervals[a].start - intervals[b].start || intervals[b].end - intervals[a].end,
+  );
 
-  for (const i of byStart) {
+  const result = new Array<{ col: number; totalCols: number; span: number }>(n);
+  let cluster: number[] = [];
+  let colEnds: number[] = [];
+  let clusterEnd = -Infinity;
+
+  const flush = () => {
+    const totalCols = colEnds.length;
+    for (const i of cluster) {
+      let span = 1;
+      for (let c = result[i].col + 1; c < totalCols; c++) {
+        if (cluster.some(j => result[j].col === c && overlaps(i, j))) break;
+        span++;
+      }
+      result[i].totalCols = totalCols;
+      result[i].span      = span;
+    }
+    cluster = []; colEnds = [];
+  };
+
+  for (const i of order) {
+    if (intervals[i].start >= clusterEnd) flush();
     const freeCol = colEnds.findIndex(end => end <= intervals[i].start);
     const col     = freeCol >= 0 ? freeCol : colEnds.length;
-    cols[i] = col;
-    if (freeCol >= 0) colEnds[freeCol] = intervals[i].end;
-    else colEnds.push(intervals[i].end);
+    colEnds[col]  = intervals[i].end;
+    result[i]     = { col, totalCols: 1, span: 1 };
+    cluster.push(i);
+    clusterEnd = cluster.length === 1 ? intervals[i].end : Math.max(clusterEnd, intervals[i].end);
   }
+  flush();
+  return result;
+}
 
-  // totalCols for each stop = 1 + max column index among all stops that overlap with it
-  return intervals.map((iv, i) => {
-    let maxCol = 0;
-    for (let j = 0; j < n; j++) {
-      if (intervals[j].start < iv.end && intervals[j].end > iv.start) {
-        maxCol = Math.max(maxCol, cols[j]);
-      }
-    }
-    return { col: cols[i], totalCols: maxCol + 1 };
-  });
+// A stop with no usable start time (e.g. a venue known only by its date) lives
+// in the all-day strip above the timeline rather than as a block on it.
+export function isUntimed(stop: Stop): boolean {
+  return stopStartMinutes(stop) === null;
 }
 
 // Snapped drag preview position

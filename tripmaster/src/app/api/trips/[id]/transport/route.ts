@@ -31,7 +31,20 @@ export interface TransportLeg {
   earlyMorningDetail?: string;
   steps:               TransportStep[];
   suggestedDate?:      string; // YYYY-MM-DD, set server-side for "Add to itinerary"
+  // Traveller's own decisions — set via PATCH, carried across regenerations
+  userPlan?:           { note: string; setAt: string };   // "I've sorted this" → leg counts as sorted
+  dismissedSteps?:     string[];                          // labels of options x'd out
 }
+
+const LEG_KEYS = ['preDeparture', 'arrivalLeg', 'returnLeg', 'homeCloseout'] as const;
+export type LegKey = typeof LEG_KEYS[number];
+
+const LEG_NAMES: Record<LegKey, string> = {
+  preDeparture: 'Pre-departure (home → departure airport)',
+  arrivalLeg:   'Arrival (airport → destination)',
+  returnLeg:    'Return (destination → airport)',
+  homeCloseout: 'Home (airport → home)',
+};
 
 export interface GroundTransportPlan {
   preDeparture:  TransportLeg;
@@ -77,6 +90,30 @@ function formatItineraryDay(day: any): string {
       const t = new Date(s.scheduledStart).toLocaleTimeString('en-IE', { hour: '2-digit', minute: '2-digit', hour12: false });
       return `  ${t} — ${s.name}${s.address ? ` (${s.address})` : ''}`;
     }).join('\n');
+}
+
+// ─── Traveller's own decisions → prompt ───────────────────────────────────────
+// A leg the traveller has sorted themselves (e.g. driving and sleeping in a van
+// near the airport) must not get "you can't get there" advice, and the other
+// legs should be consistent with it. Options they've x'd out stay gone.
+
+function travellerDecisions(previous: Partial<Record<LegKey, TransportLeg>> | null): string {
+  if (!previous) return '';
+  const own: string[] = [];
+  const rejected: string[] = [];
+  for (const key of LEG_KEYS) {
+    const leg = previous[key];
+    if (leg?.userPlan) own.push(`- ${LEG_NAMES[key]}: ${leg.userPlan.note || 'arranged by the traveller'}`);
+    for (const label of leg?.dismissedSteps ?? []) rejected.push(`- ${LEG_NAMES[key]}: "${label}"`);
+  }
+  let out = '';
+  if (own.length) {
+    out += `TRAVELLER'S OWN ARRANGEMENTS — already decided. Mark these legs "sorted", use the traveller's words as sortedDetail, return no steps for them, raise no warnings about them, and keep the other legs consistent with them:\n${own.join('\n')}\n\n`;
+  }
+  if (rejected.length) {
+    out += `OPTIONS THE TRAVELLER HAS REJECTED — do not suggest these or close variants again:\n${rejected.join('\n')}\n\n`;
+  }
+  return out;
 }
 
 // ─── Classify flights into outbound / return ──────────────────────────────────
@@ -152,6 +189,7 @@ function buildPrompt(ctx: {
   parkingAtReturn:    any | null;
   arrivalDate:        string;
   returnDepartureDate: string;
+  previous:           Partial<Record<LegKey, TransportLeg>> | null;
 }): string {
   const lastOutbound = ctx.outboundFlights[ctx.outboundFlights.length - 1];
   const firstReturn  = ctx.returnFlights[0];
@@ -210,7 +248,7 @@ HOME CLOSE-OUT STATUS (arrival airport → ${ctx.originCity}):
 ${ctx.homeCloseoutFound ? `Already covered: "${ctx.homeCloseoutFound}"` : `NOT found — this may be a gap`}
 ${returnParkingNote ? returnParkingNote : 'No parking noted for home airport'}
 
-${earlyFlag ? earlyFlag + '\n' : ''}
+${travellerDecisions(ctx.previous)}${earlyFlag ? earlyFlag + '\n' : ''}
 RULES:
 - NEVER invent specific departure times, platform numbers, or prices
 - If a leg is multi-city (arrival airport city ≠ destination city), always include the intercity step
@@ -385,6 +423,7 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
     parkingAtReturn,
     arrivalDate,
     returnDepartureDate: returnDepDate,
+    previous:            trip.groundTransport ?? null,
   });
 
   try {
@@ -413,6 +452,19 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
     if (parsed.returnLeg)     parsed.returnLeg.suggestedDate     = returnDepDate;
     if (parsed.homeCloseout)  parsed.homeCloseout.suggestedDate  = homeArrDate;
 
+    // Carry the traveller's decisions onto the fresh plan
+    const previous = trip.groundTransport as Partial<Record<LegKey, TransportLeg>> | null;
+    for (const key of LEG_KEYS) {
+      const prev = previous?.[key];
+      const leg  = parsed[key];
+      if (!prev || !leg) continue;
+      if (prev.userPlan) leg.userPlan = prev.userPlan;
+      if (prev.dismissedSteps?.length) {
+        leg.dismissedSteps = prev.dismissedSteps;
+        leg.steps = (leg.steps ?? []).filter((st: TransportStep) => !prev.dismissedSteps!.includes(st.label));
+      }
+    }
+
     const plan: GroundTransportPlan = { ...parsed, generatedAt: new Date().toISOString() };
 
     await Trip.findByIdAndUpdate(id, { groundTransport: plan });
@@ -423,6 +475,53 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
     console.error('Ground transport error:', message);
     return NextResponse.json({ error: `Failed to generate transport plan: ${message}` }, { status: 500 });
   }
+}
+
+// ─── PATCH — traveller's decisions on a leg ───────────────────────────────────
+// { leg, action: 'setUserPlan', note? }   → "I've sorted this"
+// { leg, action: 'clearUserPlan' }        → undo
+// { leg, action: 'dismissStep', label }   → x out one option
+
+export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  const session = await getServerSession();
+  if (!session?.user?.email) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
+
+  await connectDB();
+  const user = await User.findOne({ email: session.user.email });
+  const trip = await Trip.findOne({ _id: id, userId: user._id, deleted: false });
+  if (!trip) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+
+  const body = await req.json().catch(() => ({}));
+  const key  = body.leg as LegKey;
+  const plan = trip.groundTransport as GroundTransportPlan | null;
+  if (!plan || !LEG_KEYS.includes(key) || !plan[key]) {
+    return NextResponse.json({ error: 'Unknown leg' }, { status: 400 });
+  }
+  const leg = plan[key];
+
+  switch (body.action) {
+    case 'setUserPlan':
+      leg.userPlan = { note: String(body.note ?? '').trim().slice(0, 300), setAt: new Date().toISOString() };
+      break;
+    case 'clearUserPlan':
+      delete leg.userPlan;
+      break;
+    case 'dismissStep': {
+      const label = String(body.label ?? '');
+      if (!label) return NextResponse.json({ error: 'label required' }, { status: 400 });
+      leg.steps = (leg.steps ?? []).filter(st => st.label !== label);
+      leg.dismissedSteps = Array.from(new Set([...(leg.dismissedSteps ?? []), label]));
+      break;
+    }
+    default:
+      return NextResponse.json({ error: 'Unknown action' }, { status: 400 });
+  }
+
+  trip.groundTransport = plan;
+  trip.markModified('groundTransport');
+  await trip.save();
+  return NextResponse.json({ plan });
 }
 
 // ─── DELETE — clear cached plan ───────────────────────────────────────────────

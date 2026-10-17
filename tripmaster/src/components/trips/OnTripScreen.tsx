@@ -35,6 +35,7 @@ import AttachFileIcon           from '@mui/icons-material/AttachFile';
 import DocumentViewer, { type ViewableFile } from '@/components/files/DocumentViewer';
 import ArrivalTransportCard from '@/components/trips/ArrivalTransportCard';
 import QuickLaunchCard from '@/components/trips/QuickLaunchCard';
+import { sendOrQueue } from '@/lib/offline/writes';
 
 // ─── Design tokens ─────────────────────────────────────────────────────────────
 
@@ -940,7 +941,7 @@ export default function OnTripScreen({ tripId, trip }: OnTripScreenProps) {
   useEffect(() => {
     fetch('/api/user/my-apps').then(r => r.json()).then(data => {
       if (Array.isArray(data.myApps)) setMyAppIds(data.myApps);
-    });
+    }).catch(() => {});
   }, []);
 
   const load = useCallback(async (quiet = false) => {
@@ -993,11 +994,20 @@ export default function OnTripScreen({ tripId, trip }: OnTripScreenProps) {
   const completeTodo = async (id: string) => {
     setTodos(prev => prev.filter(t => t._id !== id));
     try {
-      await fetch(`/api/trips/${tripId}/files/${id}`, {
-        method:  'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ completed: true }),
-      });
+      await sendOrQueue(
+        { type: 'COMPLETE_TODO', tripId, fileId: id },
+        () => fetch(`/api/trips/${tripId}/files/${id}`, {
+          method:  'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ completed: true }),
+        }),
+        {
+          [`/api/trips/${tripId}/files`]: saved => saved?.files && {
+            ...saved,
+            files: saved.files.map((f: any) => (f._id === id ? { ...f, completed: true } : f)),
+          },
+        },
+      );
     } catch {
       load(true);
     }

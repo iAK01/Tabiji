@@ -4,9 +4,9 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   Box, Container, Typography, TextField, Button, Paper,
-  ToggleButton, ToggleButtonGroup, Stepper, Step, StepLabel,
+  Stepper, Step, StepLabel,
   AppBar, Toolbar, IconButton, FormControl, InputLabel, Select,
-  MenuItem, Chip, Tooltip, StepConnector, stepConnectorClasses,
+  MenuItem, Chip, StepConnector, stepConnectorClasses,
 } from '@mui/material';
 import { styled } from '@mui/material/styles';
 import ArrowBackIcon       from '@mui/icons-material/ArrowBack';
@@ -21,7 +21,7 @@ import BusinessCenterIcon  from '@mui/icons-material/BusinessCenter';
 import SyncAltIcon         from '@mui/icons-material/SyncAlt';
 import CheckIcon           from '@mui/icons-material/Check';
 import { COUNTRY_LIST }    from '@/lib/data/countries';
-import { queueAction }     from '@/lib/offline/db';
+import { sendOrQueue, pendingId } from '@/lib/offline/writes';
 import AirportSearch       from '@/components/ui/AirportSearch';
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
@@ -324,13 +324,19 @@ export default function NewTripPage() {
       },
       startDate: form.startDate, endDate: form.endDate, nights, status: 'planning',
     };
-    if (!navigator.onLine) {
-      await queueAction({ type: 'CREATE_TRIP', body: payload, timestamp: Date.now() });
+    // Shown on the dashboard (as waiting to sync) until the queued create reaches the server.
+    const pendingTrip = { _id: pendingId(), ...payload, _pending: true };
+    const res = await sendOrQueue(
+      { type: 'CREATE_TRIP', body: payload, timestamp: Date.now() },
+      () => fetch('/api/trips', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+      }),
+      { '/api/trips': saved => saved?.trips && { ...saved, trips: [...saved.trips, pendingTrip] } },
+    );
+    if (!res) {
       setSaving(false); router.push('/dashboard'); return;
     }
-    const data = await fetch('/api/trips', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
-    }).then(r => r.json());
+    const data = await res.json();
     if (data.trip?._id) router.push(`/trips/${data.trip._id}`);
     setSaving(false);
   };

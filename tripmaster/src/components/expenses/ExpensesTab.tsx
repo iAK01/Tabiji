@@ -16,7 +16,8 @@ import EditIcon       from '@mui/icons-material/Edit';
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 import CheckCircleIcon  from '@mui/icons-material/CheckCircle';
 import RadioButtonUncheckedIcon from '@mui/icons-material/RadioButtonUnchecked';
-import { queueAction, saveTripCache, getTripCache } from '@/lib/offline/db';
+import { saveTripCache, getTripCache } from '@/lib/offline/db';
+import { sendOrQueue, pendingId } from '@/lib/offline/writes';
 import { EXPENSE_CATEGORIES as CATEGORIES, EXPENSE_PAYERS as PAYERS, EXPENSE_STATUSES as STATUSES, getPayerLabel, payerNameMissing, type TripPayerNames } from '@/lib/logistics/expenseConstants';
 import { getProofSlots, FUEL_RECEIPT_SLOT, type ProofSlot } from '@/lib/logistics/expenseProofs';
 import { compressImageFile } from '@/lib/utils/imageCompression';
@@ -289,28 +290,30 @@ export default function ExpensesTab({ tripId, trip, fabTrigger }: ExpensesTabPro
       date: todayStr(), category: captureForm.category, amount: captureForm.amount,
       currency: 'EUR', gratuity: '', notes: '', payer: 'tbc', status: 'captured',
     };
-    if (!navigator.onLine) {
-      // The blob rides straight into IndexedDB (structured clone supports File/Blob
-      // natively) — flushQueue() builds the real multipart upload once back online.
-      await queueAction({
-        type: 'ADD_EXPENSE', tripId, payload,
-        receiptBlob: compressedFile ?? null,
-        receiptName: compressedFile?.name ?? null,
-        receiptType: compressedFile?.type ?? null,
-      });
-      setExpenses(prev => [{ _id: `pending-${Date.now()}`, ...payload, amount: parseFloat(payload.amount), _pending: true }, ...prev]);
-      setSaving(false);
-      setSnackbarMsg(
-        captureQueue.length > 0
-          ? `Captured offline (${captureQueue.length} more queued) — will finish uploading once you're back online`
-          : 'Captured offline — will finish uploading once you\'re back online',
-      );
-      advanceCaptureQueue();
-      return;
-    }
+    const pending = { _id: pendingId(), ...payload, amount: parseFloat(payload.amount), _pending: true };
     try {
-      const fd  = buildFormData(payload as any, compressedFile);
-      const res = await fetch(`/api/trips/${tripId}/expenses`, { method: 'POST', body: fd });
+      // Queued, the blob rides straight into IndexedDB (structured clone supports File/Blob
+      // natively) — flushQueue() builds the real multipart upload once back online.
+      const res = await sendOrQueue(
+        {
+          type: 'ADD_EXPENSE', tripId, payload,
+          receiptBlob: compressedFile ?? null,
+          receiptName: compressedFile?.name ?? null,
+          receiptType: compressedFile?.type ?? null,
+        },
+        () => fetch(`/api/trips/${tripId}/expenses`, { method: 'POST', body: buildFormData(payload as any, compressedFile) }),
+        { [`/api/trips/${tripId}/expenses`]: saved => saved && { ...saved, expenses: [pending, ...(saved.expenses ?? [])] } },
+      );
+      if (!res) {
+        setExpenses(prev => [pending, ...prev]);
+        setSnackbarMsg(
+          captureQueue.length > 0
+            ? `Captured offline (${captureQueue.length} more queued) — will finish uploading once you're back online`
+            : 'Captured offline — will finish uploading once you\'re back online',
+        );
+        advanceCaptureQueue();
+        return;
+      }
       if (!res.ok) {
         const body = await res.json().catch(() => null);
         throw new Error(body?.error || undefined);

@@ -443,12 +443,15 @@ export async function syncLogisticsToItinerary(tripId: string, logistics?: any) 
     for (const [vIdx, v] of (log.venues ?? []).entries()) {
       if (!v.name || !v.date) continue;
 
-      const time = v.time ?? '20:00';
+      // No usable time (Smart Extract sends '' for rooms/stages it only knows
+      // the day of) → an all-day marker, not a fake 2h block at midnight.
+      const time    = normaliseTime(v.time);
+      const endTime = normaliseTime(v.endTime);
 
-      let duration = 120;
-      if (v.time && v.endTime) {
-        const [sh, sm] = v.time.split(':').map(Number);
-        const [eh, em] = v.endTime.split(':').map(Number);
+      let duration = time ? 120 : 0;
+      if (time && endTime) {
+        const [sh, sm] = time.split(':').map(Number);
+        const [eh, em] = endTime.split(':').map(Number);
         const calc = (eh * 60 + em) - (sh * 60 + sm);
         if (calc > 0) duration = calc;
       }
@@ -461,8 +464,8 @@ export async function syncLogisticsToItinerary(tripId: string, logistics?: any) 
         name:           `${emoji} ${v.name}`,
         type:           'activity',
         color:          '#55702C',
-        time,
-        scheduledStart: toScheduledStart(v.date, time),
+        time:           time ?? undefined,
+        scheduledStart: time ? toScheduledStart(v.date, time) : undefined,
         duration,
         locked:         true,
         source:         'logistics',
@@ -473,7 +476,7 @@ export async function syncLogisticsToItinerary(tripId: string, logistics?: any) 
           v.website            ? `🔗 ${v.website}`              : null,
           (v.status === 'confirmed' || v.status === 'booked') ? '✅ Confirmed' : '⏳ Not booked',
         ].filter(Boolean).join(' · '),
-        metadata:     { venueType: v.type },
+        metadata:     { venueType: v.type, ...(time ? {} : { allDay: true }) },
         logisticsRef: { collection: 'venue', index: vIdx },
       });
     }

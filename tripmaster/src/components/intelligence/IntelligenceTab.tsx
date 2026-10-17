@@ -155,21 +155,13 @@ export default function IntelligenceTab({ tripId }: Props) {
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
 
-      {/* ── City ── */}
-      <Box>
-        <Typography sx={{
-          fontFamily: D.display,
-          fontSize: { xs: '2.5rem', sm: '3rem' },
-          color: D.navy, lineHeight: 1, letterSpacing: '-0.03em', mb: 0.5,
-        }}>
-          {intel.destination.city ?? intel.destination.country}
-        </Typography>
-        {intel.destination.city && (
-          <Typography sx={{ fontSize: '1rem', color: D.muted, fontWeight: 500 }}>
-            {intel.destination.country}
-          </Typography>
-        )}
-      </Box>
+      {/* ── Anchor nav ── */}
+      <AnchorNav />
+
+      {/* ── Sections ── */}
+      <Discoversection tripId={tripId} />
+
+      <Divider sx={{ borderColor: D.rule }} />
 
       {/* ── Critical alerts ── */}
       {passport?.isExpired && (
@@ -254,14 +246,6 @@ export default function IntelligenceTab({ tripId }: Props) {
           status="info" value={emergency.number}
           href="#ntk-emergency" />
       </Box>
-
-      {/* ── Anchor nav ── */}
-      <AnchorNav />
-
-      {/* ── Sections ── */}
-      <Discoversection tripId={tripId} />
-
-      <Divider sx={{ borderColor: D.rule }} />
 
       <Needtoknow
         visa={visa} tipping={tipping} water={water}

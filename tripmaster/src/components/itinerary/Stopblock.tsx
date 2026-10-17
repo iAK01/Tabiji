@@ -33,11 +33,12 @@ interface Props {
   isMobile:     boolean;
   colIndex?:    number;
   totalCols?:   number;
+  colSpan?:     number;
   linkedFiles?: LinkedFile[];
   startHour?:   number;
 }
 
-export function StopBlock({ stop, onDelete, onClick, onResize, pxPerMin, isMobile, colIndex = 0, totalCols = 1, linkedFiles = [], startHour = DAY_START_HOUR }: Props) {
+export function StopBlock({ stop, onDelete, onClick, onResize, pxPerMin, isMobile, colIndex = 0, totalCols = 1, colSpan = 1, linkedFiles = [], startHour = DAY_START_HOUR }: Props) {
   const startMin = stopStartMinutes(stop);
   if (startMin === null) return null;
 
@@ -78,6 +79,14 @@ export function StopBlock({ stop, onDelete, onClick, onResize, pxPerMin, isMobil
   // Content thresholds
   const isTall   = liveHeight >= (isMobile ? 60 : 52);   // show name + time
   const isShort  = liveHeight < (isMobile ? 44 : 38);    // time only, no name
+  const nameLines = liveHeight >= 96 ? 3 : liveHeight >= 70 ? 2 : 1;
+  // Long blocks read top-down like a calendar entry; short ones stay centred
+  const alignTop  = liveHeight > 80;
+
+  // Narrow card (many overlapping stops) → drop the icon + action columns so the
+  // time and name get the whole width. Container queries measure the card itself.
+  const NARROW = '@container (max-width: 150px)';
+  const colEnd = colIndex + colSpan;
 
   const handleResizePointerDown = (e: React.PointerEvent, edge: 'top' | 'bottom') => {
     e.stopPropagation();
@@ -151,8 +160,9 @@ export function StopBlock({ stop, onDelete, onClick, onResize, pxPerMin, isMobil
         }}
         sx={{
           position:   'absolute',
-          left:       totalCols === 1 ? 0 : `calc(${(colIndex / totalCols) * 100}% + ${colIndex > 0 ? 2 : 0}px)`,
-          right:      totalCols === 1 ? (isMobile ? 4 : 6) : colIndex < totalCols - 1 ? `calc(${((totalCols - colIndex - 1) / totalCols) * 100}% + 2px)` : (isMobile ? 4 : 6),
+          left:       colIndex === 0 ? 0 : `calc(${(colIndex / totalCols) * 100}% + 2px)`,
+          right:      colEnd >= totalCols ? (isMobile ? 4 : 6) : `calc(${((totalCols - colEnd) / totalCols) * 100}% + 2px)`,
+          containerType: 'inline-size',
           top:        liveTop,
           height:     liveHeight,
           zIndex:     isDragging || isResizing ? 100 : 2,
@@ -198,13 +208,15 @@ export function StopBlock({ stop, onDelete, onClick, onResize, pxPerMin, isMobil
             flexShrink:      0,
             width:           liveHeight > 60 ? (isMobile ? 44 : 38) : (isMobile ? 34 : 28),
             display:         'flex',
-            alignItems:      'center',
+            alignItems:      alignTop ? 'flex-start' : 'center',
             justifyContent:  'center',
+            pt:              alignTop ? 1 : 0,
             backgroundColor: hasFiles ? alpha(cfg.color, 0.18) : alpha(cfg.color, 0.10),
             transition:      'width 0.1s, background-color 0.15s',
             position:        'relative',
             cursor:          hasFiles ? 'pointer' : 'inherit',
             '&:hover':       hasFiles ? { backgroundColor: alpha(cfg.color, 0.28) } : {},
+            [NARROW]:        { display: 'none' },
           }}
         >
           <cfg.Icon sx={{
@@ -249,9 +261,11 @@ export function StopBlock({ stop, onDelete, onClick, onResize, pxPerMin, isMobil
           py: isMobile ? 0.75 : 0.5,
           display: 'flex',
           flexDirection: 'column',
-          justifyContent: 'center',
+          justifyContent: alignTop ? 'flex-start' : 'center',
+          pt: alignTop ? 1 : undefined,
           gap: 0.25,
           overflow: 'hidden',
+          [NARROW]: { px: 0.75 },
         }}>
 
           {/* Short block: name + time on one line, nothing hidden */}
@@ -316,10 +330,11 @@ export function StopBlock({ stop, onDelete, onClick, onResize, pxPerMin, isMobil
                   fontSize:     isMobile ? '0.88rem' : '0.82rem',
                   lineHeight:   1.15,
                   color:        D.navy,
-                  whiteSpace:   'nowrap',
                   overflow:     'hidden',
-                  textOverflow: 'ellipsis',
                   flex:         1,
+                  ...(nameLines > 1
+                    ? { display: '-webkit-box', WebkitBoxOrient: 'vertical', WebkitLineClamp: nameLines, overflowWrap: 'anywhere' }
+                    : { whiteSpace: 'nowrap', textOverflow: 'ellipsis' }),
                 }}>
                   {displayName}
                 </Typography>
@@ -363,9 +378,11 @@ export function StopBlock({ stop, onDelete, onClick, onResize, pxPerMin, isMobil
                 <Typography sx={{
                   fontFamily: D.body,
                   fontSize:   isMobile ? '0.7rem' : '0.64rem',
-                  color:      D.muted,
-                  lineHeight: 1,
-                  whiteSpace: 'nowrap',
+                  color:        D.muted,
+                  lineHeight:   1.2,
+                  whiteSpace:   'nowrap',
+                  overflow:     'hidden',
+                  textOverflow: 'ellipsis',
                 }}>
                   {liveDuration >= 60
                     ? `${Math.floor(liveDuration / 60)}h${liveDuration % 60 > 0 ? ` ${liveDuration % 60}m` : ''}`
@@ -384,6 +401,7 @@ export function StopBlock({ stop, onDelete, onClick, onResize, pxPerMin, isMobil
             display: 'flex', flexDirection: 'column',
             justifyContent: 'flex-start',
             flexShrink: 0, pt: 0.5, pr: 0.5,
+            [NARROW]: { display: 'none' },
           }}>
             {hasLocation && (
               <NavigateButton

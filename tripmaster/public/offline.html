@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#6B7C5C" />
+  <title>Tabiji — offline</title>
+  <style>
+    @font-face {
+      font-family: 'Archivo Black';
+      src: url('/fonts/ArchivoBlack-Regular.ttf') format('truetype');
+      font-display: swap;
+    }
+    :root { --bg: #F5F0E8; --paper: #FDFAF5; --green: #6B7C5C; --navy: #2C3E50; --terra: #C4714A; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100vh; min-height: 100dvh;
+      display: flex; align-items: center; justify-content: center;
+      padding: 24px max(16px, env(safe-area-inset-right)) 24px max(16px, env(safe-area-inset-left));
+      background: var(--bg); color: var(--navy);
+      font-family: Archivo, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    }
+    main {
+      width: 100%; max-width: 380px; padding: 32px 24px; text-align: center;
+      background: var(--paper); border-top: 4px solid var(--terra); border-radius: 12px;
+      box-shadow: 0 2px 12px rgba(44, 62, 80, 0.08);
+    }
+    h1 { margin: 0 0 8px; font: 400 1.5rem/1.2 'Archivo Black', sans-serif; letter-spacing: 0.01em; }
+    p  { margin: 0 0 24px; line-height: 1.5; color: rgba(44, 62, 80, 0.7); }
+    .actions { display: flex; flex-direction: column; gap: 10px; }
+    a, button {
+      display: block; width: 100%; padding: 12px 16px; border-radius: 8px;
+      font: 600 0.95rem/1 inherit; font-family: inherit; text-decoration: none; cursor: pointer;
+    }
+    a      { background: var(--green); color: #fff; border: 0; }
+    button { background: transparent; color: var(--navy); border: 1px solid rgba(44, 62, 80, 0.2); }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>You're offline</h1>
+    <p>This page isn't saved on this device yet.</p>
+    <div class="actions">
+      <a href="/dashboard">Open my trips</a>
+      <button type="button" onclick="location.reload()">Try again</button>
+    </div>
+  </main>
+  <script>window.addEventListener('online', () => location.reload());</script>
+</body>
+</html>

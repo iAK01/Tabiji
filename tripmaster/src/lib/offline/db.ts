@@ -1,4 +1,5 @@
 import { openDB } from 'idb';
+import { isOffline } from './connectivity';
 
 const DB_NAME = 'tabiji-offline';
 const DB_VERSION = 4;
@@ -73,9 +74,9 @@ export async function clearQueue() {
  * (ADD_STOP, ADD_TRANSPORT, etc.) was silently dropped the next time the queue was
  * cleared. Each action type here mirrors the exact online-path fetch its caller
  * already makes, including any payload reshaping that path does before sending.
- * Returns true/false for whether the action was (successfully) handled — a network
- * failure returns false so flushQueue() stops and leaves it queued for next time,
- * rather than skipping ahead out of order.
+ * Returns true/false for whether the action was handled — a network failure or server
+ * error returns false so flushQueue() stops and leaves it queued for next time, rather
+ * than skipping ahead out of order. A permanent rejection counts as handled (see isDone).
  */
 async function dispatchQueuedAction(action: any): Promise<boolean> {
   try {
@@ -191,43 +192,97 @@ async function dispatchQueuedAction(action: any): Promise<boolean> {
         break;
       }
 
+      case 'TOGGLE_PACKED':
+        res = await fetch(`/api/trips/${action.tripId}/packing`, {
+          method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(action.payload),
+        });
+        break;
+
+      case 'ADD_PACKING_ITEM':
+        res = await fetch(`/api/trips/${action.tripId}/packing`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(action.payload),
+        });
+        break;
+
+      case 'COMPLETE_TODO':
+        res = await fetch(`/api/trips/${action.tripId}/files/${action.fileId}`, {
+          method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ completed: true }),
+        });
+        break;
+
       default:
         // Unrecognised action type — drop it rather than block the queue forever.
         return true;
     }
-    return res.ok;
+    return isDone(res);
   } catch {
     return false;
   }
 }
 
+// A 4xx the server will give on every retry (deleted trip, invalid data) can never
+// succeed — left at the head of the queue it would block every change behind it
+// forever. Expired sessions (401) and rate limits stay queued for a later retry.
+function isDone(res: Response): boolean {
+  if (res.ok) return true;
+  const permanent = res.status >= 400 && res.status < 500 && ![401, 408, 429].includes(res.status);
+  if (permanent) console.warn(`[offline queue] dropped a queued change the server rejected (${res.status})`);
+  return permanent;
+}
+
 let flushInFlight = false;
+
+type FlushResult = { processed: number; remaining: number; synced: any[] };
 
 // Replays every queued action in order, stopping (not skipping) on the first failure
 // so nothing is lost or reordered. Safe to call opportunistically and often — on
-// mount, on the browser's 'online' event, etc. — it no-ops immediately if offline
-// or if a flush is already running.
-export async function flushQueue(): Promise<{ processed: number; remaining: number }> {
-  if (flushInFlight || typeof navigator !== 'undefined' && !navigator.onLine) {
-    return { processed: 0, remaining: (await getQueue()).length };
+// mount, on reconnect, etc. — it no-ops immediately if offline or if a flush is
+// already running in this tab or any other.
+export async function flushQueue(): Promise<FlushResult> {
+  if (flushInFlight || isOffline()) {
+    return { processed: 0, remaining: (await getQueue()).length, synced: [] };
   }
   flushInFlight = true;
   try {
-    const db      = await getDB();
-    const keys    = await db.getAllKeys('queue');
-    const actions = await db.getAll('queue');
-    let processed = 0;
-    for (let i = 0; i < actions.length; i++) {
-      const ok = await dispatchQueuedAction(actions[i]);
-      if (!ok) break;
-      await db.delete('queue', keys[i]);
-      processed++;
+    // One flush across every open tab/window, so two can't replay the same action.
+    if (navigator.locks) {
+      return await navigator.locks.request('tabiji-flush-queue', { ifAvailable: true }, async lock =>
+        lock ? replayQueue() : { processed: 0, remaining: (await getQueue()).length, synced: [] });
     }
-    const remaining = await db.count('queue');
-    return { processed, remaining };
+    return await replayQueue();
   } finally {
     flushInFlight = false;
   }
+}
+
+async function replayQueue(): Promise<FlushResult> {
+  const db      = await getDB();
+  const keys    = await db.getAllKeys('queue');
+  const actions = await db.getAll('queue');
+  const synced: any[] = [];
+  for (let i = 0; i < actions.length; i++) {
+    const ok = await dispatchQueuedAction(actions[i]);
+    if (!ok) break;
+    await db.delete('queue', keys[i]);
+    synced.push(actions[i]);
+  }
+  const remaining = await db.count('queue');
+  return { processed: synced.length, remaining, synced };
+}
+
+/* -------- Sign-out --------
+ * Drops saved trips and downloaded documents (the service worker clears its own caches
+ * when it sees the sign-out request). The queue is kept — those are unsynced edits.
+ */
+export async function clearOfflineData() {
+  const db = await getDB();
+  await Promise.all(['tripList', 'tripCache', 'pinnedFiles'].map(store => db.clear(store)));
+  try {
+    Object.keys(localStorage).filter(k => k.startsWith('tabiji-offline:')).forEach(k => localStorage.removeItem(k));
+  } catch { /* storage blocked */ }
 }
 
 /* -------- Pinned Files -------- */

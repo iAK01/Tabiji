@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useMemo } from 'react';
 import {
-  Box, Typography, IconButton, Paper, Chip,
+  Box, Typography, IconButton, Chip,
   CircularProgress, useMediaQuery, useTheme, Tooltip,
 } from '@mui/material';
 import ChevronLeftIcon  from '@mui/icons-material/ChevronLeft';
@@ -11,6 +11,7 @@ import WorkIcon         from '@mui/icons-material/Work';
 import BeachAccessIcon  from '@mui/icons-material/BeachAccess';
 import FlightIcon       from '@mui/icons-material/Flight';
 import { useRouter }    from 'next/navigation';
+import { isPendingId }  from '@/lib/offline/writes';
 
 interface Trip {
   _id: string;
@@ -65,11 +66,6 @@ function buildMonthGrid(year: number, month: number): string[][] {
   }
 
   return weeks;
-}
-
-interface TripSpan {
-  trip: Trip;
-  // For each week row, which day indices (0-6) this trip occupies
 }
 
 function getTripDaySet(trips: Trip[]): Map<string, Trip[]> {
@@ -397,7 +393,7 @@ export default function TripCalendar() {
             month={month}
             trips={trips}
             tripDayMap={tripDayMap}
-            onTripClick={id => router.push(`/trips/${id}`)}
+            onTripClick={id => { if (!isPendingId(id)) router.push(`/trips/${id}`); }}
             today={today}
           />
         ))}
@@ -422,7 +418,7 @@ export default function TripCalendar() {
                 return (
                   <Box
                     key={trip._id}
-                    onClick={() => router.push(`/trips/${trip._id}`)}
+                    onClick={() => { if (!isPendingId(trip._id)) router.push(`/trips/${trip._id}`); }}
                     sx={{
                       display: 'flex', alignItems: 'center', gap: 1.5,
                       p: 1.25, borderRadius: 1.5, cursor: 'pointer',

@@ -1,4 +1,5 @@
 import mongoose, { Schema } from 'mongoose';
+import { DOCUMENT_TYPE_VALUES } from '@/lib/files/documentTypes';
 
 const TripFileSchema = new Schema({
   tripId:       { type: Schema.Types.ObjectId, ref: 'Trip', required: true, index: true },
@@ -10,17 +11,8 @@ const TripFileSchema = new Schema({
   type: {
     type: String,
     enum: [
-      // ── File types ──
-      'boarding_pass',
-      'train_ticket',
-      'hotel_confirmation',
-      'car_hire',
-      'event_brief',
-      'ticket',
-      'reservation',
-      'visa',
-      'insurance',
-      'passport',
+      // ── File / document types (see src/lib/files/documentTypes.ts) ──
+      ...DOCUMENT_TYPE_VALUES,
       // ── Link types ──
       'primary',
       'hotel',

@@ -10,6 +10,7 @@ import HotelIcon          from '@mui/icons-material/Hotel';
 import LocationOnIcon     from '@mui/icons-material/LocationOn';
 import CalendarTodayIcon  from '@mui/icons-material/CalendarToday';
 import DirectionsIcon     from '@mui/icons-material/Directions';
+import { DOC_TYPE_LABEL } from '@/lib/files/documentTypes';
 
 const D = {
   green:   '#6B7C5C',
@@ -80,21 +81,6 @@ export interface DocClassification {
   documentType: string;
   summary:      string;
 }
-
-// Maps a classified document type → the human label shown in the Files tab.
-export const DOC_TYPE_LABEL: Record<string, string> = {
-  boarding_pass:      'Boarding pass',
-  train_ticket:       'Train / rail ticket',
-  hotel_confirmation: 'Accommodation confirmation',
-  car_hire:           'Car hire',
-  event_brief:        'Event brief / schedule',
-  ticket:             'Event ticket',
-  reservation:        'Reservation',
-  visa:               'Visa',
-  insurance:          'Insurance',
-  passport:           'Passport copy',
-  other:              'Other',
-};
 
 interface Props {
   open:     boolean;

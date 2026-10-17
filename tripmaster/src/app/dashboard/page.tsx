@@ -35,9 +35,11 @@ import { useEffect, useState } from 'react';
 import DocumentViewer, { type ViewableFile } from '@/components/files/DocumentViewer';
 import AttachFileIcon from '@mui/icons-material/AttachFile';
 import TripCalendar from '@/components/calendar/TripCalendar';
-import { saveTripList, getTripList } from '@/lib/offline/db';
+import { saveTripList, getTripList, clearOfflineData } from '@/lib/offline/db';
 import { useFlushQueueOnReconnect } from '@/lib/offline/useFlushQueue';
+import { warmTrips } from '@/lib/offline/warm';
 import TripReadinessPanel from '@/components/dashboard/TripReadinessPanel';
+import { isOnTrip } from '@/lib/trips/onTrip';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -52,6 +54,7 @@ interface Trip {
   status: string;
   coverPhotoThumb?: string;
   coverPhotoUrl?: string;
+  _pending?: boolean;   // created offline, not on the server yet
 }
 
 interface Stop {
@@ -486,6 +489,7 @@ export default function Dashboard() {
         const data = await res.json();
         await saveTripList(data.trips ?? []);
         setTrips(data.trips ?? []);
+        warmTrips(data.trips ?? []).catch(() => {});
       } catch {
         const offlineTrips = await getTripList();
         setTrips(offlineTrips ?? []);
@@ -584,7 +588,7 @@ export default function Dashboard() {
                   {firstName[0]}
                 </Avatar>
               </IconButton>
-              <IconButton color="inherit" size="small" onClick={() => signOut({ callbackUrl: '/signin' })}>
+              <IconButton color="inherit" size="small" onClick={async () => { await clearOfflineData().catch(() => {}); signOut({ callbackUrl: '/signin' }); }}>
                 <LogoutIcon fontSize="small" />
               </IconButton>
             </Box>
@@ -863,20 +867,20 @@ export default function Dashboard() {
                       return (
                         <Box
                           key={trip._id}
-                          onClick={() => router.push(`/trips/${trip._id}`)}
+                          onClick={() => { if (!trip._pending) router.push(`/trips/${trip._id}`); }}
                           sx={{
-                            cursor: 'pointer',
+                            cursor: trip._pending ? 'default' : 'pointer',
                             display: 'flex',
                             flexDirection: { xs: 'column', sm: 'row' },
                             backgroundColor: D.paper,
                             borderRadius: 2,
                             overflow: 'hidden',
                             border: `1.5px solid ${alpha(D.navy, 0.08)}`,
-                            ...(trip.status === 'active' && { border: `2px solid ${D.green}` }),
+                            ...(isOnTrip(trip) && { border: `2px solid ${D.green}` }),
                             transition: 'transform 0.15s, box-shadow 0.15s',
                             '&:hover': { transform: 'translateY(-2px)', boxShadow: `0 10px 32px ${alpha(D.navy, 0.1)}` },
                             '&:active': { transform: 'scale(0.998)' },
-                            opacity: trip.status === 'cancelled' ? 0.55 : 1,
+                            opacity: trip.status === 'cancelled' || trip._pending ? 0.55 : 1,
                           }}
                         >
                           {/* Photo panel */}
@@ -904,11 +908,11 @@ export default function Dashboard() {
                             }}>
                               <Box sx={{
                                 width: 6, height: 6, borderRadius: '50%',
-                                backgroundColor: STATUS_DOT[trip.status] ?? alpha('#fff', 0.5),
+                                backgroundColor: trip._pending ? alpha('#fff', 0.5) : (STATUS_DOT[trip.status] ?? alpha('#fff', 0.5)),
                               }} />
                               <Typography sx={{ fontFamily: D.body, color: 'white', fontSize: '0.63rem',
                                 fontWeight: 800, textTransform: 'capitalize', letterSpacing: '0.05em' }}>
-                                {trip.status}
+                                {trip._pending ? 'Waiting to sync' : trip.status}
                               </Typography>
                             </Box>
                           </Box>

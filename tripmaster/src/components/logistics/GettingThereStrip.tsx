@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import {
   Box, Typography, Paper, Button, Chip, CircularProgress,
-  Collapse, IconButton, Alert, Snackbar,
+  Collapse, IconButton, Alert, Snackbar, TextField,
 } from '@mui/material';
 import DirectionsCarIcon     from '@mui/icons-material/DirectionsCar';
 import TrainIcon             from '@mui/icons-material/Train';
@@ -23,6 +23,7 @@ import ExpandLessIcon        from '@mui/icons-material/ExpandLess';
 import OpenInNewIcon         from '@mui/icons-material/OpenInNew';
 import CalendarPlusIcon      from '@mui/icons-material/PlaylistAdd';
 import AccessTimeIcon        from '@mui/icons-material/AccessTime';
+import CloseIcon             from '@mui/icons-material/Close';
 import type { GroundTransportPlan, TransportLeg, TransportStep } from '@/app/api/trips/[id]/transport/route';
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
@@ -132,7 +133,7 @@ function LegStatusChip({ status }: { status: TransportLeg['status'] }) {
 
 // ─── Single transport step ────────────────────────────────────────────────────
 
-function StepCard({ step }: { step: TransportStep }) {
+function StepCard({ step, onDismiss }: { step: TransportStep; onDismiss?: () => void }) {
   const url = operatorUrl(step.operator, step.searchTerms);
   return (
     <Box sx={{
@@ -162,6 +163,16 @@ function StepCard({ step }: { step: TransportStep }) {
                 {step.estimatedDuration}
               </Typography>
             </Box>
+          )}
+          {onDismiss && (
+            <IconButton
+              size="small"
+              title="Not for me"
+              onClick={onDismiss}
+              sx={{ ml: 'auto', p: 0.5, color: D.muted, '&:hover': { color: D.navy } }}
+            >
+              <CloseIcon sx={{ fontSize: '0.95rem' }} />
+            </IconButton>
           )}
         </Box>
 
@@ -218,15 +229,45 @@ interface LegPanelProps {
   tripId:        string;
   defaultOpen?:  boolean;
   legKey:        'preDeparture' | 'arrivalLeg' | 'returnLeg' | 'homeCloseout';
+  onPlanChange:  (plan: GroundTransportPlan) => void;
 }
 
-function LegPanel({ label, subtitle, leg, generating, onGenerate, tripId, defaultOpen, legKey }: LegPanelProps) {
+function LegPanel({ label, subtitle, leg, generating, onGenerate, tripId, defaultOpen, legKey, onPlanChange }: LegPanelProps) {
   const [open,    setOpen]    = useState(defaultOpen ?? false);
   const [added,   setAdded]   = useState(false);
   const [adding,  setAdding]  = useState<number | null>(null);
+  const [sortingOpen, setSortingOpen] = useState(false);
+  const [note,        setNote]        = useState('');
+  const [saving,      setSaving]      = useState(false);
+  const [hidden,      setHidden]      = useState<Set<string>>(new Set());
 
-  const status = leg?.status ?? 'gap';
-  const hasSteps = (leg?.steps?.length ?? 0) > 0;
+  // The traveller's own arrangement overrides whatever the plan said
+  const userPlan = leg?.userPlan;
+  const status   = userPlan ? 'sorted' : (leg?.status ?? 'gap');
+  const steps    = (leg?.steps ?? []).filter(st => !hidden.has(st.label));
+  const hasSteps = steps.length > 0;
+  const canSort  = !userPlan && (status === 'gap' || !!leg?.earlyMorningWarning);
+
+  const patchLeg = async (payload: Record<string, unknown>) => {
+    const res  = await fetch(`/api/trips/${tripId}/transport`, {
+      method:  'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ leg: legKey, ...payload }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (data.plan) onPlanChange(data.plan);
+  };
+
+  const saveUserPlan = async () => {
+    setSaving(true);
+    try { await patchLeg({ action: 'setUserPlan', note }); setSortingOpen(false); setNote(''); }
+    finally { setSaving(false); }
+  };
+
+  const dismissStep = (step: TransportStep) => {
+    setHidden(h => new Set(h).add(step.label));
+    patchLeg({ action: 'dismissStep', label: step.label }).catch(() => {});
+  };
 
   const addToItinerary = async (step: TransportStep, idx: number) => {
     const dayDate = leg?.suggestedDate ?? null;
@@ -283,7 +324,7 @@ function LegPanel({ label, subtitle, leg, generating, onGenerate, tripId, defaul
       </Box>
 
       {/* Early morning warning — always visible, outside collapse */}
-      {leg?.earlyMorningWarning && (
+      {leg?.earlyMorningWarning && !userPlan && (
         <Box sx={{
           mx: 2, mb: 1, px: 1.5, py: 1,
           backgroundColor: 'rgba(196,113,74,0.08)',
@@ -301,104 +342,175 @@ function LegPanel({ label, subtitle, leg, generating, onGenerate, tripId, defaul
       <Collapse in={open}>
         <Box sx={{ px: 2, pb: 2 }}>
 
-          {/* Time pressure */}
-          {leg?.timePressure?.active && (
+          {/* Traveller's own arrangement */}
+          {userPlan && (
             <Box sx={{
-              mb: 1.5, px: 1.5, py: 1,
-              backgroundColor: 'rgba(196,113,74,0.06)',
-              border: `1px solid rgba(196,113,74,0.25)`,
-              borderLeft: `3px solid ${D.terra}`,
-              borderRadius: '0 6px 6px 0',
-            }}>
-              <Typography sx={{ fontSize: '0.82rem', color: D.terra, lineHeight: 1.5, fontFamily: D.body }}>
-                ⏱ {leg.timePressure.reason}
-              </Typography>
-            </Box>
-          )}
-
-          {/* First stop */}
-          {leg?.firstStop && (
-            <Box sx={{ mb: 1.5 }}>
-              <Typography sx={{ fontSize: '0.72rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: D.muted, fontFamily: D.body, mb: 0.25 }}>
-                Head to first
-              </Typography>
-              <Typography sx={{ fontSize: '0.9rem', fontWeight: 700, color: D.navy, fontFamily: D.body }}>
-                {leg.firstStop.name}
-              </Typography>
-              {leg.firstStop.address && (
-                <Typography sx={{ fontSize: '0.8rem', color: D.muted, fontFamily: D.body }}>
-                  {leg.firstStop.address}
-                </Typography>
-              )}
-            </Box>
-          )}
-
-          {/* Sorted detail */}
-          {status === 'sorted' && leg?.sortedDetail && (
-            <Box sx={{
-              mb: hasSteps ? 1.5 : 0, px: 1.5, py: 1,
+              display: 'flex', alignItems: 'center', gap: 1,
+              px: 1.5, py: 1,
               backgroundColor: 'rgba(107,124,92,0.06)',
               border: `1px solid rgba(107,124,92,0.2)`,
               borderLeft: `3px solid ${D.green}`,
               borderRadius: '0 6px 6px 0',
             }}>
-              <Typography sx={{ fontSize: '0.85rem', color: D.green, lineHeight: 1.5, fontFamily: D.body }}>
-                ✓ {leg.sortedDetail}
+              <Typography sx={{ flex: 1, fontSize: '0.85rem', color: D.green, lineHeight: 1.5, fontFamily: D.body }}>
+                ✓ {userPlan.note || 'Sorted'}
               </Typography>
+              <Button
+                size="small"
+                onClick={() => patchLeg({ action: 'clearUserPlan' })}
+                sx={{ fontSize: '0.72rem', fontWeight: 700, color: D.muted, textTransform: 'none', fontFamily: D.body, minWidth: 0 }}
+              >
+                Undo
+              </Button>
             </Box>
           )}
 
-          {/* No data state */}
-          {status === 'no_data' && (
-            <Typography sx={{ fontSize: '0.88rem', color: D.muted, fontFamily: D.body, py: 1 }}>
-              Add accommodation or a venue to your trip and regenerate to get guidance for this leg.
-            </Typography>
+          {/* "I've sorted this" — the traveller disagrees with the plan */}
+          {canSort && (
+            sortingOpen ? (
+              <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', mb: 1.5 }}>
+                <TextField
+                  size="small"
+                  fullWidth
+                  autoFocus
+                  value={note}
+                  onChange={e => setNote(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') saveUserPlan(); if (e.key === 'Escape') setSortingOpen(false); }}
+                  placeholder="How? e.g. Driving, staying near the airport"
+                  InputProps={{ sx: { fontFamily: D.body, fontSize: '0.85rem' } }}
+                />
+                <Button
+                  variant="contained"
+                  size="small"
+                  disabled={saving}
+                  onClick={saveUserPlan}
+                  sx={{ flexShrink: 0, fontFamily: D.body, fontWeight: 700, backgroundColor: D.green, '&:hover': { backgroundColor: D.green } }}
+                >
+                  {saving ? <CircularProgress size={14} sx={{ color: '#fff' }} /> : 'Save'}
+                </Button>
+                <IconButton size="small" onClick={() => setSortingOpen(false)} sx={{ color: D.muted }}>
+                  <CloseIcon sx={{ fontSize: '1rem' }} />
+                </IconButton>
+              </Box>
+            ) : (
+              <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 0.5 }}>
+                <Button
+                  size="small"
+                  startIcon={<CheckCircleIcon sx={{ fontSize: '0.9rem !important' }} />}
+                  onClick={() => setSortingOpen(true)}
+                  sx={{
+                    fontSize: '0.75rem', fontWeight: 700, py: 0.35, px: 1.25,
+                    color: D.green, border: `1px solid rgba(107,124,92,0.35)`,
+                    textTransform: 'none', fontFamily: D.body,
+                    '&:hover': { backgroundColor: 'rgba(107,124,92,0.08)' },
+                  }}
+                >
+                  I've sorted this
+                </Button>
+              </Box>
+            )
           )}
 
-          {/* Generate button for gap legs with no steps yet */}
-          {(status === 'gap') && !hasSteps && (
-            <Button
-              variant="outlined"
-              startIcon={generating ? <CircularProgress size={14} /> : <AutoAwesomeIcon sx={{ fontSize: '0.9rem !important' }} />}
-              onClick={e => { e.stopPropagation(); onGenerate(); }}
-              disabled={generating}
-              sx={{
-                fontFamily: D.body, fontSize: '0.85rem', fontWeight: 700,
-                borderColor: D.navy, color: D.navy, mt: 0.5,
-                '&:hover': { backgroundColor: 'rgba(29,38,66,0.05)' },
-              }}
-            >
-              {generating ? 'Generating…' : 'Generate plan'}
-            </Button>
-          )}
+          {!userPlan && (<>
+            {/* Time pressure */}
+            {leg?.timePressure?.active && (
+              <Box sx={{
+                mb: 1.5, px: 1.5, py: 1,
+                backgroundColor: 'rgba(196,113,74,0.06)',
+                border: `1px solid rgba(196,113,74,0.25)`,
+                borderLeft: `3px solid ${D.terra}`,
+                borderRadius: '0 6px 6px 0',
+              }}>
+                <Typography sx={{ fontSize: '0.82rem', color: D.terra, lineHeight: 1.5, fontFamily: D.body }}>
+                  ⏱ {leg.timePressure.reason}
+                </Typography>
+              </Box>
+            )}
 
-          {/* Steps */}
-          {hasSteps && (
-            <Box sx={{ mt: status === 'sorted' ? 0 : 0 }}>
-              {leg!.steps.map((step, i) => (
-                <Box key={i}>
-                  <StepCard step={step} />
-                  {step.method !== 'car' && (
-                    <Box sx={{ display: 'flex', justifyContent: 'flex-end', pb: 0.5 }}>
-                      <Button
-                        size="small"
-                        startIcon={adding === i ? <CircularProgress size={12} /> : <CalendarPlusIcon sx={{ fontSize: '0.85rem !important' }} />}
-                        disabled={adding === i}
-                        onClick={() => addToItinerary(step, i)}
-                        sx={{
-                          fontSize: '0.72rem', fontWeight: 700, py: 0.3, px: 1,
-                          color: D.muted, textTransform: 'none', fontFamily: D.body,
-                          '&:hover': { color: D.navy },
-                        }}
-                      >
-                        Add to itinerary
-                      </Button>
-                    </Box>
-                  )}
-                </Box>
-              ))}
-            </Box>
-          )}
+            {/* First stop */}
+            {leg?.firstStop && (
+              <Box sx={{ mb: 1.5 }}>
+                <Typography sx={{ fontSize: '0.72rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: D.muted, fontFamily: D.body, mb: 0.25 }}>
+                  Head to first
+                </Typography>
+                <Typography sx={{ fontSize: '0.9rem', fontWeight: 700, color: D.navy, fontFamily: D.body }}>
+                  {leg.firstStop.name}
+                </Typography>
+                {leg.firstStop.address && (
+                  <Typography sx={{ fontSize: '0.8rem', color: D.muted, fontFamily: D.body }}>
+                    {leg.firstStop.address}
+                  </Typography>
+                )}
+              </Box>
+            )}
+
+            {/* Sorted detail */}
+            {status === 'sorted' && leg?.sortedDetail && (
+              <Box sx={{
+                mb: hasSteps ? 1.5 : 0, px: 1.5, py: 1,
+                backgroundColor: 'rgba(107,124,92,0.06)',
+                border: `1px solid rgba(107,124,92,0.2)`,
+                borderLeft: `3px solid ${D.green}`,
+                borderRadius: '0 6px 6px 0',
+              }}>
+                <Typography sx={{ fontSize: '0.85rem', color: D.green, lineHeight: 1.5, fontFamily: D.body }}>
+                  ✓ {leg.sortedDetail}
+                </Typography>
+              </Box>
+            )}
+
+            {/* No data state */}
+            {status === 'no_data' && (
+              <Typography sx={{ fontSize: '0.88rem', color: D.muted, fontFamily: D.body, py: 1 }}>
+                Add accommodation or a venue to your trip and regenerate to get guidance for this leg.
+              </Typography>
+            )}
+
+            {/* Generate button for gap legs with no steps yet */}
+            {(status === 'gap') && !hasSteps && (
+              <Button
+                variant="outlined"
+                startIcon={generating ? <CircularProgress size={14} /> : <AutoAwesomeIcon sx={{ fontSize: '0.9rem !important' }} />}
+                onClick={e => { e.stopPropagation(); onGenerate(); }}
+                disabled={generating}
+                sx={{
+                  fontFamily: D.body, fontSize: '0.85rem', fontWeight: 700,
+                  borderColor: D.navy, color: D.navy, mt: 0.5,
+                  '&:hover': { backgroundColor: 'rgba(29,38,66,0.05)' },
+                }}
+              >
+                {generating ? 'Generating…' : 'Generate plan'}
+              </Button>
+            )}
+
+            {/* Steps */}
+            {hasSteps && (
+              <Box>
+                {steps.map((step, i) => (
+                  <Box key={step.label}>
+                    <StepCard step={step} onDismiss={() => dismissStep(step)} />
+                    {step.method !== 'car' && (
+                      <Box sx={{ display: 'flex', justifyContent: 'flex-end', pb: 0.5 }}>
+                        <Button
+                          size="small"
+                          startIcon={adding === i ? <CircularProgress size={12} /> : <CalendarPlusIcon sx={{ fontSize: '0.85rem !important' }} />}
+                          disabled={adding === i}
+                          onClick={() => addToItinerary(step, i)}
+                          sx={{
+                            fontSize: '0.72rem', fontWeight: 700, py: 0.3, px: 1,
+                            color: D.muted, textTransform: 'none', fontFamily: D.body,
+                            '&:hover': { color: D.navy },
+                          }}
+                        >
+                          Add to itinerary
+                        </Button>
+                      </Box>
+                    )}
+                  </Box>
+                ))}
+              </Box>
+            )}
+          </>)}
         </Box>
       </Collapse>
 
@@ -443,7 +555,7 @@ function JourneyOverview({ legs, labels }: {
                 backgroundColor: color,
                 border: `2px solid ${color}`,
               }} />
-              <Typography sx={{ fontSize: '0.62rem', fontWeight: 700, color, fontFamily: D.body, letterSpacing: '0.04em', whiteSpace: 'nowrap', maxWidth: 70, textAlign: 'center', lineHeight: 1.2 }}>
+              <Typography sx={{ fontSize: '0.62rem', fontWeight: 700, color, fontFamily: D.body, letterSpacing: '0.04em', whiteSpace: 'nowrap', textAlign: 'center', lineHeight: 1.2 }}>
                 {label}
               </Typography>
             </Box>
@@ -496,8 +608,12 @@ export default function GettingThereStrip({ tripId, trip }: Props) {
     }
   };
 
+  // A leg the traveller sorted themselves reads as sorted everywhere
+  const effective = (leg: TransportLeg | null | undefined): TransportLeg | null =>
+    leg ? (leg.userPlan ? { ...leg, status: 'sorted' } : leg) : null;
+
   const legs = plan
-    ? [plan.preDeparture, plan.arrivalLeg, plan.returnLeg, plan.homeCloseout]
+    ? [plan.preDeparture, plan.arrivalLeg, plan.returnLeg, plan.homeCloseout].map(effective)
     : [null, null, null, null];
 
   const legDefs = [
@@ -523,9 +639,10 @@ export default function GettingThereStrip({ tripId, trip }: Props) {
     },
   ];
 
-  const hasAnyGap = plan && legDefs.some(
-    d => plan[d.key]?.status === 'gap' || plan[d.key]?.earlyMorningWarning
-  );
+  const needsAction = (leg: TransportLeg | null | undefined) =>
+    !!leg && !leg.userPlan && (leg.status === 'gap' || !!leg.earlyMorningWarning);
+
+  const hasAnyGap = plan && legDefs.some(d => needsAction(plan[d.key]));
 
   return (
     <Paper
@@ -650,10 +767,8 @@ export default function GettingThereStrip({ tripId, trip }: Props) {
                 generating={generating}
                 onGenerate={generate}
                 tripId={tripId}
-                defaultOpen={
-                  plan[def.key]?.status === 'gap' ||
-                  plan[def.key]?.earlyMorningWarning === true
-                }
+                defaultOpen={needsAction(plan[def.key])}
+                onPlanChange={setPlan}
               />
             ))}
 

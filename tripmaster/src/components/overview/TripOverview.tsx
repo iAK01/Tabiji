@@ -2,42 +2,26 @@
 
 import React, { useEffect, useState } from 'react';
 import {
-  Box, Typography, Paper, Button, Chip, CircularProgress,
-  LinearProgress, Divider, alpha, Tooltip, IconButton,
+  Box, Typography, Paper, Button, CircularProgress,
+  LinearProgress, IconButton,
 } from '@mui/material';
 import ChevronRightIcon         from '@mui/icons-material/ChevronRight';
 import FlightIcon               from '@mui/icons-material/Flight';
-import HotelIcon                from '@mui/icons-material/Hotel';
-import DirectionsCarIcon        from '@mui/icons-material/DirectionsCar';
-import TheaterComedyIcon        from '@mui/icons-material/TheaterComedy';
 import BackpackIcon             from '@mui/icons-material/Backpack';
 import WbSunnyIcon              from '@mui/icons-material/WbSunny';
 import FolderOpenIcon           from '@mui/icons-material/FolderOpen';
 import MapIcon                  from '@mui/icons-material/Map';
-import PhoneIcon                from '@mui/icons-material/Phone';
-import EmailIcon                from '@mui/icons-material/Email';
-import LinkIcon                 from '@mui/icons-material/Link';
-import PersonIcon               from '@mui/icons-material/Person';
-import CheckCircleIcon          from '@mui/icons-material/CheckCircle';
-import WarningAmberIcon         from '@mui/icons-material/WarningAmber';
-import WhatsAppIcon             from '@mui/icons-material/WhatsApp';
-import SmsIcon                  from '@mui/icons-material/Sms';
-import RadioButtonUncheckedIcon from '@mui/icons-material/RadioButtonUnchecked';
-import BlockIcon                from '@mui/icons-material/Block';
 import UndoIcon                 from '@mui/icons-material/Undo';
-import TrainIcon                from '@mui/icons-material/Train';
-import BadgeIcon                from '@mui/icons-material/Badge';
-import HealthAndSafetyIcon      from '@mui/icons-material/HealthAndSafety';
-import ConfirmationNumberIcon   from '@mui/icons-material/ConfirmationNumber';
-import VisibilityIcon           from '@mui/icons-material/Visibility';
 import RefreshIcon              from '@mui/icons-material/Refresh';
 import NavigateButton           from '@/components/ui/NavigateButton';
 import DocumentViewer, { type ViewableFile } from '@/components/files/DocumentViewer';
 import PreTripAppsCard from '@/components/overview/PreTripAppsCard';
 import { saveTripCache, getTripCache } from '@/lib/offline/db';
+import { sendOrQueue, savedTripPatch } from '@/lib/offline/writes';
 import { totalFreeMinutes, freeLabelText } from '@/components/itinerary/Itinerary.helpers';
 import { getLogisticsFacts } from '@/lib/logistics/facts';
 import { getTransportLabel } from '@/components/logistics/logistics.helpers';
+import { displayStatus } from '@/lib/trips/onTrip';
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 
@@ -114,16 +98,6 @@ interface Props {
   tabsSlot?:       React.ReactNode;
 }
 
-// ─── Section colours ──────────────────────────────────────────────────────────
-
-const SECTION_COLOURS = {
-  logistics:  { header: '#1D2642', tint: 'rgba(29,38,66,0.03)',  accent: '#4a5a8a' },
-  itinerary:  { header: '#2d4a1e', tint: 'rgba(45,74,30,0.03)',  accent: '#55702C' },
-  weather:    { header: '#7a4a10', tint: 'rgba(122,74,16,0.03)', accent: '#C9521B' },
-  packing:    { header: '#3d3035', tint: 'rgba(61,48,53,0.03)',  accent: '#8b5e6a' },
-  resources:  { header: '#1a3d3d', tint: 'rgba(26,61,61,0.03)', accent: '#0891b2' },
-};
-
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function stopStartMinutes(stop: any): number | null {
@@ -139,7 +113,6 @@ function formatTime(mins: number): string {
   return `${String(Math.floor(mins / 60)).padStart(2, '0')}:${String(mins % 60).padStart(2, '0')}`;
 }
 
-const toDialDigits = (phone: string) => phone.replace(/\D/g, '');
 
 // ─── Shared atoms ─────────────────────────────────────────────────────────────
 
@@ -158,22 +131,6 @@ const SectionTag = ({ children, color = D.muted, icon }: { children: React.React
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
-const TICKET_TYPES = new Set([
-  'boarding_pass', 'train_ticket', 'hotel_confirmation', 'car_hire',
-  'visa', 'insurance', 'passport', 'event_brief',
-]);
-
-const TICKET_ICONS: Record<string, React.ElementType> = {
-  boarding_pass:      FlightIcon,
-  train_ticket:       TrainIcon,
-  hotel_confirmation: HotelIcon,
-  car_hire:           DirectionsCarIcon,
-  visa:               BadgeIcon,
-  insurance:          HealthAndSafetyIcon,
-  passport:           BadgeIcon,
-  event_brief:        ConfirmationNumberIcon,
-};
-
 export default function TripOverview({ trip, coverPhotoUrl, coverPhotoCredit, onNavigate, onRefreshPhoto, tabsSlot }: Props) {
   const [logistics,    setLogistics]    = useState<any>(null);
   const [packing,      setPacking]      = useState<any>(null);
@@ -183,17 +140,15 @@ export default function TripOverview({ trip, coverPhotoUrl, coverPhotoCredit, on
   const [dismissed,    setDismissed]    = useState<string[]>(trip.dismissedChecks ?? []);
   const [viewerFile,   setViewerFile]   = useState<ViewableFile | null>(null);
 
-  const toggleDismiss = async (key: string) => {
-    const next = dismissed.includes(key)
-      ? dismissed.filter(k => k !== key)
-      : [...dismissed, key];
-    setDismissed(next);
-    await fetch(`/api/trips/${trip._id}`, {
+  const saveDismissed = (checks: string[]) => sendOrQueue(
+    { type: 'UPDATE_TRIP', tripId: trip._id, payload: { dismissedChecks: checks } },
+    () => fetch(`/api/trips/${trip._id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ dismissedChecks: next }),
-    });
-  };
+      body: JSON.stringify({ dismissedChecks: checks }),
+    }),
+    savedTripPatch(trip._id, { dismissedChecks: checks }),
+  ).catch(() => null);
 
   useEffect(() => {
     async function load() {
@@ -334,7 +289,6 @@ export default function TripOverview({ trip, coverPhotoUrl, coverPhotoCredit, on
   const keyLinks   = resources.filter(r => r.resourceType === 'link' &&
     ['event_website', 'booking_reference', 'venue', 'artist_lineup'].includes(r.type));
   const docCount    = resources.filter(r => r.resourceType === 'file').length;
-  const ticketFiles = resources.filter(r => r.resourceType === 'file' && TICKET_TYPES.has(r.type) && r.gcsUrl);
   const hasResources = contacts.length > 0 || keyLinks.length > 0 || docCount > 0 || notes.length > 0;
 
   // ── Countdown label ───────────────────────────────────────────────────────
@@ -881,7 +835,7 @@ export default function TripOverview({ trip, coverPhotoUrl, coverPhotoCredit, on
               )}
 
               {/* ── BEFORE YOU GO APPS ── full width */}
-              {['idea', 'planning', 'confirmed'].includes(trip.status) && daysUntil > 0 && trip.destination.countryCode && (
+              {['idea', 'planning', 'confirmed'].includes(displayStatus(trip) ?? '') && daysUntil > 0 && trip.destination.countryCode && (
                 <Box sx={{ gridColumn: { md: '1 / -1' } }}>
                   <PreTripAppsCard
                     countryCode={trip.destination.countryCode}
@@ -901,11 +855,7 @@ export default function TripOverview({ trip, coverPhotoUrl, coverPhotoCredit, on
                     startIcon={<UndoIcon sx={{ fontSize: '0.8rem !important' }} />}
                     onClick={() => {
                       setDismissed([]);
-                      fetch(`/api/trips/${trip._id}`, {
-                        method: 'PUT',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ dismissedChecks: [] }),
-                      });
+                      saveDismissed([]);
                     }}
                     sx={{ fontFamily: D.body, fontSize: '0.72rem', color: D.muted, py: 0.25 }}
                   >
