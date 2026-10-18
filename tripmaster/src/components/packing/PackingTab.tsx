@@ -21,7 +21,6 @@ import WbSunnyIcon       from '@mui/icons-material/WbSunny';
 import InfoOutlinedIcon  from '@mui/icons-material/InfoOutlined';
 import TuneIcon          from '@mui/icons-material/Tune';
 import AssignmentTurnedInIcon from '@mui/icons-material/AssignmentTurnedIn';
-import ViewListIcon      from '@mui/icons-material/ViewList';
 import ViewCarouselIcon  from '@mui/icons-material/ViewCarousel';
 import LightModeIcon     from '@mui/icons-material/LightMode';
 import { sendOrQueue } from '@/lib/offline/writes';
@@ -594,14 +593,12 @@ export default function PackingTab({ tripId, tripType, nights, startDate, fabTri
             }}>
             Add
           </Button>
-          {view === 'list' && (
-            <Button size="small" variant="outlined" startIcon={<FilterListIcon />}
-              onClick={() => setFilterOpen(p => !p)}
-              color={filter !== 'all' ? 'primary' : 'inherit'}
-              sx={{ fontFamily: D.body, fontWeight: 700, fontSize: '0.72rem', flexShrink: 0, ...(mobile && { minHeight: 36 }) }}>
-              {filter === 'all' ? 'Filter' : filter}
-            </Button>
-          )}
+          <Button size="small" variant="outlined" startIcon={<FilterListIcon />}
+            onClick={() => setFilterOpen(p => !p)}
+            color={filter !== 'all' ? 'primary' : 'inherit'}
+            sx={{ fontFamily: D.body, fontWeight: 700, fontSize: '0.72rem', flexShrink: 0, ...(mobile && { minHeight: 36 }) }}>
+            {filter === 'all' ? 'Filter' : filter}
+          </Button>
           <IconButton size="small" onClick={generate} disabled={generating}
             aria-label="Regenerate list"
             title={showLiveRefresh ? 'Live forecast available — refresh' : 'Regenerate list'}>
@@ -611,18 +608,16 @@ export default function PackingTab({ tripId, tripType, nights, startDate, fabTri
           </IconButton>
         </Box>
 
-        {/* View + screen */}
+        {/* Cards + screen */}
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.25, flexWrap: 'wrap' }}>
-          <ToggleButtonGroup value={view} exclusive size="small"
-            onChange={(_, v) => { if (v) setView(v); }}
-            aria-label="Packing view">
-            <ToggleButton value="list" sx={toolSx}>
-              <ViewListIcon sx={{ fontSize: '1.05rem', mr: 0.5 }} />List
-            </ToggleButton>
-            <ToggleButton value="cards" sx={toolSx}>
-              <ViewCarouselIcon sx={{ fontSize: '1.05rem', mr: 0.5 }} />Cards
-            </ToggleButton>
-          </ToggleButtonGroup>
+          <Button variant="contained" size="small" onClick={() => setView('cards')}
+            startIcon={<ViewCarouselIcon />}
+            sx={{
+              ...toolSx, boxShadow: 'none', backgroundColor: D.navy, color: '#fff',
+              '&:hover': { backgroundColor: 'rgba(44,62,80,0.88)', boxShadow: 'none' },
+            }}>
+            Packing cards
+          </Button>
           <Box sx={{ flex: 1 }} />
           {wake.supported && (
             <ToggleButton value="awake" size="small" selected={keepAwake} onChange={toggleAwake}
@@ -634,7 +629,7 @@ export default function PackingTab({ tripId, tripType, nights, startDate, fabTri
         </Box>
 
         {/* Filter chips */}
-        <Collapse in={filterOpen && view === 'list'}>
+        <Collapse in={filterOpen}>
           <Box sx={{ display: 'flex', gap: 1, mb: 1.25, flexWrap: 'wrap' }}>
             {(['all', 'unpacked', 'packed'] as const).map(f => (
               <Chip key={f}
@@ -690,16 +685,15 @@ export default function PackingTab({ tripId, tripType, nights, startDate, fabTri
         </Box>
       </Paper>
 
-      {/* ── One item at a time ── */}
-      {view === 'cards' && (
-        <PackingCardDeck
-          items={deckItems} nights={nights} pending={pending}
-          onStatus={setItemStatus} onShowList={() => setView('list')}
-        />
-      )}
+      {/* ── One item at a time, full screen ── */}
+      <PackingCardDeck
+        open={view === 'cards'} onClose={() => setView('list')}
+        items={deckItems} nights={nights} pending={pending} onStatus={setItemStatus}
+        awake={{ supported: wake.supported, on: keepAwake, toggle: toggleAwake }}
+      />
 
       {/* ── Category sections ── */}
-      {view === 'list' && Object.entries(grouped).map(([category, catItems]) => {
+      {Object.entries(grouped).map(([category, catItems]) => {
         const packedCount  = catItems.filter(i => i.packed).length;
         const bringing     = catItems.filter(i => !i.skipped).length;
         const allCatPacked = catItems.every(isDone);
