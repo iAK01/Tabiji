@@ -9,6 +9,7 @@ import { registerServiceWorker } from '@/lib/offline/sw';
 import { listenForNotificationOpens, syncPushOnOpen } from '@/lib/push/client';
 import OfflineIndicator from '@/components/ui/OfflineIndicator';
 import SaveErrorToast from '@/components/ui/SaveErrorToast';
+import PassMoment from '@/components/passes/PassMoment';
 import 'mapbox-gl/dist/mapbox-gl.css';
 
 export default function RootLayout({
@@ -40,6 +41,7 @@ export default function RootLayout({
           <ThemeProvider theme={theme}>
             <CssBaseline />
             {children}
+            <PassMoment />
             <OfflineIndicator />
             <SaveErrorToast />
           </ThemeProvider>

@@ -36,6 +36,7 @@ export interface Intelligence {
   };
   timezone: {
     destinationTimezone: string;
+    originTimezone:      string | null;
     hoursDifference:     number;
     absDifference:       number;
     jetlagRisk:          'none' | 'mild' | 'moderate' | 'significant';
@@ -98,17 +99,24 @@ export interface Intelligence {
 // ─── Culture / Discover types ─────────────────────────────────────────────────
 
 export interface CultureHighlight {
-  name:         string;
-  description:  string;
-  type:         string;
-  category:     'cultural' | 'coffee' | 'park';
-  tip?:         string;
-  free?:        boolean;
-  address?:     string;
-  coordinates?: { lat: number; lng: number };
-  nearVenue?:   string;
-  imageUrl?:    string;
-  imageCredit?: { name: string; username: string; link: string };
+  id?:           string;     // absent on briefings from before picks had ids — use pickKey()
+  listingId?:    string;     // the Wikivoyage listing this pick is, when the guide has it
+  source?:       'wikivoyage' | 'ai';
+  name:          string;
+  description:   string;
+  type:          string;
+  category:      'cultural' | 'coffee' | 'park' | 'food';
+  tip?:          string;
+  free?:         boolean;
+  address?:      string;
+  coordinates?:  { lat: number; lng: number };
+  nearVenue?:    string;
+  hours?:        string;
+  price?:        string;
+  website?:      string;
+  imageUrl?:     string;
+  imageCredit?:  { name: string; username?: string; link: string; source?: 'unsplash' | 'wikimedia'; licence?: string };
+  imageChecked?: boolean;
 }
 
 export interface CultureBriefing {

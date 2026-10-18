@@ -5,6 +5,7 @@
 // landing — the arrival guide for wherever you've just arrived. Driven by
 // ?sheet=transport|accommodation|venue|arrival&i=<logistics index>, so it works
 // from a cold start, from a tap while the app is open, and offline.
+// ?sheet=pass opens a booking's boarding pass straight away (its sheet if it has none).
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
@@ -35,14 +36,21 @@ import { COUNTRY_META } from '@/lib/data/countries';
 import { getProofSlots } from '@/lib/logistics/expenseProofs';
 import { resolveCheckIn, normaliseTime } from '@/lib/itinerary/checkInTiming';
 import { openAppUrl } from '@/lib/push/useNotifications';
+import PassTile from '@/components/passes/PassTile';
+import PassView from '@/components/passes/PassView';
+import AddPassButton from '@/components/passes/AddPassButton';
+import { passesFor, wantsPass } from '@/lib/passes/passes';
+import FlightLive from '@/components/flights/FlightLive';
+import { useFlights } from '@/lib/flights/useFlights';
+import type { FlightStatus } from '@/lib/flights/status';
 
 const NAVY  = '#2C3E50';
 const GREEN = '#55702C';
 const TERRA = '#C4714A';
 const PAPER = '#FDFAF5';
 
-type Kind = 'transport' | 'accommodation' | 'venue' | 'arrival';
-const KINDS: Kind[] = ['transport', 'accommodation', 'venue', 'arrival'];
+type Kind = 'transport' | 'accommodation' | 'venue' | 'arrival' | 'pass';
+const KINDS: Kind[] = ['transport', 'accommodation', 'venue', 'arrival', 'pass'];
 
 const TYPE_LABEL: Record<string, string> = {
   flight: 'Flight', train: 'Train', bus: 'Bus', ferry: 'Ferry', car_hire: 'Car hire',
@@ -189,8 +197,10 @@ export default function TravelSheet({ trip }: { trip: any }) {
   const index     = Number(searchParams.get('i'));
   const open      = !!kind && Number.isInteger(index) && index >= 0;
 
-  const [data,   setData]   = useState<Loaded | null>(null);
-  const [viewer, setViewer] = useState<ViewableFile | null>(null);
+  const [data,     setData]     = useState<Loaded | null>(null);
+  const [viewer,   setViewer]   = useState<ViewableFile | null>(null);
+  const [passOpen, setPassOpen] = useState(false);
+  const flights = useFlights(open ? String(trip._id) : null);
 
   // Fresh every time it opens — a proof uploaded or a booking edited since the
   // last tap shows up (offline, the saved copies answer).
@@ -217,6 +227,8 @@ export default function TravelSheet({ trip }: { trip: any }) {
     return () => { cancelled = true; };
   }, [open, kind, index, trip._id]);
 
+  useEffect(() => { if (!open) setPassOpen(false); }, [open]);
+
   const close = useCallback(() => {
     const params = new URLSearchParams(window.location.search);
     params.delete('sheet');
@@ -241,6 +253,21 @@ export default function TravelSheet({ trip }: { trip: any }) {
 
   const tripId = String(trip._id);
   const lg     = data?.logistics;
+  const passes = (kind === 'transport' || kind === 'pass') && lg?.transportation?.[index]
+    ? passesFor(data?.files ?? [], index, lg.transportation[index])
+    : [];
+
+  // A pass added here shows straight away; it's in the saved data by the next open.
+  const passAdded = (files: any[]) => {
+    setData(d => d && { ...d, files: [...files, ...d.files.filter(f => !files.some(n => n._id === f._id))] });
+    if (files.some(f => f.barcode && f.linkedTo?.entryId === String(index))) setPassOpen(true);
+  };
+  const addPass = { tripId: String(trip._id), index, onAdded: passAdded };
+
+  if (kind === 'pass') {
+    if (!data) return null;
+    if (passes.length) return <PassView open passes={passes} t={lg.transportation[index]} flight={flights[index] ?? null} onClose={close} add={addPass} />;
+  }
   const linked = (collection: string) => (data?.files ?? []).filter(f =>
     f.resourceType !== 'todo' && f.linkedTo?.collection === collection && f.linkedTo?.entryId === String(index));
   const expenseFor = (collection: string) => (data?.expenses ?? []).find(e =>
@@ -252,7 +279,7 @@ export default function TravelSheet({ trip }: { trip: any }) {
   let body: React.ReactNode = null;
 
   // ── Transport ──
-  if (kind === 'transport' && lg?.transportation?.[index]) {
+  if ((kind === 'transport' || kind === 'pass') && lg?.transportation?.[index]) {
     const t    = lg.transportation[index];
     const leg  = legs.find(l => l.index === index) ?? null;
     const type = t.type || 'flight';
@@ -271,10 +298,24 @@ export default function TravelSheet({ trip }: { trip: any }) {
 
     body = (
       <>
+        {passes.length > 0 ? (
+          <Box sx={{ mb: 2 }}>
+            <PassTile passes={passes} t={t} onOpen={() => setPassOpen(true)} />
+          </Box>
+        ) : wantsPass(t) && (
+          <Box sx={{ mb: 2 }}>
+            <AddPassButton tripId={tripId} index={index} t={t} onAdded={passAdded} />
+          </Box>
+        )}
         {(t.departureLocation || t.arrivalLocation) && (
           <Typography sx={{ fontSize: '1rem', fontWeight: 700, color: NAVY }}>
             {placeName(t.departureLocation) || t.departureLocation} → {placeName(t.arrivalLocation) || t.arrivalLocation}
           </Typography>
+        )}
+        {type === 'flight' && (
+          <Box sx={{ mt: 1.5 }}>
+            <FlightLive t={t} fs={flights[index] ?? null} />
+          </Box>
         )}
         <Box sx={{ mt: 1.5 }}>
           {t.departureTime && <Fact label="Departs" value={shown(t.departureTime)} />}
@@ -389,7 +430,7 @@ export default function TravelSheet({ trip }: { trip: any }) {
     const leg = legs.find(l => l.index === index) ?? null;
     if (leg) {
       Icon  = FlightLandIcon;
-      body  = <Arrival trip={trip} leg={leg} legs={legs} data={data!} />;
+      body  = <Arrival trip={trip} leg={leg} legs={legs} data={data!} flight={flights[leg.index] ?? null} />;
       title = `Welcome to ${leg.arrCity || trip.destination?.city || 'your destination'}`;
     }
   }
@@ -426,13 +467,16 @@ export default function TravelSheet({ trip }: { trip: any }) {
         </Box>
       </Dialog>
       <DocumentViewer file={viewer} onClose={() => setViewer(null)} />
+      {passOpen && passes.length > 0 && (
+        <PassView open passes={passes} t={lg.transportation[index]} flight={flights[index] ?? null} onClose={() => setPassOpen(false)} add={addPass} />
+      )}
     </>
   );
 }
 
 // ── Arrival guide ─────────────────────────────────────────────────────────────
 
-function Arrival({ trip, leg, legs, data }: { trip: any; leg: Leg; legs: Leg[]; data: Loaded }) {
+function Arrival({ trip, leg, legs, data, flight }: { trip: any; leg: Leg; legs: Leg[]; data: Loaded; flight: FlightStatus | null }) {
   const tripId   = String(trip._id);
   const zone     = leg.arr?.zoneName ?? tripZones(trip)();
   const homeZone = placeTz(data.user?.homeLocation) ?? placeTz(trip.origin) ?? zone;
@@ -499,6 +543,12 @@ function Arrival({ trip, leg, legs, data }: { trip: any; leg: Leg; legs: Leg[]; 
         <Typography sx={{ mt: 0.75, fontSize: '0.88rem' }}>
           {weather.icon} {weather.condition}, {Math.round(weather.tempMax)}° / {Math.round(weather.tempMin)}°
         </Typography>
+      )}
+
+      {flight && (
+        <Box sx={{ mt: 2 }}>
+          <FlightLive t={leg.t} fs={flight} side="arrival" />
+        </Box>
       )}
 
       {(stay || steps.length > 0) && (

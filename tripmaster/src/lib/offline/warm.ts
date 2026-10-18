@@ -1,4 +1,4 @@
-import { BUILD_ID, postToWorker } from './sw';
+import { BUILD_ID, DATA_CACHE, postToWorker } from './sw';
 import { autoCacheTripFiles } from './fileCache';
 import { isOffline } from './connectivity';
 
@@ -18,7 +18,7 @@ const APP_DATA  = [
 ];
 const TRIP_DATA = [
   '', '/itinerary', '/logistics', '/files', '/packing', '/expenses',
-  '/transport', '/weather', '/intelligence', '/culture', '/reminders',
+  '/transport', '/weather', '/intelligence', '/culture', '/guide', '/reminders', '/flights',
 ];
 
 const DAY_MS       = 86_400_000;
@@ -34,7 +34,8 @@ const inFlight = new Set<string>();
 
 // One trip — its page and every tab's data. Called whenever a trip is opened.
 export async function warmTrip(tripId: string) {
-  await warmScopes([appScope(), tripScope(tripId)]);
+  const warmed = await warmScopes([appScope(), tripScope(tripId)]);
+  if (warmed.has(`trip:${tripId}`)) await warmPhotos(tripId);
 }
 
 // Every current and upcoming trip, plus attached documents for the ones coming up soon.
@@ -47,6 +48,7 @@ export async function warmTrips(trips: WarmableTrip[]) {
     .slice(0, MAX_TRIPS);
 
   const warmed = await warmScopes([appScope(), ...keep.map(t => tripScope(t._id))]);
+  for (const t of keep) if (warmed.has(`trip:${t._id}`)) await warmPhotos(t._id);
 
   const soon = keep.filter(t =>
     warmed.has(`trip:${t._id}`) && (!t.startDate || new Date(t.startDate).getTime() - now < FILES_WITHIN));
@@ -107,6 +109,23 @@ async function warmScopes(scopes: Scope[]): Promise<Set<string>> {
     }
   }
   return warmed;
+}
+
+// The worker saves photos only when something shows them, so load Discover's (the guide
+// photo and the picks) now — otherwise a trip opened first on the plane has none.
+async function warmPhotos(tripId: string) {
+  if (typeof caches === 'undefined') return;
+  try {
+    const cache = await caches.open(DATA_CACHE);
+    const urls: string[] = [];
+    for (const suffix of ['/guide', '/culture']) {
+      const hit  = await cache.match(new URL(`/api/trips/${tripId}${suffix}`, location.origin).href, { ignoreVary: true });
+      const body = hit ? await hit.json().catch(() => null) : null;
+      if (body?.guide?.photo?.url) urls.push(body.guide.photo.url);
+      for (const h of body?.culture?.briefing?.highlights ?? []) if (h.imageUrl) urls.push(h.imageUrl);
+    }
+    for (const src of urls) new Image().src = src;
+  } catch { /* storage unavailable — they're saved when first shown instead */ }
 }
 
 // Created offline, not on the server yet — nothing to save.

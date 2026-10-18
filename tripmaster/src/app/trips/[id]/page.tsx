@@ -53,6 +53,7 @@ import { sendOrQueue, savedTripPatch } from '@/lib/offline/writes';
 import { readSaved, reportSaveFailure } from '@/lib/offline/saveErrors';
 import { useFlushQueueOnReconnect } from '@/lib/offline/useFlushQueue';
 import { autoCacheTripFiles } from '@/lib/offline/fileCache';
+import { scanPendingPasses } from '@/lib/passes/client';
 import { warmTrip }        from '@/lib/offline/warm';
 import OfflineBoundary     from '@/components/ui/OfflineBoundary';
 import { COUNTRY_LIST }    from '@/lib/data/countries';
@@ -321,7 +322,10 @@ function TripPageInner() {
     warmTrip(String(id)).catch(() => {});
     fetch(`/api/trips/${id}/files`)
       .then(r => r.json())
-      .then(data => autoCacheTripFiles(String(id), data.files ?? []))
+      .then(data => Promise.all([
+        autoCacheTripFiles(String(id), data.files ?? []),
+        scanPendingPasses(String(id), data.files ?? []),
+      ]))
       .catch(() => {});
   }, [id]);
 

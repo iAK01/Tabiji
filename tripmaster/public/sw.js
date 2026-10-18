@@ -25,7 +25,7 @@ const ASSET_CACHE   = 'tabiji-assets-v1';
 const IMAGE_CACHE   = 'tabiji-images-v1';
 const LEGACY_CACHES = new Set(['tabiji-shell-v1']);
 
-const IMAGE_LIMIT      = 150;
+const IMAGE_LIMIT      = 250;
 const DEV_STATIC_LIMIT = 400;
 
 const OFFLINE_URL = '/offline.html';
@@ -53,7 +53,7 @@ let lastWriteAt = 0;
 const DATA_ROUTES  = ['/api/trips', '/api/user/', '/api/packing/', '/api/auth/session'];
 const DATA_EXCLUDE = [/\/calendar$/, /\/expenses\/export$/, /\/delete-preview$/];
 const FONT_HOSTS   = new Set(['fonts.googleapis.com', 'fonts.gstatic.com']);
-const PHOTO_HOSTS  = new Set(['images.unsplash.com', 'storage.googleapis.com']);
+const PHOTO_HOSTS  = new Set(['images.unsplash.com', 'storage.googleapis.com', 'upload.wikimedia.org', 'thumb.wikimedia.org']);
 
 // ── INSTALL ─────────────────────────────────────
 self.addEventListener('install', (event) => {
@@ -229,9 +229,9 @@ async function staleWhileRevalidate(event, cacheName) {
   return fresh.catch(() => Response.error());
 }
 
-// Trip cover photos and uploaded images. A plain <img> fetch comes back opaque, which
-// can't be checked and costs megabytes of quota per entry — re-request in CORS mode
-// (both photo hosts allow it) and only save what comes back readable.
+// Trip cover photos, uploaded images and Discover's Wikimedia photos. A plain <img> fetch
+// comes back opaque, which can't be checked and costs megabytes of quota per entry —
+// re-request in CORS mode (every photo host allows it) and only save what comes back readable.
 async function photo(event) {
   const req = event.request;
   const key = req.url;

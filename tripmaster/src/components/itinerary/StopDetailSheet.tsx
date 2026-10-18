@@ -20,6 +20,8 @@ import DocumentViewer, { type ViewableFile } from '@/components/files/DocumentVi
 import { STOP_CONFIG, D }   from './Itinerary.config';
 import type { Stop }        from './Itinerary.config';
 import { stopDuration, fmtDuration, timeRangeLabel, canSkip } from './Itinerary.helpers';
+import FlightLive from '@/components/flights/FlightLive';
+import type { FlightStatus } from '@/lib/flights/status';
 
 interface LinkedFile { _id: string; name: string; mimeType?: string; gcsUrl?: string }
 
@@ -29,6 +31,8 @@ interface Props {
   isMobile:    boolean;
   linkedFiles: LinkedFile[];
   reminder:    { local: string; sent: boolean } | null;
+  /** The flight this stop mirrors, with its live status. */
+  flight?:     { t: any; fs: FlightStatus | null; phase?: string } | null;
   onClose:     () => void;
   onSelect:    (stop: Stop) => void;   // jump to a concurrent stop
   onSkip:      (stop: Stop, skipped: boolean) => void;
@@ -41,7 +45,7 @@ interface Props {
 // Tap a stop → everything about it, plus what else is on at the same time.
 // The read-first view: nothing here moves a stop by accident.
 export function StopDetailSheet({
-  stop, concurrent, isMobile, linkedFiles, reminder,
+  stop, concurrent, isMobile, linkedFiles, reminder, flight,
   onClose, onSelect, onSkip, onEdit, onDelete, onOpenLogistics, onFilterType,
 }: Props) {
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -137,6 +141,12 @@ export function StopDetailSheet({
                   sx={{ flexShrink: 0, minWidth: 44, minHeight: 44 }}
                 />
               )}
+            </Box>
+          )}
+
+          {flight && (
+            <Box sx={{ mb: 1.5 }}>
+              <FlightLive t={flight.t} fs={flight.fs} side={flight.phase === 'arrival' ? 'arrival' : 'auto'} />
             </Box>
           )}
 

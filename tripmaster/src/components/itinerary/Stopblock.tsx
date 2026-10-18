@@ -17,6 +17,8 @@ import {
   stopStartMinutes, stopDuration, minutesToPx,
   formatTime, snappedPreviewMinutes,
 } from './Itinerary.helpers';
+import { TONE } from '@/components/flights/FlightLive';
+import type { Tone } from '@/lib/flights/status';
 
 interface LinkedFile {
   _id:      string;
@@ -43,6 +45,8 @@ interface Props {
   highlighted?: boolean;
   /** Drag, resize and delete only in edit mode — a stray touch must not re-time a stop. */
   editMode?:    boolean;
+  /** Live flight status for a stop mirroring a flight: "Gate 102", "Landed 10:21 · belt 7". */
+  live?:        { text: string; tone: Tone } | null;
 }
 
 // Bell + the time the notification goes out, beside the stop's name.
@@ -64,7 +68,7 @@ function ReminderMark({ reminder, size }: { reminder: { local: string; sent: boo
   );
 }
 
-export function StopBlock({ stop, onDelete, onClick, onResize, pxPerMin, isMobile, colIndex = 0, totalCols = 1, colSpan = 1, linkedFiles = [], startHour = DAY_START_HOUR, reminder = null, highlighted = false, editMode = false }: Props) {
+export function StopBlock({ stop, onDelete, onClick, onResize, pxPerMin, isMobile, colIndex = 0, totalCols = 1, colSpan = 1, linkedFiles = [], startHour = DAY_START_HOUR, reminder = null, highlighted = false, editMode = false, live = null }: Props) {
   const startMin = stopStartMinutes(stop);
   if (startMin === null) return null;
 
@@ -340,6 +344,11 @@ export function StopBlock({ stop, onDelete, onClick, onResize, pxPerMin, isMobil
               }}>
                 {timeLabel}
               </Typography>
+              {live && (
+                <Typography sx={{ fontFamily: D.body, fontSize: isMobile ? '0.68rem' : '0.62rem', fontWeight: 800, lineHeight: 1, color: TONE[live.tone], whiteSpace: 'nowrap', flexShrink: 0 }}>
+                  {live.text}
+                </Typography>
+              )}
               {reminder && <ReminderMark reminder={reminder} size={isMobile ? 10 : 9} />}
               {isFact && <LockIcon sx={{ fontSize: 9, color: alpha(D.navy, 0.35), flexShrink: 0 }} />}
             </Box>
@@ -378,6 +387,15 @@ export function StopBlock({ stop, onDelete, onClick, onResize, pxPerMin, isMobil
                   <LockIcon sx={{ fontSize: 10, color: alpha(D.navy, 0.35), flexShrink: 0 }} />
                 )}
               </Box>
+
+              {live && (
+                <Typography sx={{
+                  fontFamily: D.body, fontSize: isMobile ? '0.75rem' : '0.7rem', fontWeight: 800, lineHeight: 1.2,
+                  color: TONE[live.tone], whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                }}>
+                  {live.text}
+                </Typography>
+              )}
 
               {/* Reference — platform, seat, booking code — shown on any non-short block */}
               {stop.reference && (

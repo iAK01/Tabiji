@@ -50,6 +50,8 @@ import { FreeSuggestionsModal } from './FreeSuggestionsModal';
 import { StopDetailSheet }      from './StopDetailSheet';
 import { ItineraryList }        from './ItineraryList';
 import { useUrlParam }          from '@/lib/hooks/useUrlParam';
+import { useFlights }           from '@/lib/flights/useFlights';
+import { stopNote }             from '@/lib/flights/status';
 
 const VIEW_MODES = ['timeline', 'list'] as const;
 const MIN_ZOOM   = 1;
@@ -121,6 +123,8 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
   const nowLineRef = useRef<HTMLDivElement>(null);
 
   // When each stop's notification goes out — same planner the sender uses.
+  const [transport,     setTransport]     = useState<any[]>([]);
+  const flights = useFlights(tripId);
   const [reminders,     setReminders]     = useState<Array<{ local: string; sent: boolean; ref?: { stopId?: string; collection?: string; index?: number; phase?: string } }>>([]);
   // A notification link (?stop=) landing on a stop: ring it for a moment.
   const [highlightStop, setHighlightStop] = useState<string | null>(null);
@@ -195,6 +199,19 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
     }, 1500);
     return () => clearTimeout(t);
   }, [days, tripId]);
+
+  // Live gate / delay / landing for stops that mirror a flight
+  const flightFor = (stop: Stop) => {
+    const lr = (stop as any).logisticsRef as { collection: string; index: number } | undefined;
+    const t  = stop.source === 'logistics' && lr?.collection === 'transport' ? transport[lr.index] : null;
+    return t && (t.type || 'flight') === 'flight'
+      ? { t, fs: flights[lr!.index] ?? null, phase: (stop as any).metadata?.phase as string | undefined }
+      : null;
+  };
+  const liveFor = (stop: Stop) => {
+    const f = flightFor(stop);
+    return f?.fs ? stopNote(f.fs, f.phase) : null;
+  };
 
   const reminderFor = (stop: Stop) => {
     const lr = (stop as any).logisticsRef as { collection: string; index: number } | undefined;
@@ -314,6 +331,7 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
       .then(data => {
         const logistics = data.logistics ?? data;
         const ymd = (v: any) => (v ? String(v).split('T')[0] : '');
+        setTransport(logistics.transportation ?? []);
         setAccoms(
           (logistics.accommodation ?? [])
             .filter((a: any) => a.name && a.checkIn)
@@ -1155,7 +1173,7 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
           )}
 
           {viewMode === 'list' ? (
-            <ItineraryList stops={timedStops} onOpen={s => setSheetKey(stopKey(s))} onSkip={skipStop} />
+            <ItineraryList stops={timedStops} onOpen={s => setSheetKey(stopKey(s))} onSkip={skipStop} live={liveFor} />
           ) : (
           <DndContext
             sensors={sensors}
@@ -1260,6 +1278,7 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
                         startHour={effectiveStartHour}
                         linkedFiles={filesFor(stop)}
                         reminder={reminderFor(stop)}
+                        live={liveFor(stop)}
                         highlighted={!!stop._id && highlightStop === stop._id}
                         editMode={editMode}
                       />
@@ -1310,6 +1329,7 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
         isMobile={isMobile}
         linkedFiles={sheetStop ? filesFor(sheetStop) : []}
         reminder={sheetStop ? reminderFor(sheetStop) : null}
+        flight={sheetStop ? flightFor(sheetStop) : null}
         onClose={() => setSheetKey(null)}
         onSelect={s => setSheetKey(stopKey(s))}
         onSkip={skipStop}

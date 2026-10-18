@@ -34,6 +34,11 @@ import { readSaved, reportSaveFailure } from '@/lib/offline/saveErrors';
 import { EXPENSE_PAYERS, getPayerLabel } from '@/lib/logistics/expenseConstants';
 import DocumentViewer from '@/components/files/DocumentViewer';
 import type { ViewableFile } from '@/components/files/DocumentViewer';
+import PassView from '@/components/passes/PassView';
+import { passesFor } from '@/lib/passes/passes';
+import { useFlights } from '@/lib/flights/useFlights';
+import { airportByIata } from '@/lib/data/airports';
+import { PASSES_CHANGED } from '@/lib/passes/client';
 
 // ── Sub-components (defined outside — no remount bug) ─────────────────────────
 import TransportCard      from './TransportCard';
@@ -58,8 +63,9 @@ import {
 } from './logistics.helpers';
 
 export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabProps) {
-  const theme  = useTheme();
-  const mobile = useMediaQuery(theme.breakpoints.down('sm'));
+  const theme   = useTheme();
+  const mobile  = useMediaQuery(theme.breakpoints.down('sm'));
+  const flights = useFlights(tripId);
 
   // Section lives in the URL (?section=accommodation) so links and refresh land on it
   const [sectionSlug, setSectionSlug] = useUrlParam('section', LOGISTICS_SECTIONS, 'transport');
@@ -110,8 +116,32 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
   const [geocoding, setGeocoding] = useState(false);
   const [geoNote,   setGeoNote]   = useState<string | null>(null);
 
+  // Keyed `${collection}:${index}` — hotel 0 and flight 0 are different things.
   const [filesById,  setFilesById]  = useState<Map<string, any[]>>(new Map());
   const [viewerFile, setViewerFile] = useState<ViewableFile | null>(null);
+  const [passIndex,  setPassIndex]  = useState<number | null>(null);
+
+  // Passes added from a card show straight away; the refresh after it agrees.
+  const addFiles = (added: any[]) => setFilesById(prev => {
+    const map = new Map(prev);
+    for (const f of added) {
+      if (!f.linkedTo?.collection || !f.linkedTo?.entryId) continue;
+      const key = `${f.linkedTo.collection}:${f.linkedTo.entryId}`;
+      map.set(key, [f, ...(map.get(key) ?? []).filter(x => x._id !== f._id)]);
+    }
+    return map;
+  });
+
+  const showFiles = (files: any[]) => {
+    const map = new Map<string, any[]>();
+    for (const f of files) {
+      if (f.resourceType === 'file' && f.linkedTo?.collection && f.linkedTo?.entryId) {
+        const key = `${f.linkedTo.collection}:${f.linkedTo.entryId}`;
+        map.set(key, [...(map.get(key) ?? []), f]);
+      }
+    }
+    setFilesById(map);
+  };
 
   // ── Load logistics + files ──────────────────────────────────────────────────
   useEffect(() => {
@@ -126,22 +156,26 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
         setLogistics(data.logistics);
         const cached = await getTripCache(tripId);
         await saveTripCache(tripId, { ...(cached ?? {}), logistics: data.logistics });
-
-        const map = new Map<string, any[]>();
-        for (const f of (fData.files ?? [])) {
-          if (f.resourceType === 'file' && f.linkedTo?.entryId) {
-            const arr = map.get(f.linkedTo.entryId) ?? [];
-            arr.push(f);
-            map.set(f.linkedTo.entryId, arr);
-          }
-        }
-        setFilesById(map);
+        showFiles(fData.files ?? []);
       } catch {
         const cached = await getTripCache(tripId);
         if (cached?.logistics) setLogistics(cached.logistics);
       }
     }
     loadLogistics();
+  }, [tripId]);
+
+  // Older screenshots scanned in the background turned out to hold passes.
+  useEffect(() => {
+    const onPasses = (e: Event) => {
+      if ((e as CustomEvent).detail !== tripId) return;
+      fetch(`/api/trips/${tripId}/files`)
+        .then(r => r.json())
+        .then(data => showFiles(data.files ?? []))
+        .catch(() => {});
+    };
+    window.addEventListener(PASSES_CHANGED, onPasses);
+    return () => window.removeEventListener(PASSES_CHANGED, onPasses);
   }, [tripId]);
 
   // ── Backfill missing venue / accommodation locations ──────────────────────
@@ -580,7 +614,7 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
   // top-level route fields, so that gets mirrored too.
   const buildReturnFields = (sourceLeg: any, forType: string) => {
     const originLabel = forType === 'flight' && trip.origin?.iataCode
-      ? `${trip.origin.iataCode} — ${trip.origin.city}`
+      ? `${trip.origin.iataCode} — ${airportByIata(trip.origin.iataCode)?.city ?? trip.origin.city}`
       : (trip.origin?.city ?? '');
     const top: any = {
       departureLocation:    sourceLeg.arrivalLocation ?? '',
@@ -1052,9 +1086,17 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
         const renderCard = (t: any, i: number, seqLabel?: string) => (
           <TransportCard
             key={i} t={t} i={i} onMenu={openMenu} fmtDateTime={fmtDateTime}
-            linkedFiles={filesById.get(String(i)) ?? []}
+            linkedFiles={filesById.get(`transport:${i}`) ?? []}
             onOpenFile={f => setViewerFile({ _id: f._id, name: f.name, mimeType: f.mimeType, gcsUrl: f.gcsUrl })}
+            passes={passesFor(filesById.get(`transport:${i}`) ?? [], i, t)}
+            onOpenPass={() => setPassIndex(i)}
+            tripId={tripId}
+            onPassAdded={files => {
+              addFiles(files);
+              if (files.some(f => f.barcode && f.linkedTo?.entryId === String(i))) setPassIndex(i);
+            }}
             sequenceLabel={seqLabel}
+            flight={flights[i] ?? null}
           />
         );
 
@@ -1133,7 +1175,7 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
           {(logistics?.accommodation ?? []).map((a: any, i: number) => (
             <AccomCard
               key={i} a={a} i={i} onMenu={openMenu} fmtDate={fmtDate}
-              linkedFiles={filesById.get(String(i)) ?? []}
+              linkedFiles={filesById.get(`accommodation:${i}`) ?? []}
               onOpenFile={f => setViewerFile({ _id: f._id, name: f.name, mimeType: f.mimeType, gcsUrl: f.gcsUrl })}
             />
           ))}
@@ -1157,7 +1199,7 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
           {(logistics?.venues ?? []).map((v: any, i: number) => (
             <VenueCard
               key={i} v={v} i={i} onMenu={openMenu} fmtDate={fmtDate}
-              linkedFiles={filesById.get(String(i)) ?? []}
+              linkedFiles={filesById.get(`venue:${i}`) ?? []}
               onOpenFile={f => setViewerFile({ _id: f._id, name: f.name, mimeType: f.mimeType, gcsUrl: f.gcsUrl })}
             />
           ))}
@@ -1645,6 +1687,16 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
       </Dialog>
 
       <DocumentViewer file={viewerFile} onClose={() => setViewerFile(null)} />
+      {passIndex !== null && (
+        <PassView
+          open
+          passes={passesFor(filesById.get(`transport:${passIndex}`) ?? [], passIndex, logistics?.transportation?.[passIndex])}
+          t={logistics?.transportation?.[passIndex]}
+          flight={flights[passIndex] ?? null}
+          onClose={() => setPassIndex(null)}
+          add={{ tripId, index: passIndex, onAdded: addFiles }}
+        />
+      )}
     </Box>
   );
 }

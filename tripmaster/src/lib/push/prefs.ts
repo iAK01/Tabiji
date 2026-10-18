@@ -3,9 +3,9 @@
 // malformed falls back to the defaults here.
 
 export type NotificationCategory =
-  | 'travel'      // departures, hotel check-in/out
+  | 'travel'      // departures, gates, delays, hotel check-in/out
   | 'checkin'     // online check-in opening
-  | 'landed'      // arrival into a new city
+  | 'landed'      // arrival into a new city, baggage belt
   | 'briefings'   // evening-before / morning-of
   | 'itinerary'   // itinerary stops and events
   | 'todos'
@@ -21,9 +21,9 @@ export interface NotificationPrefs {
 }
 
 export const CATEGORY_OPTIONS: Array<{ key: NotificationCategory; label: string }> = [
-  { key: 'travel',    label: 'Departures and hotel check-in' },
+  { key: 'travel',    label: 'Departures, gates, delays and hotel check-in' },
   { key: 'checkin',   label: 'Online check-in opening' },
-  { key: 'landed',    label: 'Arrivals' },
+  { key: 'landed',    label: 'Arrivals and baggage belts' },
   { key: 'briefings', label: 'Morning and evening briefings' },
   { key: 'itinerary', label: 'Itinerary and events' },
   { key: 'todos',     label: 'To-dos' },

@@ -52,6 +52,26 @@ const TripFileSchema = new Schema({
   mimeType: { type: String },
   size:     { type: Number },
 
+  // ── Ticket barcode — read from an uploaded image (lib/passes/scan.ts) ──
+  barcode: {
+    type: new Schema({
+      format: { type: String, required: true },   // 'Aztec', 'QRCode', 'PDF417', 'DataMatrix'
+      text:   { type: String, required: true },   // the payload, exactly as read
+      svg:    { type: String, required: true },   // redrawn from text; reads back identical
+      bcbp:   {                                    // when it's a boarding pass (lib/passes/bcbp.ts)
+        type: new Schema({
+          passenger: String,
+          legs: [{
+            _id: false,
+            pnr: String, from: String, to: String, carrier: String, flightNumber: String,
+            julianDate: Number, compartment: String, seat: String, sequence: String,
+          }],
+        }, { _id: false }),
+      },
+    }, { _id: false }),
+  },
+  barcodeScannedAt: { type: Date },   // looked at once, barcode or not — never re-scanned
+
   // ── Link-only ──────────────────────────────────────────
   linkUrl:  { type: String },
 

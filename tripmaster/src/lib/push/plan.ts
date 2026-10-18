@@ -17,6 +17,11 @@ import {
 } from '@/lib/push/journey';
 import { inQuietHours, QUIET_EXEMPT, type NotificationCategory, type NotificationPrefs } from '@/lib/push/prefs';
 import type { PushAction, PushPayload } from '@/lib/push/send';
+import { passesForSure, passLabel, passSummary } from '@/lib/passes/passes';
+import {
+  arrivalAt as liveArrival, closingTimes, delayMins, departureAt, flightPhase, landedMs, previousGate, DELAY_MIN,
+  type FlightStatus,
+} from '@/lib/flights/status';
 
 const MIN  = 60 * 1000;
 const HOUR = 60 * MIN;
@@ -76,6 +81,7 @@ export interface TripData {
   files:     any[];
   expenses:  any[];
   packing:   { packed: number; total: number } | null;
+  flights:   Map<number, FlightStatus>;   // live status by transport index (lib/flights/live.ts)
 }
 
 /** Leg index → time to drive to its airport, for journey-start flights. */
@@ -136,6 +142,25 @@ function transportLabel(t: any): string {
   return [t.details?.operator, route].filter(Boolean).join(' - ') || KIND[t.type] || 'Transport';
 }
 
+const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+
+/** "Terminal 1 · check-in 1204–1319 · bag drop closes 05:25" — walking into the airport. */
+function airportLine(t: any, fs: FlightStatus | null): string | null {
+  const close = closingTimes(t);
+  const line  = [
+    fs?.dep.terminal && `terminal ${fs.dep.terminal}`,
+    fs?.dep.desk && `check-in ${fs.dep.desk}`,
+    close && `bag drop closes ${close.bagDrop.toFormat('HH:mm')}`,
+  ].filter(Boolean).join(' · ');
+  return line ? cap(line) : null;
+}
+
+/** " · delayed to 06:50" when the flight's running late. */
+function delayNote(fs: FlightStatus | null): string {
+  const est = fs && delayMins(fs) >= DELAY_MIN ? departureAt(fs) : null;
+  return est ? ` · delayed to ${est.toFormat('HH:mm')}` : '';
+}
+
 /** How far ahead of or behind home the clock is at a moment. */
 function offsetNote(at: DateTime, homeZone: string): string {
   const home  = DateTime.fromMillis(at.toMillis(), { zone: homeZone });
@@ -147,7 +172,7 @@ function offsetNote(at: DateTime, homeZone: string): string {
 
 // ---- Links ------------------------------------------------------------------
 
-const sheetUrl = (tripId: string, kind: 'transport' | 'accommodation' | 'venue' | 'arrival', i: number) =>
+const sheetUrl = (tripId: string, kind: 'transport' | 'accommodation' | 'venue' | 'arrival' | 'pass', i: number) =>
   `/trips/${tripId}?sheet=${kind}&i=${i}`;
 
 const dayUrl = (tripId: string, dayNumber: number) => `/trips/${tripId}?tab=itinerary&day=${dayNumber}`;
@@ -213,6 +238,14 @@ function docsLine(docs: any[]): string | null {
 
 function docAction(tripId: string, docs: any[]): PushAction[] {
   return docs[0] ? [{ action: 'document', title: docName(docs[0]), url: fileTarget(tripId, docs[0]) }] : [];
+}
+
+// A scanned boarding pass or ticket opens on its own, ready to scan; otherwise the first document.
+function passAction(tripId: string, files: any[], i: number, t: any, docs: any[]): PushAction[] {
+  const passes = passesForSure(files, i, t);
+  return passes.length
+    ? [{ action: 'pass', title: passLabel(passes[0]), url: sheetUrl(tripId, 'pass', i) }]
+    : docAction(tripId, docs);
 }
 
 function missingProofs(expenses: any[], collection: string, index: number, category: string) {
@@ -300,7 +333,7 @@ function gettingThereHint(trip: any, leg: Leg, isMainArrival: boolean): string |
 // ---- Planning -----------------------------------------------------------------
 
 export function planTrip(data: TripData, r: Recipient, drive: DriveTimes, nowMs: number): Planned[] {
-  const { trip, logistics, itinerary, files, expenses, packing } = data;
+  const { trip, logistics, itinerary, files, expenses, packing, flights } = data;
   const tripId         = String(trip._id);
   const zoneFor        = tripZones(trip);
   const transportation = logistics?.transportation ?? [];
@@ -341,6 +374,9 @@ export function planTrip(data: TripData, r: Recipient, drive: DriveTimes, nowMs:
     const docs  = linkedFiles(files, ['transport'], i, [t.details?.flightNumber, t.details?.operator]);
     const proof = PROOF_WITH_DEPARTURE.has(leg.type) ? missingProofs(expenses, 'transport', i, leg.type) : null;
     const from  = departurePoint(leg);
+    const fs    = leg.type === 'flight' ? flights.get(i) ?? null : null;
+    const phase = fs ? flightPhase(fs) : null;
+    const gone  = phase === 'airborne' || phase === 'landed' || phase === 'diverted';
 
     // Online check-in opens
     if (leg.type === 'flight' && !leg.isConnection) {
@@ -375,8 +411,12 @@ export function planTrip(data: TripData, r: Recipient, drive: DriveTimes, nowMs:
         title = leave
           ? `Leave for the airport by ${leave.toFormat('HH:mm')}`
           : `Be at the airport by ${atAirport.toFormat('HH:mm')}`;
-        lines.push(`${name}${to} departs ${dep.toFormat('HH:mm')}${ref}`);
+        // Leave-by stays on the booked time even when it's running late: bag
+        // drop and the gate can still close on the original schedule.
+        lines.push(`${name}${to} departs ${dep.toFormat('HH:mm')}${delayNote(fs)}${ref}`);
         if (d) lines.push(`${d.estimated ? 'About ' : ''}${d.minutes} min from ${d.from}`);
+        const airport = airportLine(t, fs);
+        if (airport) lines.push(airport);
       } else {
         at    = depMs - (LEAD_MIN[leg.type] ?? DEFAULT_LEAD_MIN) * MIN;
         title = `${KIND[leg.type]}${to} ${startsIn(depMs, nowMs)}`;
@@ -395,46 +435,160 @@ export function planTrip(data: TripData, r: Recipient, drive: DriveTimes, nowMs:
           url: sheetUrl(tripId, 'transport', i),
           tag: `leg-${i}`,
           requireInteraction: leg.type === 'flight',
-          actions: [...(nav ? [{ action: 'directions', title: 'Directions', url: nav }] : []), ...docAction(tripId, docs)],
+          actions: [...(nav ? [{ action: 'directions', title: 'Directions', url: nav }] : []), ...passAction(tripId, files, i, t, docs)],
         },
         ref: { collection: 'transport', index: i, phase: 'departure' },
       });
     }
 
-    // Landing
+    // At the airport: the boarding pass, for bag drop and security. Replaces
+    // the leave-by notification (same tag) — that moment has passed. Once the
+    // gate shows, it's the gate notification instead (same tag again), and a
+    // new one for every change of gate.
+    const passes  = passesForSure(files, i, t);
+    const passAt  = depMs - r.airportBufferMins * MIN;
+    const gateAt  = fs?.dep.gate && fs.gateSince && !gone && phase !== 'cancelled'
+      ? Math.max(Date.parse(fs.gateSince), leg.isConnection ? depMs - 3 * HOUR : passAt)
+      : null;
+    const gateUntil = Math.max(depMs, fs ? departureAt(fs)?.toMillis() ?? depMs : depMs);
+
+    if (leg.type === 'flight' && !leg.isConnection && passes.length && !(gateAt && gateAt <= passAt)) {
+      const one = passes.length === 1 ? passSummary(passes[0]) : `${passes.length} boarding passes`;
+      add({
+        key: `transport-${i}${at$(dep)}`, type: 'flight_pass', category: 'travel',
+        at: passAt, until: depMs, deferrable: false,
+        payload: {
+          title: `${name} · ${passLabel(passes[0])}`,
+          body:  [[one, `Departs ${dep.toFormat('HH:mm')}${delayNote(fs)}`].filter(Boolean).join(' · '), airportLine(t, fs)].filter(Boolean).join('\n'),
+          url:   sheetUrl(tripId, 'pass', i),
+          tag:   `leg-${i}`,
+          requireInteraction: true,
+        },
+        ref: { collection: 'transport', index: i, phase: 'pass' },
+      });
+    }
+
+    if (gateAt && fs?.dep.gate) {
+      const was   = previousGate(fs);
+      const close = closingTimes(t);
+      const late  = delayMins(fs) >= DELAY_MIN ? departureAt(fs) : null;
+      const lines = [
+        ...(was ? [`${name} · was gate ${was}`] : []),
+        late
+          ? `Delayed to ${late.toFormat('HH:mm')}`
+          : [`Departs ${dep.toFormat('HH:mm')}`, close && `gate closes ${close.gate.toFormat('HH:mm')}`].filter(Boolean).join(' · '),
+        [fs.dep.terminal && `Terminal ${fs.dep.terminal}`, passes.length === 1 && passSummary(passes[0])].filter(Boolean).join(' · '),
+      ].filter(Boolean);
+      add({
+        // Numbered, so going back to an earlier gate is news too
+        key: `transport-${i}-gate-${fs.gates.length}-${fs.dep.gate}${at$(dep)}`, type: was ? 'flight_gate_change' : 'flight_gate', category: 'travel',
+        at: gateAt, until: gateUntil, deferrable: false,
+        payload: {
+          title: was ? `Gate change: now gate ${fs.dep.gate}` : `Gate ${fs.dep.gate} · ${name}`,
+          body:  lines.join('\n'),
+          url:   sheetUrl(tripId, passes.length ? 'pass' : 'transport', i),
+          tag:   `leg-${i}`,
+          requireInteraction: true,
+          actions: passAction(tripId, files, i, t, docs),
+        },
+        ref: { collection: 'transport', index: i, phase: 'gate' },
+      });
+    }
+
+    // Running late, or not running at all. From 6 hours out — earlier than
+    // that it waits for the evening briefing — and whatever time of night,
+    // since it changes when you leave.
+    if (fs && phase === 'cancelled') {
+      const airline = t.details?.airline;
+      add({
+        key: `transport-${i}-cancelled${at$(dep)}`, type: 'flight_cancelled', category: 'travel',
+        at: depMs - 24 * HOUR, until: depMs + 2 * HOUR, deferrable: false,
+        payload: {
+          title: fs.status === 'CanceledUncertain' ? `${name} may be cancelled` : `${name} is cancelled`,
+          body:  [`Was due to leave ${dep.toFormat('EEE HH:mm')}${to ? ` for ${leg.arrCity}` : ''}`, `Check with ${airline || 'the airline'} about rebooking`].join('\n'),
+          url:   sheetUrl(tripId, 'transport', i),
+          tag:   `flight-${i}`,
+          requireInteraction: true,
+          actions: airline
+            ? [{ action: 'airline', title: airline, url: `https://www.google.com/search?q=${encodeURIComponent(`${airline} manage booking`)}` }]
+            : [],
+        },
+        ref: { collection: 'transport', index: i, phase: 'status' },
+      });
+    } else if (fs && phase === 'scheduled' && delayMins(fs) >= DELAY_MIN) {
+      const est = departureAt(fs)!;
+      add({
+        // Re-sent only when the estimate moves by 10 minutes or more
+        key: `transport-${i}-delay-${Math.round(est.toMillis() / (10 * MIN))}${at$(dep)}`, type: 'flight_delay', category: 'travel',
+        at: depMs - 6 * HOUR, until: est.toMillis(), deferrable: false,
+        payload: {
+          title: `${name} delayed to ${est.toFormat('HH:mm')}`,
+          body:  [`Was ${dep.toFormat('HH:mm')}${to}`, 'Bag drop and the gate can still close on the original times'].join('\n'),
+          url:   sheetUrl(tripId, 'transport', i),
+          tag:   `flight-${i}`,
+        },
+        ref: { collection: 'transport', index: i, phase: 'status' },
+      });
+    }
+
+    // Landing: when it really touches down once that's known, the latest
+    // estimate before then, the timetable without live data. Keys stay on the
+    // booked time, so a late landing moves the notification rather than adding one.
     if (!leg.arr) continue;
-    const arrMs = leg.arr.toMillis();
-    const next  = connectingLeg(legs, leg);
+    const arrMs  = leg.arr.toMillis();
+    const downMs = landedMs(fs);
+    const etaMs  = downMs ?? (fs && phase !== 'cancelled' ? liveArrival(fs)?.toMillis() : null) ?? arrMs;
+    const next   = connectingLeg(legs, leg);
 
     if (next) {
       const nt       = next.t;
+      const nfs      = flights.get(next.index);
       const nextDocs = linkedFiles(files, ['transport'], next.index, [nt.details?.flightNumber, nt.details?.operator]);
       const nextProof = missingProofs(expenses, 'transport', next.index, next.type);
-      const gap      = Math.round((next.dep.toMillis() - arrMs) / MIN);
-      const lines    = [`${legName(next)}${next.arrCity ? ` to ${next.arrCity}` : ''} departs ${next.dep.toFormat('HH:mm')} · ${duration(gap)} to make it`];
+      const gap      = Math.max(0, Math.round((next.dep.toMillis() - etaMs) / MIN));
+      const lines    = [`${legName(next)}${next.arrCity ? ` to ${next.arrCity}` : ''} departs ${next.dep.toFormat('HH:mm')}${delayNote(nfs ?? null)} · ${duration(gap)} to make it`];
+      if (nfs?.dep.gate) lines.push([`Gate ${nfs.dep.gate}`, nfs.dep.terminal && `terminal ${nfs.dep.terminal}`].filter(Boolean).join(' · '));
       const docLine  = docsLine(nextDocs);
       if (docLine) lines.push(docLine);
       if (nextProof) lines.push(`Keep your ${nextProof.slots[0].label.toLowerCase()} for expenses`);
       add({
         key: `transport-${i}${at$(leg.arr)}`, type: 'connection', category: 'travel',
-        at: arrMs + 10 * MIN, until: next.dep.toMillis(), deferrable: false, zone: leg.arr.zoneName ?? undefined,
+        at: etaMs + 10 * MIN, until: next.dep.toMillis(), deferrable: false, zone: leg.arr.zoneName ?? undefined,
         payload: {
           title: `Connecting in ${leg.arrCity || 'transit'}`,
           body:  lines.join('\n'),
           url:   sheetUrl(tripId, 'transport', next.index),
           tag:   `leg-${next.index}`,
-          actions: docAction(tripId, nextDocs),
+          actions: passAction(tripId, files, next.index, nt, nextDocs),
         },
         ref: { collection: 'transport', index: i, phase: 'arrival' },
       });
       continue;
+    }
+
+    // The baggage belt: in the landing notification when it's known by then,
+    // otherwise on its own as soon as it shows (and always landing back home,
+    // where there's no landing notification).
+    const at = downMs ? downMs + 10 * MIN : etaMs + (leg.type === 'flight' ? 15 : 5) * MIN;
+    if (fs?.arr.belt && fs.beltSince && (leg.arrivesHome || Date.parse(fs.beltSince) > at)) {
+      const down = downMs ?? etaMs;
+      add({
+        key: `transport-${i}-belt-${fs.arr.belt}${at$(leg.arr)}`, type: 'flight_belt', category: 'landed',
+        at: Math.max(Date.parse(fs.beltSince), down), until: down + 90 * MIN, deferrable: false, zone: leg.arr.zoneName ?? undefined,
+        payload: {
+          title: `Bags: belt ${fs.arr.belt}`,
+          body:  `${name}${downMs ? ` · landed ${DateTime.fromMillis(downMs, { zone: leg.arr.zoneName ?? 'UTC' }).toFormat('HH:mm')}` : ''}`,
+          url:   sheetUrl(tripId, leg.arrivesHome ? 'transport' : 'arrival', i),
+          tag:   `belt-${i}`,
+        },
+        ref: { collection: 'transport', index: i, phase: 'belt' },
+      });
     }
     if (leg.arrivesHome) continue;
 
     const date = leg.arr.toISODate()!;
     const stay = stayOn(accommodation, date)
       ?? (leg.arr.hour < 6 ? stayOn(accommodation, leg.arr.minus({ days: 1 }).toISODate()!) : null);
-    const at    = arrMs + (leg.type === 'flight' ? 15 : 5) * MIN;
     const zone  = leg.arr.zoneName ?? zoneFor(date);
     const city  = leg.arrCity || cityOn(trip, date) || 'your destination';
     const hint  = gettingThereHint(trip, leg, mainArrival);
@@ -442,6 +596,7 @@ export function planTrip(data: TripData, r: Recipient, drive: DriveTimes, nowMs:
     if (stay && r.prefs.categories.landed) arrivalAt.set(stay.index, at);
 
     const lines = [`It's ${DateTime.fromMillis(at, { zone }).toFormat('HH:mm')} here${offsetNote(DateTime.fromMillis(at, { zone }), r.home.zone)}`];
+    if (fs?.arr.belt) lines.push(`Bags: belt ${fs.arr.belt}`);
     if (stay) lines.push([stay.a.name, hint].filter(Boolean).join(' · '));
     else if (hint) lines.push(hint);
     lines.push('Tap for getting there, money and plugs');
@@ -451,7 +606,7 @@ export function planTrip(data: TripData, r: Recipient, drive: DriveTimes, nowMs:
       : null;
     add({
       key: `transport-${i}${at$(leg.arr)}`, type: leg.type === 'flight' ? 'landed' : 'arrived', category: 'landed',
-      at, until: arrMs + 4 * HOUR, deferrable: false, zone,
+      at, until: Math.max(arrMs, etaMs) + 4 * HOUR, deferrable: false, zone,
       payload: {
         title: leg.type === 'flight' ? `You've landed in ${city}` : `You've arrived in ${city}`,
         body:  lines.join('\n'),
@@ -492,7 +647,7 @@ export function planTrip(data: TripData, r: Recipient, drive: DriveTimes, nowMs:
           body:  lines.join('\n'),
           url:   sheetUrl(tripId, 'transport', i),
           tag:   `leg-${i}`,
-          actions: [...(nav ? [{ action: 'directions', title: 'Directions', url: nav }] : []), ...docAction(tripId, docs)],
+          actions: [...(nav ? [{ action: 'directions', title: 'Directions', url: nav }] : []), ...passAction(tripId, files, i, t, docs)],
         },
         ref: { collection: 'transport', index: i, phase: 'departure' },
       });
@@ -719,7 +874,12 @@ export function planTrip(data: TripData, r: Recipient, drive: DriveTimes, nowMs:
           ? ` · leave by ${leave.toFormat('HH:mm')}`
           : atAirport ? ` · at the airport by ${atAirport.toFormat('HH:mm')}` : '';
         title = `Tomorrow: ${leg.type === 'flight' ? 'flight' : KIND[leg.type].toLowerCase()} to ${leg.arrCity || cityOn(trip, date) || 'your next stop'}`;
-        lines.push(`${legName(leg)} departs ${leg.dep.toFormat('HH:mm')}${when}`);
+        const fs = leg.type === 'flight' ? flights.get(leg.index) ?? null : null;
+        lines.push(fs && flightPhase(fs) === 'cancelled'
+          ? `${legName(leg)} is showing as cancelled`
+          : `${legName(leg)} departs ${leg.dep.toFormat('HH:mm')}${delayNote(fs)}${when}`);
+        const airport = leg.type === 'flight' ? airportLine(leg.t, fs) : null;
+        if (airport) lines.push(airport);
       } else {
         const firstUp = timedStops(days, date, localStopTime)[0];
         title = `Tomorrow: ${trip.name} begins`;

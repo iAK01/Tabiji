@@ -5,6 +5,7 @@ import Trip from '@/lib/mongodb/models/Trip';
 import User from '@/lib/mongodb/models/User';
 import TripFile from '@/lib/mongodb/models/TripFile';
 import { uploadFile } from '@/lib/utils/storage';
+import { barcodeFields, SCANNABLE_MIME } from '@/lib/passes/files';
 
 const ATTACHMENT_MIME = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif']);
 
@@ -207,6 +208,11 @@ export async function POST(
   const buffer   = Buffer.from(await file.arrayBuffer());
   const gcsUrl   = await uploadFile(buffer, gcsPath, file.type);
 
+  // A boarding pass or ticket screenshot: keep its barcode, linked to its flight.
+  const scanned = SCANNABLE_MIME.has(file.type)
+    ? await barcodeFields(new Uint8Array(buffer), { type, linkedTo: linkedTo as any }, id)
+    : {};
+
   const doc = await TripFile.create({
     tripId: id, userId: user._id,
     resourceType: 'file',
@@ -215,6 +221,7 @@ export async function POST(
     mimeType: file.type,
     size: file.size,
     linkedTo: linkedTo || undefined,
+    ...scanned,
   });
 
   return NextResponse.json({ file: doc }, { status: 201 });

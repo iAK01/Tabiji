@@ -247,6 +247,13 @@ async function dispatchQueuedAction(action: any): Promise<boolean> {
         });
         break;
 
+      case 'DISMISS_PICK':
+        res = await fetch(`/api/trips/${action.tripId}/culture`, {
+          method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'dismissPick', ...action.payload }),
+        });
+        break;
+
       default:
         // Unrecognised action type — drop it rather than block the queue forever.
         return true;
@@ -280,6 +287,7 @@ function describeAction(action: any): string {
     case 'COMPLETE_TODO':           return 'a completed to-do';
     case 'SET_NOTIFICATION_PREFS':  return 'your notification settings';
     case 'MARK_NOTIFICATIONS_READ': return 'marking notifications read';
+    case 'DISMISS_PICK':            return `hiding${p.name ? ` “${p.name}”` : ' a pick'} in Discover`;
     default:                        return 'a change';
   }
 }

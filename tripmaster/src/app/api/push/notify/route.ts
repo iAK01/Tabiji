@@ -8,6 +8,8 @@ import { deliver, dropInvalid } from '@/lib/push/send';
 import { isDueNow, LATE_LIMIT_MS, planTrip } from '@/lib/push/plan';
 import { driveTimes, loadTripData, recipientOf } from '@/lib/push/context';
 import { tripZones } from '@/lib/push/timezones';
+import { buildLegs } from '@/lib/push/journey';
+import { syncFlights } from '@/lib/flights/live';
 
 // ---- POST /api/push/notify --------------------------------------------------
 //
@@ -30,6 +32,9 @@ async function notifyTrip(trip: any, nowMs: number): Promise<number> {
   if (recipient.prefs.mutedTrips.includes(tripId)) return 0;
 
   const data    = await loadTripData(trip);
+  // Live gate, delay and landing data first — looked up only when due, and
+  // shared with the app through the same cache.
+  data.flights  = await syncFlights(buildLegs(trip, data.logistics?.transportation ?? [], recipient.home), nowMs);
   const drive   = await driveTimes(data, recipient, nowMs);
   const planned = planTrip(data, recipient, drive, nowMs);
 

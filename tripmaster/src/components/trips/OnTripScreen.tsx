@@ -32,6 +32,9 @@ import { readSaved, reportSaveFailure } from '@/lib/offline/saveErrors';
 import { localYmd } from '@/lib/trips/onTrip';
 import { buildLegs, placeAt } from '@/lib/push/journey';
 import { placeTz } from '@/lib/push/timezones';
+import { useFlights } from '@/lib/flights/useFlights';
+import { stopNote, type Tone } from '@/lib/flights/status';
+import { TONE } from '@/components/flights/FlightLive';
 
 // ─── Design tokens ─────────────────────────────────────────────────────────────
 
@@ -134,10 +137,11 @@ function stopKey(s: Stop): string {
 
 // ─── Now card ─────────────────────────────────────────────────────────────────
 
-function NowCard({ pick, nowMins, linkedFiles, onOpenFile, onDismiss }: {
+function NowCard({ pick, nowMins, linkedFiles, onOpenFile, onDismiss, live }: {
   pick: Pick; nowMins: number;
   linkedFiles: any[]; onOpenFile: (f: any) => void;
   onDismiss?: () => void;
+  live?: { text: string; tone: Tone } | null;
 }) {
   const { stop, startM, when } = pick;
   const cfg    = STOP_CONFIG[stop.type] ?? STOP_CONFIG.other;
@@ -199,6 +203,12 @@ function NowCard({ pick, nowMins, linkedFiles, onOpenFile, onDismiss }: {
           }}>
             {stop.name}
           </Typography>
+
+          {live && (
+            <Typography sx={{ fontFamily: D.body, fontSize: '0.95rem', fontWeight: 800, color: TONE[live.tone], mt: 0.5 }}>
+              {live.text}
+            </Typography>
+          )}
 
           {endM > startM && (
             <Typography sx={{ fontFamily: D.body, fontSize: '0.82rem', color: D.muted, mt: 0.25 }}>
@@ -323,6 +333,7 @@ export function OnTripNow({ tripId, days, files, now, onFilesChange, onOpenFile 
   onOpenFile:    (f: any) => void;
 }) {
   const [dismissed, setDismissed] = useState<Set<string>>(new Set());
+  const flights = useFlights(tripId);
 
   const nowMins  = now.getHours() * 60 + now.getMinutes();
   const today    = localYmd(now);
@@ -400,6 +411,9 @@ export function OnTripNow({ tripId, days, files, now, onFilesChange, onOpenFile 
           linkedFiles={linkedFiles}
           onOpenFile={onOpenFile}
           onDismiss={pick.when === 'tomorrow' ? undefined : () => setDismissed(prev => new Set([...prev, stopKey(pick.stop)]))}
+          live={ref?.collection === 'transport' && flights[ref.index]
+            ? stopNote(flights[ref.index], (pick.stop as any).metadata?.phase)
+            : null}
         />
       ) : (
         <Box sx={{ p: 2.5, border: `1.5px solid ${alpha(D.green, 0.4)}`, borderRadius: '12px', bgcolor: alpha(D.green, 0.04) }}>

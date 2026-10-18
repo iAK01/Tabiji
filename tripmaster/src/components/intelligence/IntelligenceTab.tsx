@@ -132,14 +132,16 @@ export default function IntelligenceTab({ tripId }: Props) {
 
   if (loading) return <Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}><CircularProgress /></Box>;
 
+  if (error === 'No destination country on trip') return (
+    <Alert severity="warning" sx={{ mt: 2 }}>Add a destination country to your trip to see travel context.</Alert>
+  );
+
+  // Discover doesn't depend on the home-country comparisons, so it still shows.
   if (error) return (
-    <Alert severity="warning" sx={{ mt: 2 }}>
-      {error === 'No destination country on trip'
-        ? 'Add a destination country to your trip to see travel context.'
-        : error.includes('homeLocation') || !intel
-        ? 'Set your home country in your profile to see personalised comparisons.'
-        : error}
-    </Alert>
+    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+      <Discoversection tripId={tripId} />
+      <Alert severity="warning">Set your home country in your profile to see personalised comparisons.</Alert>
+    </Box>
   );
 
   if (!intel) return null;

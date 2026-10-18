@@ -10,16 +10,20 @@ import type { Stop }   from './Itinerary.config';
 import {
   stopStartMinutes, stopDuration, formatTime, fmtDuration, overlapClusters, canSkip,
 } from './Itinerary.helpers';
+import { TONE } from '@/components/flights/FlightLive';
+import type { Tone } from '@/lib/flights/status';
 
 interface Props {
   stops:  Stop[];                                   // timed stops to show
   onOpen: (stop: Stop) => void;
   onSkip: (stop: Stop, skipped: boolean) => void;
+  /** Live flight status for a stop mirroring a flight: "Gate 102", "Delayed · now 06:50". */
+  live?:  (stop: Stop) => { text: string; tone: Tone } | null;
 }
 
 // The phone-first reading of a day: one full-width row per stop, full names,
 // clashes grouped under a bracket, a big ✕ to drop what you won't go to.
-export function ItineraryList({ stops, onOpen, onSkip }: Props) {
+export function ItineraryList({ stops, onOpen, onSkip, live }: Props) {
   const clusters = overlapClusters(stops);
 
   if (!clusters.length) {
@@ -57,6 +61,7 @@ export function ItineraryList({ stops, onOpen, onSkip }: Props) {
                 const isFact = stop.source === 'logistics' && stop.locked;
                 const sub   = [stop.locationName || stop.address, dur > 0 ? fmtDuration(dur) : null]
                   .filter(Boolean).join(' · ');
+                const note  = live?.(stop) ?? null;
                 return (
                   <Box key={stop._id ?? i} sx={{
                     display: 'flex', alignItems: 'stretch',
@@ -98,6 +103,11 @@ export function ItineraryList({ stops, onOpen, onSkip }: Props) {
                             whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
                           }}>
                             {sub}
+                          </Typography>
+                        )}
+                        {note && (
+                          <Typography sx={{ fontFamily: D.body, fontSize: '0.8rem', fontWeight: 800, color: TONE[note.tone], mt: 0.25 }}>
+                            {note.text}
                           </Typography>
                         )}
                       </Box>

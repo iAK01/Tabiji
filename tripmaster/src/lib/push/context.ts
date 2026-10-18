@@ -11,6 +11,7 @@ import { buildLegs, coords, departurePoint, setOffPoint } from '@/lib/push/journ
 import { placeTz, tripZones } from '@/lib/push/timezones';
 import { resolvePrefs } from '@/lib/push/prefs';
 import { packingCounts } from '@/lib/packing/counts';
+import { loadFlights } from '@/lib/flights/live';
 import type { DriveTimes, NavApp, Recipient, TripData } from '@/lib/push/plan';
 
 const DEFAULT_AIRPORT_BUFFER_MIN = 120;
@@ -34,6 +35,7 @@ export async function loadTripData(trip: any): Promise<TripData> {
     files:    (files ?? []) as any[],
     expenses: (expenses ?? []) as any[],
     packing:  items.length ? packingCounts(items) : null,
+    flights:  await loadFlights((logistics as any)?.transportation ?? []),
   };
 }
 

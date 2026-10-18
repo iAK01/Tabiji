@@ -39,7 +39,11 @@ const TripSchema = new Schema({
   culture: {
     briefing:    { type: Object, default: null },
     generatedAt: { type: Date,   default: null },
+    // Picks the traveller x'd out — kept out of every regenerated briefing
+    dismissed:   { type: [Schema.Types.Mixed], default: [] },
   },
+  // Which Wikivoyage article this trip's destination resolved to (null = none found)
+  guide: { type: Schema.Types.Mixed, default: null },
   groundTransport: { type: Schema.Types.Mixed, default: null },
   status: {
     type: String,

@@ -134,6 +134,46 @@ export function SectionHeading({ children, action, id }: {
   );
 }
 
+// ─── Sub-heading — small caps label inside a section ─────────────────────────
+
+export function SubHeading({ children, action, id }: {
+  children: React.ReactNode;
+  action?:  React.ReactNode;
+  id?:      string;
+}) {
+  return (
+    <Box id={id} sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1, mb: 1.5, scrollMarginTop: 60 }}>
+      <Typography sx={{
+        fontSize: '0.72rem', fontWeight: 700, textTransform: 'uppercase',
+        letterSpacing: '0.09em', color: D.muted, fontFamily: D.body,
+      }}>
+        {children}
+      </Typography>
+      {action}
+    </Box>
+  );
+}
+
+// ─── Photo credit — Unsplash and Wikimedia Commons both require one ──────────
+
+export function PhotoCredit({ name, link, licence, unsplash }: {
+  name:      string;
+  link:      string;
+  licence?:  string;
+  unsplash?: boolean;
+}) {
+  return (
+    <Typography sx={{ fontSize: '0.68rem', color: 'rgba(29,38,66,0.4)', lineHeight: 1.4 }}>
+      Photo:{' '}
+      <Box component="a" href={link} target="_blank" rel="noopener noreferrer" sx={{ color: 'inherit', textDecoration: 'underline' }}>
+        {name}
+      </Box>
+      {licence ? ` · ${licence}` : ''}
+      {unsplash ? ' / Unsplash' : ''}
+    </Typography>
+  );
+}
+
 // ─── Phrase card — big foreign word ──────────────────────────────────────────
 
 export function PhraseCard({ phrase }: { phrase: Phrase }) {
@@ -201,66 +241,72 @@ function fmtDay(tz: string) {
   return new Intl.DateTimeFormat('en-IE', { timeZone: tz, weekday: 'short', day: 'numeric', month: 'short' }).format(new Date());
 }
 
+// Seconds drop on phones so two clocks fit side by side at 320–430px
+const CLOCK_SIZE = { xs: 'clamp(1.5rem, 8.5vw, 2.25rem)', sm: '2.5rem', md: '3rem' };
+
+function Clock({ tz, color = D.navy }: { tz: string; color?: string }) {
+  const t = fmt(tz);
+  return (
+    <Typography sx={{ fontFamily: D.display, fontSize: CLOCK_SIZE, lineHeight: 1, fontVariantNumeric: 'tabular-nums', color, whiteSpace: 'nowrap' }}>
+      {t.slice(0, 5)}
+      <Box component="span" sx={{ display: { xs: 'none', sm: 'inline' } }}>{t.slice(5)}</Box>
+    </Typography>
+  );
+}
+
 export function TimezoneCard({ timezone }: { timezone: Intelligence['timezone'] }) {
   const [, setTick] = useState(0);
   useEffect(() => { const id = setInterval(() => setTick(t => t + 1), 1000); return () => clearInterval(id); }, []);
 
-  const browserTz  = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  // Profile home, not the device — on the trip the phone is already on destination time
+  const homeTz     = timezone.originTimezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
   const destTz     = timezone.destinationTimezone;
-  const isSame     = browserTz === destTz || timezone.absDifference === 0;
-  const dayDiffers = fmtDay(browserTz) !== fmtDay(destTz);
+  const isSame     = homeTz === destTz || timezone.absDifference === 0;
+  const dayDiffers = fmtDay(homeTz) !== fmtDay(destTz);
 
   return (
     <Paper elevation={0} sx={{ border: `1px solid ${D.rule}`, borderRadius: 1.5, overflow: 'hidden', backgroundColor: D.paper }}>
       {isSame ? (
-        <Box sx={{ p: 2.5, display: 'flex', alignItems: 'baseline', gap: 2 }}>
-          <Typography sx={{ fontFamily: D.display, fontSize: '3rem', lineHeight: 1, fontVariantNumeric: 'tabular-nums', color: D.navy }}>
-            {fmt(browserTz)}
-          </Typography>
-          <Box>
+        <Box sx={{ p: { xs: 2, sm: 2.5 }, display: 'flex', alignItems: 'baseline', gap: 2, flexWrap: 'wrap' }}>
+          <Clock tz={homeTz} />
+          <Box sx={{ minWidth: 0 }}>
             <Typography sx={{ fontSize: '0.97rem', fontWeight: 700, color: D.navy }}>Same timezone</Typography>
-            <Typography sx={{ fontSize: '0.82rem', color: D.muted }}>{browserTz}</Typography>
+            <Typography sx={{ fontSize: '0.82rem', color: D.muted }}>{homeTz}</Typography>
           </Box>
         </Box>
       ) : (
-        <Box sx={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr' }}>
-          <Box sx={{ p: 2.5 }}>
+        <Box sx={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto minmax(0, 1fr)' }}>
+          <Box sx={{ p: { xs: 2, sm: 2.5 }, minWidth: 0 }}>
             <Typography sx={{ fontSize: '0.85rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: D.muted, display: 'block', mb: 0.75 }}>
               Home
             </Typography>
-            <Typography sx={{ fontFamily: D.display, fontSize: { xs: '2.5rem', sm: '3rem' }, lineHeight: 1, fontVariantNumeric: 'tabular-nums', color: D.navy }}>
-              {fmt(browserTz)}
-            </Typography>
-            <Typography sx={{ fontSize: '0.85rem', color: D.muted, display: 'block', mt: 0.5 }}>{fmtDay(browserTz)}</Typography>
-            <Typography sx={{ fontSize: '0.75rem', color: 'rgba(29,38,66,0.3)' }}>{browserTz}</Typography>
+            <Clock tz={homeTz} />
+            <Typography sx={{ fontSize: '0.85rem', color: D.muted, display: 'block', mt: 0.5 }}>{fmtDay(homeTz)}</Typography>
+            <Typography sx={{ fontSize: '0.75rem', color: 'rgba(29,38,66,0.3)', overflowWrap: 'anywhere' }}>{homeTz}</Typography>
           </Box>
 
-          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', px: 1.5, borderLeft: `1px solid ${D.rule}`, borderRight: `1px solid ${D.rule}` }}>
-            <Typography sx={{ fontFamily: D.display, fontSize: '1rem', color: D.muted }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', px: { xs: 1, sm: 1.5 }, borderLeft: `1px solid ${D.rule}`, borderRight: `1px solid ${D.rule}` }}>
+            <Typography sx={{ fontFamily: D.display, fontSize: '1rem', color: D.muted, whiteSpace: 'nowrap' }}>
               {timezone.hoursDifference > 0 ? '+' : ''}{timezone.hoursDifference}h
             </Typography>
           </Box>
 
-          <Box sx={{ p: 2.5, textAlign: 'right' }}>
+          <Box sx={{ p: { xs: 2, sm: 2.5 }, minWidth: 0, textAlign: 'right' }}>
             <Typography sx={{ fontSize: '0.85rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: D.muted, display: 'block', mb: 0.75 }}>
               There
             </Typography>
-            <Typography sx={{
-              fontFamily: D.display, fontSize: { xs: '2.5rem', sm: '3rem' },
-              lineHeight: 1, fontVariantNumeric: 'tabular-nums',
-              color: timezone.jetlagRisk === 'significant' ? '#d32f2f' : timezone.jetlagRisk === 'moderate' ? D.terra : D.navy,
-            }}>
-              {fmt(destTz)}
-            </Typography>
-            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 0.75, mt: 0.5 }}>
+            <Clock tz={destTz} color={timezone.jetlagRisk === 'significant' ? '#d32f2f' : timezone.jetlagRisk === 'moderate' ? D.terra : D.navy} />
+            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', flexWrap: 'wrap', gap: 0.75, mt: 0.5 }}>
               <Typography sx={{ fontSize: '0.85rem', color: D.muted }}>{fmtDay(destTz)}</Typography>
               {dayDiffers && (
                 <Box sx={{ px: 0.75, py: 0.2, backgroundColor: 'rgba(196,113,74,0.12)', borderRadius: 0.75 }}>
-                  <Typography sx={{ fontSize: '0.65rem', fontWeight: 700, color: D.terra }}>+1 day</Typography>
+                  <Typography sx={{ fontSize: '0.65rem', fontWeight: 700, color: D.terra }}>
+                    {timezone.hoursDifference > 0 ? '+1 day' : '−1 day'}
+                  </Typography>
                 </Box>
               )}
             </Box>
-            <Typography sx={{ fontSize: '0.75rem', color: 'rgba(29,38,66,0.3)' }}>{destTz}</Typography>
+            <Typography sx={{ fontSize: '0.75rem', color: 'rgba(29,38,66,0.3)', overflowWrap: 'anywhere' }}>{destTz}</Typography>
           </Box>
         </Box>
       )}

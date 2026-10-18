@@ -7,6 +7,12 @@ import MoreVertIcon   from '@mui/icons-material/MoreVert';
 import ShareIcon      from '@mui/icons-material/Share';
 import NavigateButton from '@/components/ui/NavigateButton';
 import DestinationMap from '@/components/ui/DestinationMap';
+import PassTile       from '@/components/passes/PassTile';
+import AddPassButton  from '@/components/passes/AddPassButton';
+import FlightLive, { flightFacts } from '@/components/flights/FlightLive';
+import { wantsPass, type Pass } from '@/lib/passes/passes';
+import { airportByIata } from '@/lib/data/airports';
+import type { FlightStatus } from '@/lib/flights/status';
 import {
   D, DOT_COLOUR, TRANSPORT_COLORS,
   transportIcon,
@@ -23,6 +29,11 @@ interface TransportCardProps {
   linkedFiles?:   any[];
   onOpenFile?:    (f: any) => void;
   sequenceLabel?: string;
+  passes?:        Pass[];
+  onOpenPass?:    () => void;
+  tripId?:        string;
+  onPassAdded?:   (files: any[]) => void;
+  flight?:        FlightStatus | null;
 }
 
 // ── Formatters ────────────────────────────────────────────────────────────────
@@ -40,6 +51,13 @@ const duration = (dep: string, arr: string) => {
   const h = Math.floor(mins / 60);
   const m = mins % 60;
   return m > 0 ? `${h}h ${m}m` : `${h}h`;
+};
+
+// "DUB — Ballina" (a home town saved against its airport) → "DUB — Dublin".
+const airportLabel = (loc: string) => {
+  const m = /^([A-Z]{3})\s+—\s+/.exec(loc);
+  const airport = m ? airportByIata(m[1]) : undefined;
+  return airport ? `${m![1]} — ${airport.city}` : loc;
 };
 
 // ── Atoms ─────────────────────────────────────────────────────────────────────
@@ -78,8 +96,8 @@ const StatusPill = ({ status }: { status: string }) => {
 function FlightHero({ t, sequenceLabel }: { t: any; sequenceLabel?: string }) {
   const flightNum = t.details?.flightNumber ?? t.flightNumber ?? '';
   const airline   = t.details?.airline ?? t.airline ?? '';
-  const from      = t.departureLocation ?? '';
-  const to        = t.arrivalLocation ?? '';
+  const from      = airportLabel(t.departureLocation ?? '');
+  const to        = airportLabel(t.arrivalLocation ?? '');
   const seat      = t.details?.seat ?? t.seat ?? '';
   const cabin     = t.details?.cabin ?? '';
 
@@ -410,9 +428,18 @@ function formatTransportForShare(t: any): string {
   return lines.join('\n');
 }
 
+function FlightLiveSlot({ t, flight }: { t: any; flight?: FlightStatus | null }) {
+  if (!flight && !flightFacts(t, flight).length) return null;
+  return (
+    <Box sx={{ px: 2, pb: 1.5 }}>
+      <FlightLive t={t} fs={flight} />
+    </Box>
+  );
+}
+
 // ── Main export ───────────────────────────────────────────────────────────────
 
-export default function TransportCard({ t, i, onMenu, linkedFiles, onOpenFile, sequenceLabel }: TransportCardProps) {
+export default function TransportCard({ t, i, onMenu, linkedFiles, onOpenFile, sequenceLabel, passes, onOpenPass, tripId, onPassAdded, flight }: TransportCardProps) {
   const typeColor = TRANSPORT_COLORS[t.type as string] ?? D.navy;
   const mapTarget = getMapTarget(t);
   const navDest   = mapTarget ? { name: mapTarget.address, address: mapTarget.address, coordinates: mapTarget.coordinates } : null;
@@ -493,6 +520,22 @@ export default function TransportCard({ t, i, onMenu, linkedFiles, onOpenFile, s
 
           {/* Time / ref */}
           <TimeRefStrip t={t} type={t.type} />
+
+          {/* Gate, terminal, delays, landing and belt — live, plus the airline's closing times */}
+          {t.type === 'flight' && (flight || t.status !== 'cancelled') && (
+            <FlightLiveSlot t={t} flight={flight} />
+          )}
+
+          {/* Boarding pass / ticket barcode, read from an attached screenshot */}
+          {passes && passes.length > 0 ? (
+            <Box sx={{ px: 2, pb: 1.5 }}>
+              <PassTile passes={passes} t={t} onOpen={() => onOpenPass?.()} />
+            </Box>
+          ) : tripId && onPassAdded && wantsPass(t) && (
+            <Box sx={{ px: 2, pb: 1.5 }}>
+              <AddPassButton tripId={tripId} index={i} t={t} onAdded={onPassAdded} />
+            </Box>
+          )}
 
           {/* Attached files */}
           {linkedFiles && linkedFiles.length > 0 && (

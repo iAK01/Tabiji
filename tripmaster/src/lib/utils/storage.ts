@@ -37,3 +37,9 @@ export async function deleteFile(destination: string): Promise<void> {
 export function getFileStream(destination: string) {
   return bucket.file(destination).createReadStream();
 }
+
+// A whole file in memory — for reading an upload again (scanning old screenshots for barcodes).
+export async function downloadFile(destination: string): Promise<Buffer> {
+  const [contents] = await bucket.file(destination).download();
+  return contents;
+}
