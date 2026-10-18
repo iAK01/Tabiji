@@ -25,6 +25,7 @@ import CalendarPlusIcon      from '@mui/icons-material/PlaylistAdd';
 import AccessTimeIcon        from '@mui/icons-material/AccessTime';
 import CloseIcon             from '@mui/icons-material/Close';
 import type { GroundTransportPlan, TransportLeg, TransportStep } from '@/app/api/trips/[id]/transport/route';
+import { readSaved, reportSaveFailure, SaveError } from '@/lib/offline/saveErrors';
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 
@@ -248,30 +249,59 @@ function LegPanel({ label, subtitle, leg, generating, onGenerate, tripId, defaul
   const hasSteps = steps.length > 0;
   const canSort  = !userPlan && (status === 'gap' || !!leg?.earlyMorningWarning);
 
+  // Throws unless the server confirmed the change — each caller undoes its own part and reports.
   const patchLeg = async (payload: Record<string, unknown>) => {
     const res  = await fetch(`/api/trips/${tripId}/transport`, {
       method:  'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body:    JSON.stringify({ leg: legKey, ...payload }),
     });
-    const data = await res.json().catch(() => ({}));
-    if (data.plan) onPlanChange(data.plan);
+    const data = await readSaved(res);
+    if (!data.plan) throw new Error('No plan in response');
+    onPlanChange(data.plan);
   };
 
   const saveUserPlan = async () => {
+    if (saving) return;
     setSaving(true);
-    try { await patchLeg({ action: 'setUserPlan', note }); setSortingOpen(false); setNote(''); }
-    finally { setSaving(false); }
+    try {
+      await patchLeg({ action: 'setUserPlan', note });
+      setSortingOpen(false);
+      setNote('');
+    } catch (err) {
+      // The box stays open with their note so they can retry.
+      reportSaveFailure(`your ${label.toLowerCase()} plan`, err);
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const dismissStep = (step: TransportStep) => {
+  const clearUserPlan = async () => {
+    if (saving) return;
+    setSaving(true);
+    try {
+      await patchLeg({ action: 'clearUserPlan' });
+    } catch (err) {
+      reportSaveFailure(`the undo on your ${label.toLowerCase()} plan`, err);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const dismissStep = async (step: TransportStep) => {
     setHidden(h => new Set(h).add(step.label));
-    patchLeg({ action: 'dismissStep', label: step.label }).catch(() => {});
+    try {
+      await patchLeg({ action: 'dismissStep', label: step.label });
+    } catch (err) {
+      setHidden(h => { const next = new Set(h); next.delete(step.label); return next; });
+      reportSaveFailure(`the dismissal of “${step.label}”`, err);
+    }
   };
 
   const addToItinerary = async (step: TransportStep, idx: number) => {
     const dayDate = leg?.suggestedDate ?? null;
     if (!dayDate) return; // can't add without a date
+    const name = `${step.label}${step.operator ? ` — ${step.operator}` : ''}`;
     setAdding(idx);
     try {
       const res = await fetch(`/api/trips/${tripId}/itinerary/stops`, {
@@ -280,7 +310,7 @@ function LegPanel({ label, subtitle, leg, generating, onGenerate, tripId, defaul
         body: JSON.stringify({
           dayDate,
           stop: {
-            name:           `${step.label}${step.operator ? ` — ${step.operator}` : ''}`,
+            name,
             type:           'transport',
             scheduledStart: null,
             duration:       null,
@@ -288,9 +318,14 @@ function LegPanel({ label, subtitle, leg, generating, onGenerate, tripId, defaul
           },
         }),
       });
-      if (res.ok) setAdded(true);
-    } catch {}
-    setAdding(null);
+      const data = await readSaved(res);
+      if (!data.days) throw new Error('No itinerary in response');
+      setAdded(true);
+    } catch (err) {
+      reportSaveFailure(`“${name}” to your itinerary`, err);
+    } finally {
+      setAdding(null);
+    }
   };
 
   return (
@@ -357,7 +392,8 @@ function LegPanel({ label, subtitle, leg, generating, onGenerate, tripId, defaul
               </Typography>
               <Button
                 size="small"
-                onClick={() => patchLeg({ action: 'clearUserPlan' })}
+                disabled={saving}
+                onClick={clearUserPlan}
                 sx={{ fontSize: '0.72rem', fontWeight: 700, color: D.muted, textTransform: 'none', fontFamily: D.body, minWidth: 0 }}
               >
                 Undo
@@ -597,12 +633,13 @@ export default function GettingThereStrip({ tripId, trip }: Props) {
     setError(null);
     try {
       const res  = await fetch(`/api/trips/${tripId}/transport`, { method: 'POST' });
-      const data = await res.json();
-      if (data.error) setError(data.error);
-      else if (!data.plan) setError('No plan returned — please try again');
+      const data = await readSaved(res);
+      if (!data.plan) setError('No plan returned — please try again');
       else setPlan(data.plan);
     } catch (e: any) {
-      setError(e?.message ?? 'Failed to generate — check your connection');
+      setError(e instanceof SaveError
+        ? (e.message || 'Failed to generate — please try again')
+        : 'Failed to generate — check your connection');
     } finally {
       setGenerating(false);
     }

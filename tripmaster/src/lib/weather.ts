@@ -20,7 +20,7 @@ import TripLogistics from '@/lib/mongodb/models/TripLogistics';
 import { airportByIata, airports } from '@/lib/data/airports';
 import {
   WEATHER_VERSION,
-  type CurrentWeather, type DayWeather, type WeatherPlace, type WeatherResult,
+  type CurrentWeather, type DayHours, type DayWeather, type WeatherPlace, type WeatherResult,
 } from '@/lib/weather-insights';
 
 // Open-Meteo hard-errors (rather than clamping) past its horizon. 14 leaves a
@@ -172,19 +172,36 @@ function omUrl(base: string, point: { lat: number; lon: number }, params: Record
   return url;
 }
 
-// Mean apparent temperature 20:00–22:00 local, per date.
-function eveningFeels(hourly: { time?: string[]; apparent_temperature?: (number | null)[] } | undefined) {
-  const acc = new Map<string, number[]>();
-  hourly?.time?.forEach((t, i) => {
+// Hourly arrays regrouped as date → variable → 24 local hours. Keyed by the
+// timestamp's own hour, so a DST gap stays null rather than shifting the day.
+type HourCols = Record<string, (number | null)[]>;
+
+function groupHourly(hourly: any): Map<string, HourCols> {
+  const out = new Map<string, HourCols>();
+  if (!hourly?.time) return out;
+  const keys = Object.keys(hourly).filter(k => k !== 'time');
+  (hourly.time as string[]).forEach((t, i) => {
+    const date = t.slice(0, 10);
+    let cols = out.get(date);
+    if (!cols) {
+      cols = Object.fromEntries(keys.map(k => [k, Array<number | null>(24).fill(null)]));
+      out.set(date, cols);
+    }
     const h = +t.slice(11, 13);
-    const v = hourly.apparent_temperature?.[i];
-    if (h >= 20 && h <= 22 && isNum(v)) {
-      const k = t.slice(0, 10);
-      acc.set(k, [...(acc.get(k) ?? []), v]);
+    for (const k of keys) {
+      const v = hourly[k]?.[i];
+      cols[k][h] = isNum(v) ? v : null;
     }
   });
-  return new Map([...acc].map(([k, vs]) => [k, vs.reduce((a, b) => a + b, 0) / vs.length]));
+  return out;
 }
+
+// Mean apparent temperature 20:00–22:00 — what going out to dinner feels like.
+const eveningOf = (feels: (number | null)[] | undefined) => mean(feels?.slice(20, 23) ?? []);
+
+const hhmm = (iso: unknown) => (typeof iso === 'string' && iso.length >= 16 ? iso.slice(11, 16) : null);
+const col  = (xs: (number | null)[] | undefined, f: (v: number) => number | null = v => v) =>
+  Array.from({ length: 24 }, (_, h) => (isNum(xs?.[h]) ? f(xs![h] as number) : null));
 
 // ─── Forecast ─────────────────────────────────────────────────────────────────
 
@@ -195,15 +212,21 @@ async function fetchForecastDays(point: Point, start: string, end: string, city:
     daily: [
       'weather_code', 'temperature_2m_max', 'temperature_2m_min',
       'apparent_temperature_max', 'apparent_temperature_min',
-      'precipitation_sum', 'precipitation_probability_max',
-      'wind_speed_10m_max', 'uv_index_max', 'sunshine_duration',
+      'precipitation_sum', 'precipitation_probability_max', 'precipitation_hours',
+      'wind_speed_10m_max', 'wind_gusts_10m_max', 'wind_direction_10m_dominant',
+      'uv_index_max', 'sunshine_duration', 'sunrise', 'sunset',
     ].join(','),
-    hourly:     'apparent_temperature',
+    hourly: [
+      'temperature_2m', 'apparent_temperature', 'weather_code',
+      'precipitation_probability', 'precipitation', 'cloud_cover',
+      'wind_speed_10m', 'wind_gusts_10m', 'wind_direction_10m',
+      'relative_humidity_2m', 'uv_index', 'is_day',
+    ].join(','),
     start_date: start,
     end_date:   end,
   }));
-  const d   = data.daily;
-  const eve = eveningFeels(data.hourly);
+  const d      = data.daily;
+  const hourly = groupHourly(data.hourly);
 
   const days: DayWeather[] = [];
   (d.time as string[]).forEach((date, i) => {
@@ -212,13 +235,14 @@ async function fetchForecastDays(point: Point, start: string, end: string, city:
     if (tMax == null || tMin == null) return;    // gap → filled from averages
     const code = isNum(d.weather_code[i]) ? d.weather_code[i] : null;
     const sun  = d.sunshine_duration[i];
+    const h    = hourly.get(date);
     days.push({
       date, label: formatLabel(date), city,
       ...wmo(code), code,
       tempMax: tMax, tempMin: tMin,
       feelsMax:      round(d.apparent_temperature_max[i]),
       feelsMin:      round(d.apparent_temperature_min[i]),
-      feelsEvening:  round(eve.get(date)),
+      feelsEvening:  round(eveningOf(h?.apparent_temperature)),
       chanceOfRain:  isNum(d.precipitation_probability_max[i]) ? d.precipitation_probability_max[i] : null,
       precipMm:      one(d.precipitation_sum[i]) ?? 0,
       windKph:       round(d.wind_speed_10m_max[i]),
@@ -226,6 +250,26 @@ async function fetchForecastDays(point: Point, start: string, end: string, city:
       sunshineHours: isNum(sun) ? one(sun / 3600) : null,
       daylightHours: one(daylightHours(point.lat, date)),
       source:        'forecast',
+      sunrise:       hhmm(d.sunrise[i]),
+      sunset:        hhmm(d.sunset[i]),
+      gustKph:       round(d.wind_gusts_10m_max[i]),
+      windDir:       round(d.wind_direction_10m_dominant[i]),
+      rainHours:     round(d.precipitation_hours[i]),
+      humidity:      round(mean(h?.relative_humidity_2m ?? [])),
+      hours: h ? {
+        temp:  col(h.temperature_2m, Math.round),
+        feels: col(h.apparent_temperature, Math.round),
+        code:  col(h.weather_code),
+        rain:  col(h.precipitation_probability),
+        mm:    col(h.precipitation, v => Math.round(v * 10) / 10),
+        cloud: col(h.cloud_cover, Math.round),
+        wind:  col(h.wind_speed_10m, Math.round),
+        gust:  col(h.wind_gusts_10m, Math.round),
+        dir:   col(h.wind_direction_10m, Math.round),
+        rh:    col(h.relative_humidity_2m, Math.round),
+        uv:    col(h.uv_index, v => Math.round(v * 10) / 10),
+        isDay: col(h.is_day),
+      } : null,
     });
   });
   return { days, timezone: (data.timezone as string) ?? null };
@@ -237,6 +281,8 @@ interface Sample {
   tMax: number | null; tMin: number | null;
   fMax: number | null; fMin: number | null; fEve: number | null;
   precip: number | null; wind: number | null; sun: number | null;
+  sunrise: string | null; sunset: string | null;
+  hours: HourCols | null;
 }
 
 async function fetchArchiveWindow(point: Point, start: string, len: number) {
@@ -245,21 +291,67 @@ async function fetchArchiveWindow(point: Point, start: string, len: number) {
       'temperature_2m_max', 'temperature_2m_min',
       'apparent_temperature_max', 'apparent_temperature_min',
       'precipitation_sum', 'wind_speed_10m_max', 'sunshine_duration',
+      'sunrise', 'sunset',
     ].join(','),
-    hourly:     'apparent_temperature',
+    hourly: [
+      'temperature_2m', 'apparent_temperature', 'precipitation',
+      'cloud_cover', 'wind_speed_10m', 'relative_humidity_2m',
+    ].join(','),
     start_date: start,
     end_date:   addDays(start, len - 1),
   }));
-  const d   = data.daily;
-  const eve = eveningFeels(data.hourly);
-  const samples: Sample[] = (d.time as string[]).map((date, i) => ({
-    tMax: d.temperature_2m_max[i], tMin: d.temperature_2m_min[i],
-    fMax: d.apparent_temperature_max[i], fMin: d.apparent_temperature_min[i],
-    fEve: eve.get(date) ?? null,
-    precip: d.precipitation_sum[i], wind: d.wind_speed_10m_max[i],
-    sun: isNum(d.sunshine_duration[i]) ? d.sunshine_duration[i] / 3600 : null,
-  }));
+  const d      = data.daily;
+  const hourly = groupHourly(data.hourly);
+  const samples: Sample[] = (d.time as string[]).map((date, i) => {
+    const h = hourly.get(date) ?? null;
+    return {
+      tMax: d.temperature_2m_max[i], tMin: d.temperature_2m_min[i],
+      fMax: d.apparent_temperature_max[i], fMin: d.apparent_temperature_min[i],
+      fEve: eveningOf(h?.apparent_temperature),
+      precip: d.precipitation_sum[i], wind: d.wind_speed_10m_max[i],
+      sun: isNum(d.sunshine_duration[i]) ? d.sunshine_duration[i] / 3600 : null,
+      sunrise: hhmm(d.sunrise?.[i]), sunset: hhmm(d.sunset?.[i]),
+      hours: h,
+    };
+  });
   return { samples, timezone: (data.timezone as string) ?? null };
+}
+
+// Typical hours have no weather code — describe the odds and the cloud.
+function typicalHourCode(rain: number | null, cloud: number | null): number {
+  if ((rain ?? 0) >= 35) return 80;
+  if (cloud == null)     return 2;
+  if (cloud >= 75)       return 3;
+  if (cloud >= 40)       return 2;
+  return cloud >= 15 ? 1 : 0;
+}
+
+// One typical day hour by hour: means across the pool, rain as how often it rained that hour.
+function typicalHours(pool: Sample[], sunrise: string | null, sunset: string | null): DayHours {
+  const at = (key: string, h: number) => pool.map(s => s.hours?.[key]?.[h] ?? null);
+  const hours: DayHours = {
+    temp: [], feels: [], code: [], rain: [], mm: [], cloud: [], wind: [],
+    gust: [], dir: [], rh: [], uv: [], isDay: [],
+  };
+  for (let h = 0; h < 24; h++) {
+    const wet   = at('precipitation', h).filter(isNum);
+    const rain  = wet.length ? Math.round(100 * wet.filter(v => v >= 0.1).length / wet.length) : null;
+    const cloud = round(mean(at('cloud_cover', h)));
+    const mid   = `${String(h).padStart(2, '0')}:30`;
+    hours.temp.push(round(mean(at('temperature_2m', h))));
+    hours.feels.push(round(mean(at('apparent_temperature', h))));
+    hours.rain.push(rain);
+    hours.cloud.push(cloud);
+    hours.wind.push(round(mean(at('wind_speed_10m', h))));
+    hours.rh.push(round(mean(at('relative_humidity_2m', h))));
+    hours.code.push(typicalHourCode(rain, cloud));
+    hours.isDay.push(sunrise && sunset ? (mid >= sunrise && mid < sunset ? 1 : 0) : (h >= 7 && h < 19 ? 1 : 0));
+    hours.mm.push(null);
+    hours.gust.push(null);
+    hours.dir.push(null);
+    hours.uv.push(null);
+  }
+  return hours;
 }
 
 async function fetchTypicalDays(point: Point, start: string, end: string, city: string) {
@@ -289,6 +381,9 @@ async function fetchTypicalDays(point: Point, start: string, end: string, city: 
     const light = daylightHours(point.lat, date);
     const sun   = mean(pool.map(s => s.sun));
     const typ   = typicalCondition(chance, tMax, sun != null && light > 0 ? sun / light : null);
+    // Sunrise/sunset from the most recent year's same date — they barely move year to year.
+    const recent = windows[0].samples[i + POOL_DAYS];
+    const hours  = typicalHours(pool, recent?.sunrise ?? null, recent?.sunset ?? null);
     return {
       date, label: formatLabel(date), city,
       condition: typ.condition, icon: wmo(typ.code).icon, code: typ.code,
@@ -303,6 +398,13 @@ async function fetchTypicalDays(point: Point, start: string, end: string, city: 
       sunshineHours: one(sun),
       daylightHours: one(light),
       source:        'historical',
+      sunrise:       recent?.sunrise ?? null,
+      sunset:        recent?.sunset ?? null,
+      gustKph:       null,
+      windDir:       null,
+      rainHours:     round(mean(pool.map(s => s.hours?.precipitation?.filter(v => isNum(v) && v >= 0.1).length ?? null))),
+      humidity:      round(mean(hours.rh)),
+      hours,
     };
   });
   return { days, years: windows.length, timezone: windows[0].timezone };
@@ -622,7 +724,8 @@ export async function fetchTripWeather(inputs: WeatherInputs, user?: any): Promi
     seaTemp,
     home: homeSeries?.days.length ? {
       city:         inputs.home!.city,
-      days:         homeSeries.days,
+      // Home only feeds the comparison — its hourly detail would just bloat the trip doc.
+      days:         homeSeries.days.map(({ hours: _hours, ...d }) => d),
       seaTemp:      homeSea,
       monthlyHighs,
     } : undefined,

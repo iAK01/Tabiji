@@ -19,7 +19,7 @@ interface Props {
   onClose:          () => void;
   tripId:           string;
   slot:             { start: number; mins: number } | null;
-  onAdd:            (stop: Partial<Stop>) => Promise<void>;
+  onAdd:            (stop: Partial<Stop>) => Promise<boolean>;
   onSwitchToDiscover?: () => void;
 }
 
@@ -55,7 +55,7 @@ export function FreeSuggestionsModal({ open, onClose, tripId, slot, onAdd, onSwi
     if (!slot) return;
     setAdding(h.name);
     try {
-      await onAdd({
+      const saved = await onAdd({
         name:        h.name,
         type:        stopType(h),
         address:     h.address     ?? undefined,
@@ -64,7 +64,7 @@ export function FreeSuggestionsModal({ open, onClose, tripId, slot, onAdd, onSwi
         notes:       h.tip         ?? undefined,
         scheduledStart: formatTime(slot.start),
       });
-      setAdded(prev => new Set(prev).add(h.name));
+      if (saved) setAdded(prev => new Set(prev).add(h.name));
     } finally {
       setAdding(null);
     }

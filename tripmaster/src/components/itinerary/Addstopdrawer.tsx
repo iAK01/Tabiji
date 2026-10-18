@@ -22,9 +22,11 @@ import { stopDuration, fmtDuration } from './Itinerary.helpers';
 interface Props {
   open:           boolean;
   onClose:        () => void;
-  onAdd:          (stop: Partial<Stop>) => Promise<void>;
-  onUpdate:       (stop: Partial<Stop>) => Promise<void>;
-  onDelete?:      () => void;
+  // Each resolves true once saved or queued offline; false means it failed (and has
+  // already been undone and reported), so the drawer stays open with the input.
+  onAdd:          (stop: Partial<Stop>) => Promise<boolean>;
+  onUpdate:       (stop: Partial<Stop>) => Promise<boolean>;
+  onDelete?:      () => Promise<boolean>;
   defaultTime:    string;
   defaultType:    string;
   editStop?:      Stop;
@@ -152,14 +154,26 @@ export function AddStopDrawer({
   };
 
   const submit = async () => {
+    if (saving) return;
     setSaving(true);
-    if (isEditing) {
-      await onUpdate({ ...editStop, ...form });
-    } else {
-      await onAdd(form);
+    try {
+      const saved = isEditing
+        ? await onUpdate({ ...editStop, ...form })
+        : await onAdd(form);
+      if (saved) onClose();
+    } finally {
+      setSaving(false);
     }
-    setSaving(false);
-    onClose();
+  };
+
+  const remove = async () => {
+    if (!onDelete || saving) return;
+    setSaving(true);
+    try {
+      if (await onDelete()) onClose();
+    } finally {
+      setSaving(false);
+    }
   };
 
   const cfg = STOP_CONFIG[form.type] ?? STOP_CONFIG.other;
@@ -552,7 +566,8 @@ export function AddStopDrawer({
           <Button
             variant="text"
             fullWidth
-            onClick={() => { onDelete(); onClose(); }}
+            onClick={remove}
+            disabled={saving}
             sx={{
               color:        'error.main',
               fontFamily:   D.body,

@@ -14,6 +14,7 @@ import LockIcon             from '@mui/icons-material/Lock';
 import NotificationsIcon    from '@mui/icons-material/Notifications';
 import AttachFileIcon       from '@mui/icons-material/AttachFile';
 import PlaceIcon            from '@mui/icons-material/Place';
+import FilterListIcon       from '@mui/icons-material/FilterList';
 import NavigateButton       from '@/components/ui/NavigateButton';
 import DocumentViewer, { type ViewableFile } from '@/components/files/DocumentViewer';
 import { STOP_CONFIG, D }   from './Itinerary.config';
@@ -34,13 +35,14 @@ interface Props {
   onEdit:      (stop: Stop) => void;
   onDelete:    (stop: Stop) => void;
   onOpenLogistics: () => void;
+  onFilterType:    (type: string) => void;   // "show me all the gigs"
 }
 
 // Tap a stop → everything about it, plus what else is on at the same time.
 // The read-first view: nothing here moves a stop by accident.
 export function StopDetailSheet({
   stop, concurrent, isMobile, linkedFiles, reminder,
-  onClose, onSelect, onSkip, onEdit, onDelete, onOpenLogistics,
+  onClose, onSelect, onSkip, onEdit, onDelete, onOpenLogistics, onFilterType,
 }: Props) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [viewerFile,    setViewerFile]    = useState<ViewableFile | null>(null);
@@ -90,8 +92,18 @@ export function StopDetailSheet({
           </Typography>
 
           <Box sx={{ display: 'flex', gap: 0.75, flexWrap: 'wrap', mb: 1.5 }}>
-            <Chip size="small" label={cfg.label.replace(/^\S+\s*/, '') || cfg.label}
-              sx={{ backgroundColor: alpha(cfg.color, 0.1), color: cfg.color, fontWeight: 700, fontFamily: D.body }} />
+            <Chip
+              size="small"
+              icon={<FilterListIcon sx={{ fontSize: '14px !important' }} />}
+              label={cfg.label.replace(/^\S+\s*/, '') || cfg.label}
+              onClick={() => onFilterType(stop.type)}
+              title="Show only these on the day"
+              sx={{
+                backgroundColor: alpha(cfg.color, 0.1), color: cfg.color, fontWeight: 700, fontFamily: D.body,
+                '& .MuiChip-icon': { color: cfg.color },
+                '&:hover': { backgroundColor: alpha(cfg.color, 0.18) },
+              }}
+            />
             {stop.skipped && (
               <Chip size="small" label="Not going"
                 sx={{ backgroundColor: alpha(D.navy, 0.08), color: D.navy, fontWeight: 700, fontFamily: D.body }} />

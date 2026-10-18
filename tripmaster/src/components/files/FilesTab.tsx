@@ -70,6 +70,7 @@ import SmartExtractProgress from './SmartExtractProgress';
 import { useSmartExtract, type SmartExtractSource } from '@/lib/extract/useSmartExtract';
 import { isFileCached } from '@/lib/offline/fileCache';
 import { saveTripCache, getTripCache } from '@/lib/offline/db';
+import { readSaved, assertSaved, reportSaveFailure } from '@/lib/offline/saveErrors';
 import { useSearchParams } from 'next/navigation';
 
 // ─── Smart Extract ────────────────────────────────────────────────────────────
@@ -802,12 +803,13 @@ function ToDoCard({
   file, onDelete, onEdit, onToggleComplete,
 }: {
   file:             TripFile;
-  onDelete:         (id: string) => void;
+  onDelete:         (id: string) => Promise<boolean>;
   onEdit:           (file: TripFile) => void;
   onToggleComplete: (file: TripFile) => void;
 }) {
   const [menuAnchor,  setMenuAnchor]  = useState<null | HTMLElement>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [deleting,    setDeleting]    = useState(false);
   const [toggling,    setToggling]    = useState(false);
 
   const isPacking  = file.type === 'packing_advisory';
@@ -816,8 +818,7 @@ function ToDoCard({
 
   const handleToggle = async () => {
     setToggling(true);
-    await onToggleComplete(file);
-    setToggling(false);
+    try { await onToggleComplete(file); } finally { setToggling(false); }
   };
 
   return (
@@ -923,7 +924,10 @@ function ToDoCard({
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 2.5, gap: 1 }}>
           <Button onClick={() => setConfirmOpen(false)} sx={{ fontFamily: D.body, fontWeight: 600 }}>Cancel</Button>
-          <Button variant="contained" color="error" onClick={() => { setConfirmOpen(false); onDelete(file._id); }}
+          <Button variant="contained" color="error" disabled={deleting} onClick={async () => {
+            setDeleting(true);
+            try { if (await onDelete(file._id)) setConfirmOpen(false); } finally { setDeleting(false); }
+          }}
             sx={{ fontFamily: D.body, fontWeight: 700 }}>Delete</Button>
         </DialogActions>
       </Dialog>
@@ -933,9 +937,10 @@ function ToDoCard({
 
 // ─── Note card ────────────────────────────────────────────────────────────────
 
-function NoteCard({ file, tripId, onDelete, onEdit }: { file: TripFile; tripId: string; onDelete: (id: string) => void; onEdit: (file: TripFile) => void }) {
+function NoteCard({ file, tripId, onDelete, onEdit }: { file: TripFile; tripId: string; onDelete: (id: string) => Promise<boolean>; onEdit: (file: TripFile) => void }) {
   const [menuAnchor,  setMenuAnchor]  = useState<null | HTMLElement>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [deleting,    setDeleting]    = useState(false);
   const color    = TYPE_COLOUR[file.type] ?? D.green;
   const typeMeta = NOTE_TYPES.find(t => t.value === file.type);
   const hasBody  = !!(file.body ?? '').trim();
@@ -1011,7 +1016,10 @@ function NoteCard({ file, tripId, onDelete, onEdit }: { file: TripFile; tripId: 
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 2.5, gap: 1 }}>
           <Button onClick={() => setConfirmOpen(false)} sx={{ fontFamily: D.body, fontWeight: 600 }}>Cancel</Button>
-          <Button variant="contained" color="error" onClick={() => { setConfirmOpen(false); onDelete(file._id); }}
+          <Button variant="contained" color="error" disabled={deleting} onClick={async () => {
+            setDeleting(true);
+            try { if (await onDelete(file._id)) setConfirmOpen(false); } finally { setDeleting(false); }
+          }}
             sx={{ fontFamily: D.body, fontWeight: 700 }}>Delete</Button>
         </DialogActions>
       </Dialog>
@@ -1037,9 +1045,10 @@ function NoteCard({ file, tripId, onDelete, onEdit }: { file: TripFile; tripId: 
 
 // ─── Contact card ─────────────────────────────────────────────────────────────
 
-function ContactCard({ file, onDelete, onEdit }: { file: TripFile; onDelete: (id: string) => void; onEdit: (file: TripFile) => void }) {
+function ContactCard({ file, onDelete, onEdit }: { file: TripFile; onDelete: (id: string) => Promise<boolean>; onEdit: (file: TripFile) => void }) {
   const [menuAnchor,  setMenuAnchor]  = useState<null | HTMLElement>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [deleting,    setDeleting]    = useState(false);
   const color    = TYPE_COLOUR[file.type] ?? '#6b7280';
   const typeMeta = CONTACT_TYPES.find(t => t.value === file.type);
 
@@ -1117,7 +1126,10 @@ function ContactCard({ file, onDelete, onEdit }: { file: TripFile; onDelete: (id
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 2.5, gap: 1 }}>
           <Button onClick={() => setConfirmOpen(false)} sx={{ fontFamily: D.body, fontWeight: 600 }}>Cancel</Button>
-          <Button variant="contained" color="error" onClick={() => { setConfirmOpen(false); onDelete(file._id); }}
+          <Button variant="contained" color="error" disabled={deleting} onClick={async () => {
+            setDeleting(true);
+            try { if (await onDelete(file._id)) setConfirmOpen(false); } finally { setDeleting(false); }
+          }}
             sx={{ fontFamily: D.body, fontWeight: 700 }}>Remove</Button>
         </DialogActions>
       </Dialog>
@@ -1127,9 +1139,10 @@ function ContactCard({ file, onDelete, onEdit }: { file: TripFile; onDelete: (id
 
 // ─── File / link card ─────────────────────────────────────────────────────────
 
-function ResourceCard({ file, tripId, onDelete, onEdit, onUpdate }: { file: TripFile; tripId: string; onDelete: (id: string) => void; onEdit: (file: TripFile) => void; onUpdate: (file: TripFile) => void }) {
+function ResourceCard({ file, tripId, onDelete, onEdit, onUpdate }: { file: TripFile; tripId: string; onDelete: (id: string) => Promise<boolean>; onEdit: (file: TripFile) => void; onUpdate: (file: TripFile) => void }) {
   const [menuAnchor,    setMenuAnchor]    = useState<null | HTMLElement>(null);
   const [confirmOpen,   setConfirmOpen]   = useState(false);
+  const [deleting,      setDeleting]      = useState(false);
   const [viewerFile,    setViewerFile]    = useState<ViewableFile | null>(null);
   const [cached,        setCached]        = useState(false);
   const color     = TYPE_COLOUR[file.type] ?? '#6b7280';
@@ -1283,7 +1296,10 @@ function ResourceCard({ file, tripId, onDelete, onEdit, onUpdate }: { file: Trip
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 2.5, gap: 1 }}>
           <Button onClick={() => setConfirmOpen(false)} sx={{ fontFamily: D.body, fontWeight: 600 }}>Cancel</Button>
-          <Button variant="contained" color="error" onClick={() => { setConfirmOpen(false); onDelete(file._id); }}
+          <Button variant="contained" color="error" disabled={deleting} onClick={async () => {
+            setDeleting(true);
+            try { if (await onDelete(file._id)) setConfirmOpen(false); } finally { setDeleting(false); }
+          }}
             sx={{ fontFamily: D.body, fontWeight: 700 }}>{isLink ? 'Remove' : 'Delete'}</Button>
         </DialogActions>
       </Dialog>
@@ -1473,12 +1489,14 @@ export default function FilesTab({ tripId, fabTrigger }: FilesTabProps) {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ completed: newCompleted }),
       });
-      const data = await res.json();
-      if (res.ok && data.file) setFiles(prev => prev.map(f => f._id === file._id ? data.file : f));
-    } catch {
+      const data = await readSaved(res);
+      if (!data.file) throw new Error('No file in response');
+      setFiles(prev => prev.map(f => f._id === file._id ? data.file : f));
+    } catch (err) {
       setFiles(prev => prev.map(f =>
         f._id === file._id ? { ...f, completed: file.completed, completedAt: file.completedAt } : f
       ));
+      reportSaveFailure(`the tick on “${file.name}”`, err);
     }
   };
 
@@ -1593,9 +1611,19 @@ export default function FilesTab({ tripId, fabTrigger }: FilesTabProps) {
     }
   };
 
+  // Resolves true once the server confirms; on failure the card stays (and its confirm
+  // stays open) and the error toast says so.
   const handleDelete = async (fileId: string) => {
-    await fetch(`/api/trips/${tripId}/files/${fileId}`, { method: 'DELETE' });
-    setFiles(prev => prev.filter(f => f._id !== fileId));
+    try {
+      const res = await fetch(`/api/trips/${tripId}/files/${fileId}`, { method: 'DELETE' });
+      assertSaved(res);
+      setFiles(prev => prev.filter(f => f._id !== fileId));
+      return true;
+    } catch (err) {
+      const name = files.find(f => f._id === fileId)?.name;
+      reportSaveFailure(name ? `the deletion of “${name}”` : 'the deletion', err);
+      return false;
+    }
   };
 
   // ── Derived ───────────────────────────────────────────────────────────────

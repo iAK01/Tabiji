@@ -8,6 +8,7 @@ import theme from '@/theme';
 import { registerServiceWorker } from '@/lib/offline/sw';
 import { listenForNotificationOpens, syncPushOnOpen } from '@/lib/push/client';
 import OfflineIndicator from '@/components/ui/OfflineIndicator';
+import SaveErrorToast from '@/components/ui/SaveErrorToast';
 import 'mapbox-gl/dist/mapbox-gl.css';
 
 export default function RootLayout({
@@ -40,6 +41,7 @@ export default function RootLayout({
             <CssBaseline />
             {children}
             <OfflineIndicator />
+            <SaveErrorToast />
           </ThemeProvider>
         </SessionProvider>
       </body>

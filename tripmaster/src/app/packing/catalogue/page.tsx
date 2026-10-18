@@ -31,27 +31,10 @@ import NaturePeopleIcon      from '@mui/icons-material/NaturePeople';
 import OtherHousesIcon       from '@mui/icons-material/OtherHouses';
 import CloseIcon             from '@mui/icons-material/Close';
 import AddCircleOutlineIcon  from '@mui/icons-material/AddCircleOutline';
-// Category icons
-import ArticleIcon           from '@mui/icons-material/Article';
-import DevicesIcon           from '@mui/icons-material/Devices';
-import CableIcon             from '@mui/icons-material/Cable';
-import CheckroomIcon         from '@mui/icons-material/Checkroom';
-import HikingIcon            from '@mui/icons-material/Hiking';
-import ChildCareIcon         from '@mui/icons-material/ChildCare';
-import SportsEsportsIcon     from '@mui/icons-material/SportsEsports';
-import PaletteIcon           from '@mui/icons-material/Palette';
-import FavoriteIcon          from '@mui/icons-material/Favorite';
-import BlenderIcon           from '@mui/icons-material/Blender';
-import SpaIcon               from '@mui/icons-material/CleanHands';
-import MedicationIcon        from '@mui/icons-material/Medication';
-import BusinessCenterIcon    from '@mui/icons-material/BusinessCenter';
-import LuggageIcon           from '@mui/icons-material/Luggage';
-import StyleIcon             from '@mui/icons-material/Style';
-import CoffeeIcon            from '@mui/icons-material/Coffee';
 import CategoryIcon          from '@mui/icons-material/Category';
-import DirectionsWalkIcon    from '@mui/icons-material/DirectionsRun';
-import AirlineSeatIcon       from '@mui/icons-material/AirlineSeatReclineNormal';
 import { PACKING_CATEGORIES } from '@/lib/data/packing-categories';
+import { CATEGORY_ICONS } from '@/components/packing/categoryIcons';
+import { readSaved, assertSaved, reportSaveFailure } from '@/lib/offline/saveErrors';
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 
@@ -65,30 +48,6 @@ const D = {
   rule:    'rgba(29,38,66,0.10)',
   display: '"Archivo Black", sans-serif',
   body:    '"Archivo", "Inter", sans-serif',
-};
-
-// ─── Category → MUI icon map ──────────────────────────────────────────────────
-
-const CATEGORY_ICONS: Record<string, React.ElementType> = {
-  'Documents':          ArticleIcon,
-  'Electronics':        DevicesIcon,
-  'Tech Accessories':   CableIcon,
-  'Clothes':            CheckroomIcon,
-  'Sport / Outdoor':    HikingIcon,
-  'Footwear':           DirectionsWalkIcon,
-  'Baby / Kids':        ChildCareIcon,
-  'Entertainment':      SportsEsportsIcon,
-  'Hobby / Creative':   PaletteIcon,
-  'Health & Recovery':  FavoriteIcon,
-  'Food / Supplements': BlenderIcon,
-  'Toiletries':         SpaIcon,
-  'Medicines':          MedicationIcon,
-  'Work Gear':          BusinessCenterIcon,
-  'Luggage':            LuggageIcon,
-  'Plane / Train':      AirlineSeatIcon,
-  'Accessories':        StyleIcon,
-  'Coffee':             CoffeeIcon,
-  'Other':              CategoryIcon,
 };
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -267,6 +226,7 @@ export default function PackingCataloguePage() {
   const [form,            setForm]            = useState({ ...emptyForm });
   const [saving,          setSaving]          = useState(false);
   const [uploading,       setUploading]       = useState(false);
+  const [deleting,        setDeleting]        = useState(false);
   const [selectedPhoto,   setSelectedPhoto]   = useState<File | null>(null);
   const [photoPreview,    setPhotoPreview]    = useState<string | null>(null);
   const [filterCategory,  setFilterCategory]  = useState('All');
@@ -335,39 +295,68 @@ export default function PackingCataloguePage() {
     setPhotoPreview(URL.createObjectURL(file));
   };
 
+  // The dialog only closes and clears once the item is saved; on any failure (photo
+  // included — never save with a lost photo) it stays open with what they entered.
   const handleSave = async () => {
+    if (saving || !form.name) return;
     setSaving(true);
     let photoUrl = editTarget?.photoUrl;
-    if (selectedPhoto) {
-      setUploading(true);
-      const formData = new FormData();
-      formData.append('file', selectedPhoto);
-      const uploadData = await fetch('/api/packing/catalogue/upload', { method: 'POST', body: formData }).then(r => r.json());
-      photoUrl = uploadData.url;
-      setUploading(false);
+    try {
+      if (selectedPhoto) {
+        setUploading(true);
+        try {
+          const formData = new FormData();
+          formData.append('file', selectedPhoto);
+          const res        = await fetch('/api/packing/catalogue/upload', { method: 'POST', body: formData });
+          const uploadData = await readSaved(res);
+          if (!uploadData.url) throw new Error('No photo URL in response');
+          photoUrl = uploadData.url;
+        } catch (err) {
+          reportSaveFailure(`the photo for “${form.name}”`, err);
+          return;
+        } finally {
+          setUploading(false);
+        }
+      }
+      const payload = { ...form, photoUrl };
+      if (editTarget) {
+        const res  = await fetch(`/api/packing/catalogue/${editTarget._id}`, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+        });
+        const data = await readSaved(res);
+        if (!data.item) throw new Error('No item in response');
+        setItems(prev => prev.map(i => i._id === editTarget._id ? data.item : i));
+      } else {
+        const res  = await fetch('/api/packing/catalogue', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+        });
+        const data = await readSaved(res);
+        if (!Array.isArray(data.items)) throw new Error('No items in response');
+        setItems(data.items);
+      }
+      setDialogOpen(false);
+      setForm({ ...emptyForm, transportTypes: [], accommodationTypes: [] });
+      setSelectedPhoto(null); setPhotoPreview(null); setEditTarget(null);
+    } catch (err) {
+      reportSaveFailure(editTarget ? `your changes to “${editTarget.name}”` : `“${form.name}”`, err);
+    } finally {
+      setSaving(false);
     }
-    const payload = { ...form, photoUrl };
-    if (editTarget) {
-      const data = await fetch(`/api/packing/catalogue/${editTarget._id}`, {
-        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
-      }).then(r => r.json());
-      setItems(prev => prev.map(i => i._id === editTarget._id ? data.item : i));
-    } else {
-      const data = await fetch('/api/packing/catalogue', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
-      }).then(r => r.json());
-      setItems(data.items);
-    }
-    setDialogOpen(false);
-    setForm({ ...emptyForm, transportTypes: [], accommodationTypes: [] });
-    setSelectedPhoto(null); setPhotoPreview(null); setEditTarget(null);
-    setSaving(false);
   };
 
   const handleDelete = async (item: PackingItem) => {
-    await fetch(`/api/packing/catalogue/${item._id}`, { method: 'DELETE' });
-    setItems(prev => prev.filter(i => i._id !== item._id));
-    setDeleteTarget(null);
+    if (deleting) return;
+    setDeleting(true);
+    try {
+      const res = await fetch(`/api/packing/catalogue/${item._id}`, { method: 'DELETE' });
+      assertSaved(res);
+      setItems(prev => prev.filter(i => i._id !== item._id));
+      setDeleteTarget(null);
+    } catch (err) {
+      reportSaveFailure(`the deletion of “${item.name}”`, err);
+    } finally {
+      setDeleting(false);
+    }
   };
 
   const filtered   = filterCategory === 'All' ? items : items.filter(i => i.category === filterCategory);
@@ -872,7 +861,8 @@ export default function PackingCataloguePage() {
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setDeleteTarget(null)} sx={{ color: D.muted }}>Cancel</Button>
-          <Button color="error" variant="contained" onClick={() => deleteTarget && handleDelete(deleteTarget)}>Delete</Button>
+          <Button color="error" variant="contained" disabled={deleting}
+            onClick={() => deleteTarget && handleDelete(deleteTarget)}>{deleting ? 'Deleting…' : 'Delete'}</Button>
         </DialogActions>
       </Dialog>
 

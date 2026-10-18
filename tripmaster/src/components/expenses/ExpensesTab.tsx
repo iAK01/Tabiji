@@ -18,6 +18,7 @@ import CheckCircleIcon  from '@mui/icons-material/CheckCircle';
 import RadioButtonUncheckedIcon from '@mui/icons-material/RadioButtonUnchecked';
 import { saveTripCache, getTripCache } from '@/lib/offline/db';
 import { sendOrQueue, pendingId } from '@/lib/offline/writes';
+import { readSaved, reportSaveFailure } from '@/lib/offline/saveErrors';
 import { EXPENSE_CATEGORIES as CATEGORIES, EXPENSE_PAYERS as PAYERS, EXPENSE_STATUSES as STATUSES, getPayerLabel, payerNameMissing, type TripPayerNames } from '@/lib/logistics/expenseConstants';
 import { getProofSlots, FUEL_RECEIPT_SLOT, type ProofSlot } from '@/lib/logistics/expenseProofs';
 import { compressImageFile } from '@/lib/utils/imageCompression';
@@ -91,6 +92,7 @@ export default function ExpensesTab({ tripId, trip, fabTrigger }: ExpensesTabPro
 
   const [zipping, setZipping] = useState(false);
   const [snackbarMsg, setSnackbarMsg] = useState('');
+  const [advancingId, setAdvancingId] = useState<string | null>(null);
   const [view, setView] = useUrlParam('view', EXPENSE_VIEWS, 'expenses');
   const [dragActive, setDragActive] = useState(false);
   const dragCounter = useRef(0); // dragenter/dragleave fire per child element — a counter avoids flicker
@@ -280,6 +282,7 @@ export default function ExpensesTab({ tripId, trip, fabTrigger }: ExpensesTabPro
         throw new Error(body?.error || undefined);
       }
       const data = await res.json();
+      if (!data.expense) throw new Error();
       setExpenses(prev => editId ? prev.map(e => e._id === editId ? data.expense : e) : [data.expense, ...prev]);
       setDialogOpen(false);
       setSnackbarMsg(proofCount > 0 ? `Saved — ${proofCount} document${proofCount === 1 ? '' : 's'} uploaded` : 'Expense saved');
@@ -304,12 +307,21 @@ export default function ExpensesTab({ tripId, trip, fabTrigger }: ExpensesTabPro
   };
 
   const advanceStatus = async (e: any) => {
+    if (advancingId) return;
     const next = STATUSES[Math.min(STATUSES.indexOf(e.status) + 1, STATUSES.length - 1)];
     const fd = new FormData();
     fd.append('status', next);
-    const res  = await fetch(`/api/trips/${tripId}/expenses/${e._id}`, { method: 'PUT', body: fd });
-    const data = await res.json();
-    setExpenses(prev => prev.map(x => x._id === e._id ? data.expense : x));
+    setAdvancingId(e._id);
+    try {
+      const res  = await fetch(`/api/trips/${tripId}/expenses/${e._id}`, { method: 'PUT', body: fd });
+      const data = await readSaved(res);
+      if (!data.expense) throw new Error('No expense in response');
+      setExpenses(prev => prev.map(x => x._id === e._id ? data.expense : x));
+    } catch (err) {
+      reportSaveFailure('the status change on your expense', err);
+    } finally {
+      setAdvancingId(null);
+    }
   };
 
   // ── Quick capture — photo + amount only, everything else filled in later ────
@@ -353,6 +365,7 @@ export default function ExpensesTab({ tripId, trip, fabTrigger }: ExpensesTabPro
         throw new Error(body?.error || undefined);
       }
       const data = await res.json();
+      if (!data.expense) throw new Error();
       setExpenses(prev => [data.expense, ...prev]);
       setSnackbarMsg(
         captureQueue.length > 0
@@ -455,6 +468,7 @@ export default function ExpensesTab({ tripId, trip, fabTrigger }: ExpensesTabPro
       const res  = await fetch(`/api/trips/${tripId}/expenses/${expenseId}`, { method: 'PUT', body: fd });
       if (!res.ok) throw new Error();
       const data = await res.json();
+      if (!data.expense) throw new Error();
       setExpenses(prev => prev.map(e => e._id === expenseId ? data.expense : e));
       setSnackbarMsg('Document removed');
     } catch {

@@ -40,7 +40,6 @@ import { weatherHeadline, type WeatherResult } from '@/lib/weather-insights';
 import TripOverview        from '@/components/overview/TripOverview';
 import FilesTab            from '@/components/files/FilesTab';
 import ExpensesTab         from '@/components/expenses/ExpensesTab';
-import OnTripScreen        from '@/components/trips/OnTripScreen';
 import ReceiptIcon         from '@mui/icons-material/Receipt';
 import CameraAltIcon       from '@mui/icons-material/CameraAlt';
 import ThunderstormIcon    from '@mui/icons-material/Thunderstorm';
@@ -51,6 +50,7 @@ import CloudIcon           from '@mui/icons-material/Cloud';
 import dynamic             from 'next/dynamic';
 import { saveTripCache, getTripCache } from '@/lib/offline/db';
 import { sendOrQueue, savedTripPatch } from '@/lib/offline/writes';
+import { readSaved, reportSaveFailure } from '@/lib/offline/saveErrors';
 import { useFlushQueueOnReconnect } from '@/lib/offline/useFlushQueue';
 import { autoCacheTripFiles } from '@/lib/offline/fileCache';
 import { warmTrip }        from '@/lib/offline/warm';
@@ -237,6 +237,8 @@ function TripPageInner() {
   const [trip,      setTrip]      = useState<Trip | null>(null);
   const [activeTab, setActiveTabState] = useState(() => slugToTab(searchParams.get('tab')));
   const [editOpen,  setEditOpen]  = useState(false);
+  const [editSaving, setEditSaving] = useState(false);
+  const photoRefreshing = useRef(false);
   const [editForm,  setEditForm]  = useState({
     name: '', tripType: '', purpose: '', startDate: '', endDate: '', status: '',
     originCity: '', originCountry: '', originCountryCode: '', originIata: '',
@@ -293,6 +295,8 @@ function TripPageInner() {
       try {
         const res  = await fetch(`/api/trips/${id}`);
         const data = await res.json();
+        // An error response must not blank the page or overwrite the offline copy.
+        if (!res.ok || !data.trip) throw new Error(`Trip load failed (${res.status})`);
         setTrip(data.trip);
         await saveTripCache(String(id), data.trip);
         if (!data.trip?.coverPhotoUrl && data.trip?.destination?.city) {
@@ -358,8 +362,10 @@ function TripPageInner() {
     setEditOpen(true);
   };
 
+  // The dialog only closes once the edit is saved or safely queued; on failure it stays
+  // open with the edits intact, and the error toast says so.
   const saveEdit = async () => {
-    if (!trip) return;
+    if (!trip || editSaving) return;
     const nights =
       editForm.startDate && editForm.endDate
         ? Math.round((new Date(editForm.endDate).getTime() - new Date(editForm.startDate).getTime()) / 86400000)
@@ -382,23 +388,31 @@ function TripPageInner() {
       },
     };
 
-    const res = await sendOrQueue(
-      { type: 'UPDATE_TRIP', tripId: trip._id, payload },
-      () => fetch(`/api/trips/${trip._id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      }),
-      savedTripPatch(trip._id, payload),
-    );
-    if (!res) {
-      setTrip({ ...trip, ...payload });
+    setEditSaving(true);
+    try {
+      const res = await sendOrQueue(
+        { type: 'UPDATE_TRIP', tripId: trip._id, payload },
+        () => fetch(`/api/trips/${trip._id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        }),
+        savedTripPatch(trip._id, payload),
+      );
+      if (!res) {
+        setTrip({ ...trip, ...payload });
+        setEditOpen(false);
+        return;
+      }
+      const data = await readSaved(res);
+      if (!data.trip) throw new Error('No trip in response');
+      setTrip(data.trip);
       setEditOpen(false);
-      return;
+    } catch (err) {
+      reportSaveFailure('your trip details', err);
+    } finally {
+      setEditSaving(false);
     }
-    const data = await res.json();
-    setTrip(data.trip);
-    setEditOpen(false);
   };
 
   const getTripFabActions = (tripType: string): Record<number, FabActionConfig[]> => {
@@ -424,10 +438,18 @@ function TripPageInner() {
 
 
   const refreshPhoto = async () => {
-    if (!trip) return;
-    const res  = await fetch(`/api/trips/${trip._id}/cover-photo`, { method: 'POST' });
-    const data = await res.json();
-    if (data.trip) setTrip(data.trip);
+    if (!trip || photoRefreshing.current) return;
+    photoRefreshing.current = true;
+    try {
+      const res  = await fetch(`/api/trips/${trip._id}/cover-photo`, { method: 'POST' });
+      const data = await readSaved(res);
+      if (!data.trip) throw new Error('No trip in response');
+      setTrip(data.trip);
+    } catch (err) {
+      reportSaveFailure('a new cover photo', err);
+    } finally {
+      photoRefreshing.current = false;
+    }
   };
 
   const openDeletePreview = async () => {
@@ -752,11 +774,6 @@ function TripPageInner() {
         {/* ── Tab content ── */}
         {activeTab === 0 ? (
           <>
-            {isActive && (
-              <Container maxWidth="lg" sx={{ pt: { xs: 2, sm: 2.5 }, px: { xs: 2, sm: 3 } }}>
-                <OnTripScreen tripId={trip._id} trip={trip} />
-              </Container>
-            )}
             <Box
               ref={isActive ? tabContentRef : undefined}
               sx={{ scrollMarginTop: '66px' }}
@@ -898,7 +915,7 @@ function TripPageInner() {
         <TravelSheet trip={trip} />
 
         {/* ── Edit dialog ── */}
-        <Dialog open={editOpen} onClose={() => setEditOpen(false)} maxWidth="sm" fullWidth fullScreen={isMobile}
+        <Dialog open={editOpen} onClose={() => !editSaving && setEditOpen(false)} maxWidth="sm" fullWidth fullScreen={isMobile}
           PaperProps={{ sx: { borderRadius: { sm: 2.5 }, backgroundColor: D.paper } }}>
           <DialogTitle sx={{
             fontFamily: D.display, fontSize: { xs: '1.5rem', sm: '1.8rem' },
@@ -1039,24 +1056,24 @@ function TripPageInner() {
             <Button
               startIcon={<DeleteForeverIcon />}
               onClick={() => { setEditOpen(false); openDeletePreview(); }}
-              fullWidth={isMobile} size="large"
+              disabled={editSaving} fullWidth={isMobile} size="large"
               sx={{ mr: { sm: 'auto' }, fontFamily: D.body, fontWeight: 700,
                 color: '#dc2626', '&:hover': { backgroundColor: alpha('#dc2626', 0.06) } }}
             >
               Delete trip
             </Button>
-            <Button onClick={() => setEditOpen(false)} fullWidth={isMobile} size="large"
+            <Button onClick={() => setEditOpen(false)} disabled={editSaving} fullWidth={isMobile} size="large"
               sx={{ fontFamily: D.body, fontWeight: 600 }}>
               Cancel
             </Button>
-            <Button variant="contained" onClick={saveEdit} disabled={!editForm.name}
+            <Button variant="contained" onClick={saveEdit} disabled={!editForm.name || editSaving}
               fullWidth={isMobile} size="large"
               sx={{
                 fontFamily: D.display, letterSpacing: '-0.01em',
                 backgroundColor: D.navy, boxShadow: 'none',
                 '&:hover': { backgroundColor: alpha(D.navy, 0.88), boxShadow: 'none' },
               }}>
-              Save Changes
+              {editSaving ? 'Saving…' : 'Save Changes'}
             </Button>
           </DialogActions>
         </Dialog>

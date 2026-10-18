@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   Box, Container, Typography, AppBar, Toolbar, IconButton, Button,
@@ -32,6 +32,7 @@ import AirportSearch          from '@/components/ui/AirportSearch';
 import PushNotificationSetup  from '@/components/notifications/PushNotificationSetup';
 import NotificationSettings   from '@/components/notifications/NotificationSettings';
 import { Airport }            from '@/lib/data/airports';
+import { readSaved, assertSaved, reportSaveFailure } from '@/lib/offline/saveErrors';
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 
@@ -288,22 +289,52 @@ export default function ProfilePage() {
     });
   }, []);
 
+  // Each PUT sends the whole list, so only one goes out at a time; toggles made meanwhile
+  // are picked up when it lands. A failure puts the chips back to what the server last confirmed.
+  const latestApps = useRef<string[]>([]);   // the list on screen
+  const savedApps  = useRef<string[]>([]);   // the list the server last confirmed
+  const appsSaving = useRef(false);
+
   useEffect(() => {
     fetch('/api/user/my-apps').then(r => r.json()).then(data => {
-      if (Array.isArray(data.myApps)) setMyApps(data.myApps);
+      if (Array.isArray(data.myApps)) {
+        latestApps.current = savedApps.current = data.myApps;
+        setMyApps(data.myApps);
+      }
     });
   }, []);
 
+  const saveApps = async () => {
+    if (appsSaving.current) return;
+    appsSaving.current = true;
+    try {
+      while (latestApps.current !== savedApps.current) {
+        const sending = latestApps.current;
+        const res = await fetch('/api/user/my-apps', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ myApps: sending }),
+        });
+        assertSaved(res);
+        savedApps.current = sending;
+      }
+    } catch (err) {
+      latestApps.current = savedApps.current;
+      setMyApps(savedApps.current);
+      reportSaveFailure('your apps', err);
+    } finally {
+      appsSaving.current = false;
+    }
+  };
+
   const toggleApp = (id: string) => {
-    const updated = myApps.includes(id)
-      ? myApps.filter(a => a !== id)
-      : [...myApps, id];
+    const current = latestApps.current;
+    const updated = current.includes(id)
+      ? current.filter(a => a !== id)
+      : [...current, id];
+    latestApps.current = updated;
     setMyApps(updated);
-    fetch('/api/user/my-apps', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ myApps: updated }),
-    });
+    saveApps();
   };
 
   const geocodeAddress = useCallback(async () => {
@@ -354,11 +385,25 @@ export default function ProfilePage() {
     setForm(p => ({ ...p, passport: { ...p.passport, countryCode: code, country: country?.name || '' } }));
   };
 
+  // The form only closes and shows "saved" once the server confirms; on failure it stays
+  // open with everything they entered, and the error toast says so.
   const handleSave = async () => {
+    if (saving) return;
     setSaving(true);
-    await fetch('/api/user/profile', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) });
-    setProfile(form); setEditing(false); setSaving(false); setSaved(true);
-    setTimeout(() => setSaved(false), 3000);
+    try {
+      // The profile PUT replaces all of `preferences`, so carry the current app list —
+      // form.preferences still holds the one loaded with the page.
+      const body = { ...form, preferences: { ...form.preferences, myApps: latestApps.current } };
+      const res  = await fetch('/api/user/profile', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const data = await readSaved(res);
+      if (!data.user) throw new Error('No user in response');
+      setProfile(form); setEditing(false); setSaved(true);
+      setTimeout(() => setSaved(false), 3000);
+    } catch (err) {
+      reportSaveFailure('your profile', err);
+    } finally {
+      setSaving(false);
+    }
   };
 
   const passportDaysLeft = profile?.passport?.expiry

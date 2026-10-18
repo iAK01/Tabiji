@@ -5,6 +5,7 @@ import Trip from '@/lib/mongodb/models/Trip';
 import TripLogistics from '@/lib/mongodb/models/TripLogistics';
 import TripPacking from '@/lib/mongodb/models/TripPacking';
 import MasterPackingItem from '@/lib/mongodb/models/MasterPackingItem';
+import { packingCounts } from '@/lib/packing/counts';
 import User from '@/lib/mongodb/models/User';
 import { getCountryMeta } from '@/lib/data/countries';
 import {
@@ -28,8 +29,8 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
 
   // ── Transport types ──────────────────────────────────────────────────────────
   const transportTypes: string[] = [];
-  if (logistics?.transport?.length) {
-    for (const t of logistics.transport) {
+  if (logistics?.transportation?.length) {
+    for (const t of logistics.transportation) {
       if (t.type === 'flight'  && !transportTypes.includes('plane'))  transportTypes.push('plane');
       if (t.type === 'train'   && !transportTypes.includes('train'))  transportTypes.push('train');
       if (t.type === 'car'     && !transportTypes.includes('car'))    transportTypes.push('car');
@@ -176,6 +177,26 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
     }
   }
 
+  // ── Carry over what the user already did ──────────────────────────────────────
+  // A regenerate refreshes the list, not their decisions: items still on it keep their
+  // packed / not-bringing status, and manually added items (never in the catalogue) stay.
+  const previous   = await TripPacking.findOne({ tripId: id });
+  const prevByName = new Map<string, any>((previous?.items ?? []).map((i: any) => [i.name, i]));
+  for (const item of packingItems as any[]) {
+    const prev = prevByName.get(item.name);
+    if (!prev) continue;
+    item.packed   = !!prev.packed;
+    item.packedAt = prev.packedAt ?? null;
+    if (prev.skipped) item.skipped = true;
+  }
+  for (const mi of (previous?.items ?? []).filter((i: any) => i.source === 'manual')) {
+    if (!existingNames.has(mi.name)) {
+      packingItems.push(mi);
+      existingNames.add(mi.name);
+    }
+  }
+  const counts = packingCounts(packingItems);
+
   // ── Persist ───────────────────────────────────────────────────────────────────
   const packing = await TripPacking.findOneAndUpdate(
     { tripId: id },
@@ -183,8 +204,9 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
       tripId: id,
       items:  packingItems,
       totalItems:       packingItems.length,
-      packedItems:      0,
-      packingProgress:  0,
+      packedItems:      counts.packed,
+      skippedItems:     counts.skipped,
+      packingProgress:  counts.progress,
       generatedAt:      new Date(),
       generationParams: {
         nights,

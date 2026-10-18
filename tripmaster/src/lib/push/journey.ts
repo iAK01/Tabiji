@@ -166,6 +166,26 @@ export function whereAt(trip: TripLike, legs: Leg[], homeZone: string): (ms: num
   };
 }
 
+/**
+ * The place the traveller is in at a moment, for help getting around it: where
+ * they last landed (connections aside). Before anything lands, the main
+ * destination, unless the journey starts from home (a flight out of the home
+ * country, or a first leg leaving by the start date). Null at home, on the way
+ * out, and once back.
+ */
+export function placeAt(trip: TripLike, legs: Leg[], home: Home, ms: number): { city: string; countryCode: string | null } | null {
+  const landed = legs.filter(l => !l.landsInTransit && (l.arr ?? l.dep).toMillis() <= ms);
+  const last   = landed[landed.length - 1];
+  if (last) {
+    if (last.arrivesHome) return null;
+    return { city: last.arrCity || trip.destination?.city || '', countryCode: last.arrCountry ?? trip.destination?.countryCode ?? null };
+  }
+  const leavesHome = startsFromHome(trip, legs)
+    || (!!home.countryCode && legs.some(l => airportCountryCode(l.depCode) === home.countryCode));
+  if (leavesHome || !trip.destination?.city) return null;
+  return { city: trip.destination.city, countryCode: trip.destination.countryCode ?? null };
+}
+
 export interface Stay { a: any; index: number }
 
 /** Where you're sleeping the night of `date` (YYYY-MM-DD). */

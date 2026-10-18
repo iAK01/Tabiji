@@ -6,6 +6,7 @@
 
 import { useCallback, useEffect, useSyncExternalStore } from 'react';
 import { patchSavedData, sendOrQueue, type SavedDataUpdates } from '@/lib/offline/writes';
+import { assertSaved, reportSaveFailure } from '@/lib/offline/saveErrors';
 import { resolvePrefs, type NotificationPrefs } from '@/lib/push/prefs';
 import { setAppBadge } from '@/lib/push/client';
 
@@ -70,13 +71,19 @@ export function useNotificationPrefs() {
     const next    = applyPatch(current, patch);
     prefsStore.set(next);
     const saved: SavedDataUpdates = { [PREFS_URL]: () => ({ prefs: next }) };
-    const res = await sendOrQueue(
-      { type: 'SET_NOTIFICATION_PREFS', payload: patch },
-      () => fetch(PREFS_URL, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) }),
-      saved,
-    );
-    if (res && !res.ok) prefsStore.set(current);     // rejected — put it back
-    else if (res) await patchSavedData(saved);       // keep the offline copy current
+    try {
+      const res = await sendOrQueue(
+        { type: 'SET_NOTIFICATION_PREFS', payload: patch },
+        () => fetch(PREFS_URL, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) }),
+        saved,
+      );
+      if (!res) return;
+      assertSaved(res);
+      await patchSavedData(saved);                   // keep the offline copy current
+    } catch (err) {
+      prefsStore.set(current);                       // rejected — put it back
+      reportSaveFailure('your notification settings', err);
+    }
   }, []);
 
   return { prefs, update };

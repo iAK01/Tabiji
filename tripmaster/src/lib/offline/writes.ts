@@ -1,4 +1,4 @@
-import { queueAction } from './db';
+import { flushQueue, getQueueCount, queueAction } from './db';
 import { isOffline, markNetworkDown } from './connectivity';
 import { refreshSavedData } from './warm';
 import { DATA_CACHE } from './sw';
@@ -15,13 +15,22 @@ export type SavedDataUpdates = Record<string, (saved: any) => any>;
  * `optimistic` is applied to the saved copies of GET responses when the action is queued,
  * so the change still shows after leaving and reopening a tab offline (every tab reads
  * those copies). A successful send re-saves the trip's data from the server instead.
+ *
+ * While older changes are still queued, a new one queues behind them rather than going
+ * straight out: sent ahead, it could land first, and index-addressed edits (packing ticks,
+ * logistics edits) would then hit the wrong item.
+ *
+ * A returned Response may be an error — pass it through readSaved/assertSaved (./saveErrors).
+ * Rejects if the action can't be queued either (storage unavailable); callers must treat
+ * that as a failed save, never as queued.
  */
 export async function sendOrQueue(
   action: { type: string; tripId?: string; [key: string]: unknown },
   send: () => Promise<Response>,
   optimistic?: SavedDataUpdates,
 ): Promise<Response | null> {
-  if (!isOffline()) {
+  const queuedAhead = await getQueueCount().catch(() => 0);
+  if (!isOffline() && queuedAhead === 0) {
     try {
       const res = await send();
       if (res.ok) refreshSavedData(action.tripId);
@@ -32,6 +41,11 @@ export async function sendOrQueue(
   }
   await queueAction(action);
   if (optimistic) await patchSavedData(optimistic);
+  if (!isOffline()) {
+    flushQueue()
+      .then(({ synced }) => synced.forEach(a => refreshSavedData(a.tripId)))
+      .catch(() => {});
+  }
   return null;
 }
 

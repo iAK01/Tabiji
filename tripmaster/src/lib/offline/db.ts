@@ -1,5 +1,6 @@
 import { openDB } from 'idb';
 import { isOffline } from './connectivity';
+import { reportSyncRejected } from './saveErrors';
 
 const DB_NAME = 'tabiji-offline';
 const DB_VERSION = 4;
@@ -54,6 +55,24 @@ export async function getTripCache(tripId: string) {
 export async function queueAction(action: any) {
   const db = await getDB();
   await db.add('queue', action);
+  notifyQueueChanged();
+}
+
+export async function getQueueCount(): Promise<number> {
+  const db = await getDB();
+  return db.count('queue');
+}
+
+// Lets the UI show how many changes are still waiting to sync (OfflineIndicator).
+const QUEUE_EVENT = 'tabiji:queue-changed';
+
+function notifyQueueChanged() {
+  if (typeof window !== 'undefined') window.dispatchEvent(new Event(QUEUE_EVENT));
+}
+
+export function subscribeQueue(listener: () => void): () => void {
+  window.addEventListener(QUEUE_EVENT, listener);
+  return () => window.removeEventListener(QUEUE_EVENT, listener);
 }
 
 export async function getQueue() {
@@ -66,6 +85,7 @@ export async function clearQueue() {
   const tx = db.transaction('queue', 'readwrite');
   await tx.store.clear();
   await tx.done;
+  notifyQueueChanged();
 }
 
 /* -------- Queue replay --------
@@ -231,19 +251,50 @@ async function dispatchQueuedAction(action: any): Promise<boolean> {
         // Unrecognised action type — drop it rather than block the queue forever.
         return true;
     }
-    return isDone(res);
+    return isDone(res, action);
   } catch {
     return false;
   }
 }
 
+// What a queued action was, in the user's terms — for the "couldn't be saved" message.
+function describeAction(action: any): string {
+  const p = action.payload ?? {};
+  switch (action.type) {
+    case 'CREATE_TRIP':             return `the new trip${action.body?.name ? ` “${action.body.name}”` : ''}`;
+    case 'UPDATE_TRIP':             return 'an edit to your trip details';
+    case 'ADD_STOP':                return `the itinerary stop${p.stop?.name ? ` “${p.stop.name}”` : ''}`;
+    case 'RESCHEDULE_STOP':         return 'a change to an itinerary stop';
+    case 'DELETE_STOP':             return 'removing an itinerary stop';
+    case 'CALCULATE_TRAVEL':        return 'recalculated travel times';
+    case 'ADD_TRANSPORT':
+    case 'EDIT_TRANSPORT':          return 'a transport booking';
+    case 'ADD_ACCOM':
+    case 'EDIT_ACCOM':              return `the stay${p.name ? ` “${p.name}”` : ''}`;
+    case 'ADD_VENUE':
+    case 'EDIT_VENUE':              return `the venue${p.name ? ` “${p.name}”` : ''}`;
+    case 'DELETE_LOGISTICS_ITEM':   return 'removing a booking';
+    case 'ADD_EXPENSE':             return 'an expense';
+    case 'TOGGLE_PACKED':           return 'a packing-list change';
+    case 'ADD_PACKING_ITEM':        return `the packing item${p.name ? ` “${p.name}”` : ''}`;
+    case 'COMPLETE_TODO':           return 'a completed to-do';
+    case 'SET_NOTIFICATION_PREFS':  return 'your notification settings';
+    case 'MARK_NOTIFICATIONS_READ': return 'marking notifications read';
+    default:                        return 'a change';
+  }
+}
+
 // A 4xx the server will give on every retry (deleted trip, invalid data) can never
 // succeed — left at the head of the queue it would block every change behind it
-// forever. Expired sessions (401) and rate limits stay queued for a later retry.
-function isDone(res: Response): boolean {
+// forever, so it's dropped, but never quietly: the user is told which change was lost.
+// Expired sessions (401) and rate limits stay queued for a later retry.
+function isDone(res: Response, action: any): boolean {
   if (res.ok) return true;
   const permanent = res.status >= 400 && res.status < 500 && ![401, 408, 429].includes(res.status);
-  if (permanent) console.warn(`[offline queue] dropped a queued change the server rejected (${res.status})`);
+  if (permanent) {
+    console.warn(`[offline queue] dropped a queued change the server rejected (${res.status})`, action);
+    reportSyncRejected(describeAction(action), res.status);
+  }
   return permanent;
 }
 
@@ -272,16 +323,21 @@ export async function flushQueue(): Promise<FlushResult> {
   }
 }
 
+// Takes the oldest action each time round rather than a snapshot, so anything queued
+// while the flush is running (sendOrQueue queues behind a non-empty queue) is replayed
+// in the same pass, in order.
 async function replayQueue(): Promise<FlushResult> {
-  const db      = await getDB();
-  const keys    = await db.getAllKeys('queue');
-  const actions = await db.getAll('queue');
+  const db = await getDB();
   const synced: any[] = [];
-  for (let i = 0; i < actions.length; i++) {
-    const ok = await dispatchQueuedAction(actions[i]);
+  for (;;) {
+    const cursor = await db.transaction('queue').store.openCursor();
+    if (!cursor) break;
+    const { key, value: action } = cursor;
+    const ok = await dispatchQueuedAction(action);
     if (!ok) break;
-    await db.delete('queue', keys[i]);
-    synced.push(actions[i]);
+    await db.delete('queue', key);
+    synced.push(action);
+    notifyQueueChanged();
   }
   const remaining = await db.count('queue');
   return { processed: synced.length, remaining, synced };

@@ -30,6 +30,7 @@ import BookingLinks      from '@/components/logistics/BookingLinks';
 import type { ResolvedAddress } from '@/components/ui/AddressSearch';
 import { saveTripCache, getTripCache } from '@/lib/offline/db';
 import { sendOrQueue, pendingId } from '@/lib/offline/writes';
+import { readSaved, reportSaveFailure } from '@/lib/offline/saveErrors';
 import { EXPENSE_PAYERS, getPayerLabel } from '@/lib/logistics/expenseConstants';
 import DocumentViewer from '@/components/files/DocumentViewer';
 import type { ViewableFile } from '@/components/files/DocumentViewer';
@@ -224,8 +225,41 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
     [`/api/trips/${tripId}/logistics`]: (saved: any) => ({ ...saved, logistics: updated }),
   });
 
+  // Shows `updated` on screen and in the offline copy straight away, then sends it.
+  // Resolves to the server's logistics once confirmed, or null when queued offline. On any
+  // failure both are put back as they were and the error toast names `what`; resolves
+  // false so the caller keeps its dialog open with what was typed.
+  const commitLogistics = async (
+    updated: any, what: string,
+    action: Parameters<typeof sendOrQueue>[0], send: () => Promise<Response>,
+  ): Promise<{ logistics: any } | null | false> => {
+    const before = logistics;
+    let cached: any;
+    let mirrored = false;
+    try {
+      setLogistics(updated);
+      cached = await getTripCache(tripId);
+      await saveTripCache(tripId, { ...cached, logistics: updated });
+      mirrored = true;
+      const res = await sendOrQueue(action, send, savedLogistics(updated));
+      if (!res) return null;
+      const data = await readSaved(res);
+      if (!data.logistics) throw new Error('No logistics in response');
+      setLogistics(data.logistics);
+      return { logistics: data.logistics };
+    } catch (err) {
+      setLogistics(before);
+      reportSaveFailure(what, err);
+      if (mirrored) {
+        await saveTripCache(tripId, cached ?? { logistics: before })
+          .catch(e => console.error('[offline copy] couldn’t restore logistics', e));
+      }
+      return false;
+    }
+  };
+
   const saveTransport = async () => {
-    setSaving(true);
+    if (saving) return;
     const isEdit  = editTransportIdx !== null;
     const justSavedLeg = transport;
     // "Round trip?" was ticked on the leg that's *becoming* the outbound (reachedLeg was
@@ -242,8 +276,6 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
         ? logistics.transportation.map((t: any, i: number) => i === editTransportIdx ? justSavedLeg : t)
         : [...(logistics?.transportation ?? []), justSavedLeg],
     };
-    setLogistics(updated);
-    await saveTripCache(tripId, { ...(await getTripCache(tripId)), logistics: updated });
 
     const openPrefilledReturn = () => {
       const { top, details } = buildReturnFields(justSavedLeg, justSavedLeg.type);
@@ -277,42 +309,37 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
 
     const url    = isEdit ? `/api/trips/${tripId}/logistics/transport/${editTransportIdx}` : `/api/trips/${tripId}/logistics/transport`;
     const method = isEdit ? 'PUT' : 'POST';
-    const res    = await sendOrQueue(
-      { type: isEdit ? 'EDIT_TRANSPORT' : 'ADD_TRANSPORT', tripId, payload: justSavedLeg, index: editTransportIdx },
-      () => fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(justSavedLeg) }),
-      savedLogistics(updated),
-    );
-    if (!res) {
+    setSaving(true);
+    try {
+      const result = await commitLogistics(
+        updated,
+        justSavedLeg.departureLocation && justSavedLeg.arrivalLocation ? `“${transportLabel}”` : `your ${transportLabel.toLowerCase()}`,
+        { type: isEdit ? 'EDIT_TRANSPORT' : 'ADD_TRANSPORT', tripId, payload: justSavedLeg, index: editTransportIdx },
+        () => fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(justSavedLeg) }),
+      );
+      if (result === false) return;
+
+      // Gap detection — runs after every flight save the server confirmed
+      if (result && justSavedLeg.type === 'flight') {
+        const gaps = detectTransportGaps(justSavedLeg, result.logistics.transportation ?? []);
+        if (gaps.length > 0) setGapPrompts(gaps);
+      }
+
+      // Only now the leg is saved or queued — an expense must never link to a leg that doesn't exist.
       await createLinkedExpense({
         date: (justSavedLeg.departureTime || '').split('T')[0], amount: justSavedLeg.cost,
         category: justSavedLeg.type,
         label: transportLabel, collection: 'transport', entryId: transportEntryId,
       });
+
       if (continueToReturn) openPrefilledReturn(); else closeAndReset();
+    } finally {
       setSaving(false);
-      return;
     }
-    const data   = await res.json();
-    setLogistics(data.logistics);
-
-    // Gap detection — runs after every flight save
-    if (justSavedLeg.type === 'flight') {
-      const gaps = detectTransportGaps(justSavedLeg, data.logistics?.transportation ?? []);
-      if (gaps.length > 0) setGapPrompts(gaps);
-    }
-
-    await createLinkedExpense({
-      date: (justSavedLeg.departureTime || '').split('T')[0], amount: justSavedLeg.cost,
-      category: justSavedLeg.type,
-      label: transportLabel, collection: 'transport', entryId: transportEntryId,
-    });
-
-    if (continueToReturn) openPrefilledReturn(); else closeAndReset();
-    setSaving(false);
   };
 
   const saveAccom = async () => {
-    setSaving(true);
+    if (saving) return;
     const isEdit  = editAccomIdx !== null;
     const updated = {
       ...(logistics ?? {}),
@@ -320,19 +347,20 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
         ? logistics.accommodation.map((a: any, i: number) => i === editAccomIdx ? accom : a)
         : [...(logistics?.accommodation ?? []), accom],
     };
-    setLogistics(updated);
-    await saveTripCache(tripId, { ...(await getTripCache(tripId)), logistics: updated });
 
     const accomEntryId = String(isEdit ? editAccomIdx : updated.accommodation.length - 1);
 
     const url    = isEdit ? `/api/trips/${tripId}/logistics/accommodation/${editAccomIdx}` : `/api/trips/${tripId}/logistics/accommodation`;
     const method = isEdit ? 'PUT' : 'POST';
-    const res    = await sendOrQueue(
-      { type: isEdit ? 'EDIT_ACCOM' : 'ADD_ACCOM', tripId, payload: accom, index: editAccomIdx },
-      () => fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(accom) }),
-      savedLogistics(updated),
-    );
-    if (!res) {
+    setSaving(true);
+    try {
+      const result = await commitLogistics(
+        updated,
+        accom.name ? `“${accom.name}”` : 'your accommodation',
+        { type: isEdit ? 'EDIT_ACCOM' : 'ADD_ACCOM', tripId, payload: accom, index: editAccomIdx },
+        () => fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(accom) }),
+      );
+      if (result === false) return;
       await createLinkedExpense({
         date: accom.checkIn, amount: accom.cost, category: accom.type,
         label: accom.name || 'Accommodation', collection: 'accommodation', entryId: accomEntryId,
@@ -342,25 +370,13 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
       setEditAccomIdx(null);
       setReimbursable(false);
       setPayer('tbc');
+    } finally {
       setSaving(false);
-      return;
     }
-    const data   = await res.json();
-    setLogistics(data.logistics);
-    await createLinkedExpense({
-      date: accom.checkIn, amount: accom.cost, category: accom.type,
-      label: accom.name || 'Accommodation', collection: 'accommodation', entryId: accomEntryId,
-    });
-    setAccomOpen(false);
-    setAccom({ ...BLANK_ACCOM });
-    setEditAccomIdx(null);
-    setReimbursable(false);
-    setPayer('tbc');
-    setSaving(false);
   };
 
   const saveVenue = async () => {
-    setSaving(true);
+    if (saving) return;
     const isEdit  = editVenueIdx !== null;
     const updated = {
       ...(logistics ?? {}),
@@ -368,19 +384,20 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
         ? (logistics.venues ?? []).map((v: any, i: number) => i === editVenueIdx ? venue : v)
         : [...(logistics?.venues ?? []), venue],
     };
-    setLogistics(updated);
-    await saveTripCache(tripId, { ...(await getTripCache(tripId)), logistics: updated });
 
     const venueEntryId = String(isEdit ? editVenueIdx : updated.venues.length - 1);
 
     const url    = isEdit ? `/api/trips/${tripId}/logistics/venues/${editVenueIdx}` : `/api/trips/${tripId}/logistics/venues`;
     const method = isEdit ? 'PUT' : 'POST';
-    const res    = await sendOrQueue(
-      { type: isEdit ? 'EDIT_VENUE' : 'ADD_VENUE', tripId, payload: venue, index: editVenueIdx },
-      () => fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(venue) }),
-      savedLogistics(updated),
-    );
-    if (!res) {
+    setSaving(true);
+    try {
+      const result = await commitLogistics(
+        updated,
+        venue.name ? `“${venue.name}”` : 'the venue',
+        { type: isEdit ? 'EDIT_VENUE' : 'ADD_VENUE', tripId, payload: venue, index: editVenueIdx },
+        () => fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(venue) }),
+      );
+      if (result === false) return;
       await createLinkedExpense({
         date: venue.date, amount: venue.cost, category: venue.type,
         label: venue.name || 'Venue', collection: 'venue', entryId: venueEntryId,
@@ -390,26 +407,14 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
       setEditVenueIdx(null);
       setReimbursable(false);
       setPayer('tbc');
+    } finally {
       setSaving(false);
-      return;
     }
-    const data   = await res.json();
-    setLogistics(data.logistics);
-    await createLinkedExpense({
-      date: venue.date, amount: venue.cost, category: venue.type,
-      label: venue.name || 'Venue', collection: 'venue', entryId: venueEntryId,
-    });
-    setVenueOpen(false);
-    setVenue({ ...BLANK_VENUE });
-    setEditVenueIdx(null);
-    setReimbursable(false);
-    setPayer('tbc');
-    setSaving(false);
   };
 
   // ── Deletes ─────────────────────────────────────────────────────────────────
   const confirmDelete = async () => {
-    if (!deleteTarget) return;
+    if (!deleteTarget || saving) return;
     const { kind, index } = deleteTarget;
 
     const updated = {
@@ -425,27 +430,32 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
         : (logistics.venues ?? []),
     };
 
-    setLogistics(updated);
-    await saveTripCache(tripId, { ...(await getTripCache(tripId)), logistics: updated });
-
     const urlMap = {
       transport: `/api/trips/${tripId}/logistics/transport/${index}`,
       accom:     `/api/trips/${tripId}/logistics/accommodation/${index}`,
       venue:     `/api/trips/${tripId}/logistics/venues/${index}`,
     };
 
-    const res = await sendOrQueue(
-      { type: 'DELETE_LOGISTICS_ITEM', tripId, payload: { kind, index } },
-      () => fetch(urlMap[kind], { method: 'DELETE' }),
-      savedLogistics(updated),
-    );
-    if (!res) {
-      setDeleteTarget(null);
-      return;
+    const item = kind === 'transport' ? logistics.transportation[index]
+      : kind === 'accom' ? logistics.accommodation[index]
+      : (logistics.venues ?? [])[index];
+    const itemName = kind === 'transport'
+      ? (item?.departureLocation && item?.arrivalLocation ? `${item.departureLocation} → ${item.arrivalLocation}` : '')
+      : item?.name;
+
+    setSaving(true);
+    try {
+      // On failure the item comes back and the confirmation stays open to retry.
+      const result = await commitLogistics(
+        updated,
+        itemName ? `the deletion of “${itemName}”` : `the deletion of this ${kind === 'accom' ? 'stay' : kind}`,
+        { type: 'DELETE_LOGISTICS_ITEM', tripId, payload: { kind, index } },
+        () => fetch(urlMap[kind], { method: 'DELETE' }),
+      );
+      if (result !== false) setDeleteTarget(null);
+    } finally {
+      setSaving(false);
     }
-    const data = await res.json();
-    setLogistics(data.logistics);
-    setDeleteTarget(null);
   };
 
   // ── Context menu ────────────────────────────────────────────────────────────
@@ -501,7 +511,7 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
     };
     const pending = { _id: pendingId(), ...payload, amount: parseFloat(payload.amount), _pending: true };
     try {
-      await sendOrQueue(
+      const res = await sendOrQueue(
         { type: 'ADD_EXPENSE', tripId, payload, receiptBlob: null, receiptName: null, receiptType: null },
         () => {
           const fd = new FormData();
@@ -516,8 +526,13 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
         },
         { [`/api/trips/${tripId}/expenses`]: saved => saved && { ...saved, expenses: [pending, ...(saved.expenses ?? [])] } },
       );
-    } catch {
-      // Best-effort — a failed expense link shouldn't block or roll back the logistics save.
+      if (res) {
+        const data = await readSaved(res);
+        if (!data.expense) throw new Error('No expense in response');
+      }
+    } catch (err) {
+      // The booking itself saved, so it stays — but the missing expense must not go unnoticed.
+      reportSaveFailure('the linked expense for this booking', err);
     }
   };
 
@@ -1218,6 +1233,7 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
           <Button
             variant="contained"
             onClick={confirmDelete}
+            disabled={saving}
             sx={{
               fontFamily: D.display, fontSize: '0.8rem',
               bgcolor: '#dc2626', boxShadow: 'none',

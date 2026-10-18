@@ -8,7 +8,7 @@ import LocalTaxiIcon      from '@mui/icons-material/LocalTaxi';
 import DirectionsBusIcon  from '@mui/icons-material/DirectionsBus';
 import TrainIcon          from '@mui/icons-material/Train';
 import WarningAmberIcon   from '@mui/icons-material/WarningAmber';
-import { getCountryTransport, resolveServices } from '@/lib/data/ground-transport';
+import { getCountryTransport, resolveServices, servesCity } from '@/lib/data/ground-transport';
 import { openApp } from '@/lib/utils/openApp';
 
 const D = {
@@ -41,13 +41,10 @@ export default function ArrivalTransportCard({ countryCode, cityName }: Props) {
   const data = getCountryTransport(countryCode);
   if (!data) return null;
 
-  const rides   = resolveServices(data.rides);
-  const transit = resolveServices(data.transit);
+  const ridesAndRail = resolveServices(data.rides);
+  const transitOnly  = resolveServices(data.transit).filter(svc => servesCity(svc, cityName));
 
-  if (rides.length === 0 && transit.length === 0) return null;
-
-  const ridesAndRail  = [...resolveServices(data.rides)];
-  const transitOnly   = resolveServices(data.transit);
+  if (ridesAndRail.length === 0 && transitOnly.length === 0) return null;
 
   return (
     <Paper elevation={0} sx={{

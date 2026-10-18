@@ -5,9 +5,25 @@
 // All pure functions over the stored WeatherResult, so changing a threshold or a
 // phrase applies to cached data without a refetch. Fetching lives in weather.ts.
 
-export const WEATHER_VERSION = 2;
+export const WEATHER_VERSION = 3;
 
 export type DaySource = 'forecast' | 'historical';
+
+/** Hour-by-hour columns, index = local hour 0–23 (a DST gap stays null). */
+export interface DayHours {
+  temp:  (number | null)[];
+  feels: (number | null)[];
+  code:  (number | null)[];
+  rain:  (number | null)[];   // forecast: chance % · typical: % of past hours with rain
+  mm:    (number | null)[];   // forecast only
+  cloud: (number | null)[];
+  wind:  (number | null)[];
+  gust:  (number | null)[];   // forecast only
+  dir:   (number | null)[];   // forecast only — degrees the wind comes from
+  rh:    (number | null)[];
+  uv:    (number | null)[];   // forecast only
+  isDay: (number | null)[];   // 1 day · 0 night
+}
 
 export interface DayWeather {
   date:          string;         // YYYY-MM-DD, local to the place
@@ -28,6 +44,14 @@ export interface DayWeather {
   sunshineHours: number | null;
   daylightHours: number | null;
   source:        DaySource;
+  // v3 — the day-detail sheet. Optional so older cached days still type.
+  sunrise?:      string | null;  // 'HH:mm' local
+  sunset?:       string | null;
+  gustKph?:      number | null;
+  windDir?:      number | null;  // dominant, degrees the wind comes from
+  rainHours?:    number | null;
+  humidity?:     number | null;  // mean relative humidity %
+  hours?:        DayHours | null;
 }
 
 export interface CurrentWeather {
@@ -571,4 +595,170 @@ export function weatherHeadline(w: WeatherResult | null | undefined): WeatherHea
     temp: d.tempMax, condition: d.condition, icon: d.icon,
     kind: d.source === 'historical' ? 'typical' : 'day',
   };
+}
+
+// ─── One day in detail — the day sheet ────────────────────────────────────────
+
+export interface HourRow {
+  hour:  number;
+  temp:  number;
+  feels: number | null;
+  code:  number | null;
+  rain:  number | null;
+  mm:    number | null;
+  cloud: number | null;
+  wind:  number | null;
+  gust:  number | null;
+  dir:   number | null;
+  rh:    number | null;
+  uv:    number | null;
+  isDay: boolean;
+}
+
+export function hourRows(day: DayWeather): HourRow[] {
+  const h = day.hours;
+  if (!h) return [];
+  const rows: HourRow[] = [];
+  for (let i = 0; i < 24; i++) {
+    const temp = h.temp[i];
+    if (temp == null) continue;
+    rows.push({
+      hour: i, temp,
+      feels: h.feels[i], code: h.code[i], rain: h.rain[i], mm: h.mm[i],
+      cloud: h.cloud[i], wind: h.wind[i], gust: h.gust[i], dir: h.dir[i],
+      rh: h.rh[i], uv: h.uv[i], isDay: h.isDay[i] !== 0,
+    });
+  }
+  return rows;
+}
+
+export const hourLabel = (h: number) => `${String(h % 24).padStart(2, '0')}:00`;
+
+const COMPASS = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+/** Where the wind comes from — "a SW wind". */
+export const compass = (deg: number | null | undefined) =>
+  deg == null ? '' : COMPASS[Math.round(((deg % 360) + 360) % 360 / 45) % 8];
+
+export function uvLabel(uv: number): string {
+  if (uv >= 11) return 'Extreme';
+  if (uv >= 8)  return 'Very high';
+  if (uv >= 6)  return 'High';
+  if (uv >= 3)  return 'Moderate';
+  return 'Low';
+}
+
+/** The hour, local to the place, if `date` is today there; otherwise null. */
+export function currentHourIn(timeZone: string | null | undefined, date: string): number | null {
+  if (todayIn(timeZone) !== date) return null;
+  try {
+    const h = new Intl.DateTimeFormat('en-GB', { timeZone: timeZone || undefined, hour: '2-digit', hourCycle: 'h23' })
+      .format(new Date());
+    return Number(h);
+  } catch {
+    return new Date().getHours();
+  }
+}
+
+// Consecutive hours → "14:00–17:00"
+function spans(hours: number[]): string[] {
+  const out: string[] = [];
+  let from = -1;
+  let prev = -2;
+  for (const h of [...hours, -99]) {
+    if (h === prev + 1) { prev = h; continue; }
+    if (from >= 0) out.push(`${hourLabel(from)}–${hourLabel(prev + 1)}`);
+    from = h;
+    prev = h;
+  }
+  return out;
+}
+
+function longestRun(hours: number[]): number[] {
+  let best: number[] = [];
+  let run: number[] = [];
+  for (const h of hours) {
+    run = run.length && h === run[run.length - 1] + 1 ? [...run, h] : [h];
+    if (run.length > best.length) best = run;
+  }
+  return best;
+}
+
+export interface PlanItem {
+  key:  'wear' | 'evening' | 'warmest' | 'rain' | 'dry' | 'sun' | 'wind';
+  text: string;
+}
+
+/**
+ * What the hours say about planning this day: what to wear, when it rains, the
+ * driest stretch, sun-cream hours, gusts. From `fromHour` on — on today, hours
+ * already gone don't change any decision.
+ */
+export function dayPlan(day: DayWeather, fromHour = 0): PlanItem[] {
+  const items: PlanItem[] = [];
+  const typical = day.source === 'historical';
+  const rows = hourRows(day).filter(r => r.hour >= fromHour);
+
+  items.push({ key: 'wear', text: feelsBand(feelsDay(day)).day });
+  if (!rows.length) return items;
+
+  // Warmest part of the day still to come
+  const daytime = rows.filter(r => r.hour >= 8 && r.hour <= 20);
+  if (daytime.length) {
+    const peak = daytime.reduce((a, b) => ((b.feels ?? b.temp) > (a.feels ?? a.temp) ? b : a));
+    items.push({ key: 'warmest', text: `Warmest around ${hourLabel(peak.hour)} — ${peak.temp}°, feels ${peak.feels ?? peak.temp}°` });
+  }
+
+  // Evening out
+  const eve = rows.find(r => r.hour === 21) ?? rows.find(r => r.hour === 20);
+  if (eve) {
+    const f = eve.feels ?? eve.temp;
+    items.push({ key: 'evening', text: `Evening feels ${f}° at ${hourLabel(eve.hour)} — ${feelsBand(f).evening.toLowerCase()}` });
+  }
+
+  // Rain — when, not just whether
+  const waking = rows.filter(r => r.hour >= 7 && r.hour <= 23);
+  const wetHour = (r: HourRow) => typical ? (r.rain ?? 0) >= 35 : (r.mm ?? 0) >= 0.2 || (r.rain ?? 0) >= 50;
+  const wet = waking.filter(wetHour).map(r => r.hour);
+  if (wet.length) {
+    const total = rows.reduce((s, r) => s + (r.mm ?? 0), 0);
+    items.push({
+      key: 'rain',
+      text: typical
+        ? `Showers most likely ${spans(wet).join(', ')}`
+        : `Rain likely ${spans(wet).join(', ')}${total >= 0.5 ? ` · ${Math.round(total * 10) / 10} mm in all` : ''}`,
+    });
+    const dry = longestRun(rows.filter(r => r.hour >= 8 && r.hour <= 21 && !wetHour(r) && (r.rain ?? 0) < 30).map(r => r.hour));
+    if (dry.length >= 2) items.push({ key: 'dry', text: `Driest ${hourLabel(dry[0])}–${hourLabel(dry[dry.length - 1] + 1)}` });
+  } else {
+    const peak = waking.reduce<HourRow | null>((a, b) => ((b.rain ?? 0) > (a?.rain ?? 0) ? b : a), null);
+    items.push({
+      key: 'rain',
+      text: peak && (peak.rain ?? 0) >= 25
+        ? `Small chance of a shower — ${peak.rain}% around ${hourLabel(peak.hour)}`
+        : typical ? 'Usually dry all day' : 'Dry all day',
+    });
+  }
+
+  // Sun cream hours
+  const uvHours = rows.filter(r => (r.uv ?? 0) >= 3);
+  if (uvHours.length) {
+    const top = uvHours.reduce((a, b) => ((b.uv ?? 0) > (a.uv ?? 0) ? b : a));
+    items.push({
+      key: 'sun',
+      text: `Sun cream ${spans(uvHours.map(r => r.hour)).join(', ')} · UV peaks ${Math.round(top.uv!)} at ${hourLabel(top.hour)}`,
+    });
+  } else if (typical && (day.uvIndex ?? 0) >= 3) {
+    items.push({ key: 'sun', text: `UV up to ${day.uvIndex} around midday on clear days — sun cream` });
+  }
+
+  // Wind
+  const gusty = rows.reduce<HourRow | null>((a, b) => ((b.gust ?? b.wind ?? 0) > (a ? a.gust ?? a.wind ?? 0 : -1) ? b : a), null);
+  const gust  = gusty ? gusty.gust ?? gusty.wind ?? 0 : 0;
+  if (gusty && gust >= 40) {
+    items.push({ key: 'wind', text: `Gusts to ${gust} km/h around ${hourLabel(gusty.hour)}` });
+  } else if (gusty && (gusty.wind ?? 0) >= 30) {
+    items.push({ key: 'wind', text: `Breezy — up to ${gusty.wind} km/h around ${hourLabel(gusty.hour)}` });
+  }
+
+  return items;
 }

@@ -27,10 +27,12 @@ import EditIcon           from '@mui/icons-material/Edit';
 import CheckIcon          from '@mui/icons-material/Check';
 import ZoomInIcon         from '@mui/icons-material/ZoomIn';
 import ZoomOutIcon        from '@mui/icons-material/ZoomOut';
+import CloseIcon          from '@mui/icons-material/Close';
 import NavigateButton     from '@/components/ui/NavigateButton';
 import ExportCalendarDialog from '@/components/calendar/ExportCalendarDialog';
 import { saveTripCache, getTripCache } from '@/lib/offline/db';
 import { sendOrQueue } from '@/lib/offline/writes';
+import { readSaved, reportSaveFailure, reportCantSave } from '@/lib/offline/saveErrors';
 import {
   DAY_START_HOUR, DAY_END_HOUR,
   PX_PER_MIN_MOBILE, PX_PER_MIN_DESKTOP,
@@ -371,8 +373,29 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
     [`/api/trips/${tripId}/itinerary`]: (saved: any) => ({ ...saved, days: updatedDays }),
   });
 
-  const addStop = async (stop: Partial<Stop>) => {
+  // Each stop write below shows its change at once (and in the offline copy), then sends
+  // or queues it. On any failure the change is undone and the error toast names the stop;
+  // add / update / delete resolve false then, so their drawer stays open.
+  const quoted = (s?: Partial<Stop>) => (s?.name?.trim() ? `“${s.name.trim()}”` : 'this stop');
+
+  const daysFrom = async (res: Response): Promise<Day[]> => {
+    const data = await readSaved(res);
+    if (!Array.isArray(data.days)) throw new Error('No itinerary days in response');
+    return data.days;
+  };
+
+  const undoDays = async (prevDays: Day[]) => {
+    setDays(prevDays);
+    try {
+      await saveTripCache(tripId, { ...(await getTripCache(tripId)), itinerary: prevDays });
+    } catch (err) {
+      console.error('[itinerary] could not restore the offline copy', err);
+    }
+  };
+
+  const addStop = async (stop: Partial<Stop>): Promise<boolean> => {
     const day         = days[activeDayIdx];
+    const prevDays    = days;
     const updatedDays = [...days];
     updatedDays[activeDayIdx] = {
       ...day,
@@ -386,27 +409,33 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
       ],
     };
     setDays(updatedDays);
-    await saveTripCache(tripId, { ...(await getTripCache(tripId)), itinerary: updatedDays });
+    try {
+      await saveTripCache(tripId, { ...(await getTripCache(tripId)), itinerary: updatedDays });
 
-    const res = await sendOrQueue(
-      { type: 'ADD_STOP', tripId, payload: { dayDate: day.date, stop } },
-      () => fetch(`/api/trips/${tripId}/itinerary/stops`, {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({
-          dayDate: day.date,
-          stop: { ...stop, scheduledStart: `${day.date.split('T')[0]}T${stop.scheduledStart}:00` },
+      const res = await sendOrQueue(
+        { type: 'ADD_STOP', tripId, payload: { dayDate: day.date, stop } },
+        () => fetch(`/api/trips/${tripId}/itinerary/stops`, {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({
+            dayDate: day.date,
+            stop: { ...stop, scheduledStart: `${day.date.split('T')[0]}T${stop.scheduledStart}:00` },
+          }),
         }),
-      }),
-      savedDays(updatedDays),
-    );
-    if (!res) return;
-    const data = await res.json();
-    setDays(data.days);
+        savedDays(updatedDays),
+      );
+      if (res) setDays(await daysFrom(res));
+      return true;
+    } catch (err) {
+      await undoDays(prevDays);
+      reportSaveFailure(quoted(stop), err);
+      return false;
+    }
   };
 
-  const updateStop = async (stop: Partial<Stop>) => {
-    if (!stop._id) return;
+  const updateStop = async (stop: Partial<Stop>): Promise<boolean> => {
+    if (!stop._id) { reportSaveFailure(`your changes to ${quoted(stop)}`); return false; }
+    const prevDays = days;
     const day     = days[activeDayIdx];
     const dateStr = day.date.split('T')[0];
     const newScheduledStart = `${dateStr}T${stop.scheduledStart}:00`;
@@ -418,65 +447,82 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
       ),
     }));
     setDays(updatedDays);
-    await saveTripCache(tripId, { ...(await getTripCache(tripId)), itinerary: updatedDays });
+    try {
+      await saveTripCache(tripId, { ...(await getTripCache(tripId)), itinerary: updatedDays });
 
-    const res = await sendOrQueue(
-      { type: 'RESCHEDULE_STOP', tripId, payload: { stopId: stop._id, ...stop, scheduledStart: newScheduledStart } },
-      () => fetch(`/api/trips/${tripId}/itinerary/stops/${stop._id}`, {
-        method:  'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ ...stop, scheduledStart: newScheduledStart }),
-      }),
-      savedDays(updatedDays),
-    );
-    if (!res) return;
-    const data = await res.json();
-    setDays(data.days);
+      const res = await sendOrQueue(
+        { type: 'RESCHEDULE_STOP', tripId, payload: { stopId: stop._id, ...stop, scheduledStart: newScheduledStart } },
+        () => fetch(`/api/trips/${tripId}/itinerary/stops/${stop._id}`, {
+          method:  'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ ...stop, scheduledStart: newScheduledStart }),
+        }),
+        savedDays(updatedDays),
+      );
+      if (res) setDays(await daysFrom(res));
+      return true;
+    } catch (err) {
+      await undoDays(prevDays);
+      reportSaveFailure(`your changes to ${quoted(stop)}`, err);
+      return false;
+    }
   };
 
-  const deleteStop = async (stopId: string) => {
+  const deleteStop = async (stopId: string): Promise<boolean> => {
+    const prevDays    = days;
+    const target      = days.flatMap(d => d.stops).find(s => s._id === stopId);
     const updatedDays = days.map(day => ({
       ...day,
       stops: day.stops.filter(s => s._id !== stopId),
     }));
     setDays(updatedDays);
-    await saveTripCache(tripId, { ...(await getTripCache(tripId)), itinerary: updatedDays });
+    try {
+      await saveTripCache(tripId, { ...(await getTripCache(tripId)), itinerary: updatedDays });
 
-    const res = await sendOrQueue(
-      { type: 'DELETE_STOP', tripId, stopId },
-      () => fetch(`/api/trips/${tripId}/itinerary/stops/${stopId}`, { method: 'DELETE' }),
-      savedDays(updatedDays),
-    );
-    if (!res) return;
-    const data = await res.json();
-    setDays(data.days);
+      const res = await sendOrQueue(
+        { type: 'DELETE_STOP', tripId, stopId },
+        () => fetch(`/api/trips/${tripId}/itinerary/stops/${stopId}`, { method: 'DELETE' }),
+        savedDays(updatedDays),
+      );
+      if (res) setDays(await daysFrom(res));
+      return true;
+    } catch (err) {
+      await undoDays(prevDays);
+      reportSaveFailure(`the deletion of ${quoted(target)}`, err);
+      return false;
+    }
   };
 
   // "Not going" — reversible; skipped stops leave the plan, reminders and exports
   const skipStop = async (stop: Stop, skipped: boolean) => {
     if (!stop._id) return;
+    const prevDays    = days;
     const updatedDays = days.map(d => ({
       ...d,
       stops: d.stops.map(s => (s._id === stop._id ? { ...s, skipped } : s)),
     }));
     setDays(updatedDays);
-    await saveTripCache(tripId, { ...(await getTripCache(tripId)), itinerary: updatedDays });
+    try {
+      await saveTripCache(tripId, { ...(await getTripCache(tripId)), itinerary: updatedDays });
 
-    const res = await sendOrQueue(
-      { type: 'RESCHEDULE_STOP', tripId, payload: { stopId: stop._id, skipped } },
-      () => fetch(`/api/trips/${tripId}/itinerary/stops/${stop._id}`, {
-        method:  'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ skipped }),
-      }),
-      savedDays(updatedDays),
-    );
-    if (!res) return;
-    const data = await res.json();
-    if (data.days) setDays(data.days);
+      const res = await sendOrQueue(
+        { type: 'RESCHEDULE_STOP', tripId, payload: { stopId: stop._id, skipped } },
+        () => fetch(`/api/trips/${tripId}/itinerary/stops/${stop._id}`, {
+          method:  'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ skipped }),
+        }),
+        savedDays(updatedDays),
+      );
+      if (res) setDays(await daysFrom(res));
+    } catch (err) {
+      await undoDays(prevDays);
+      reportSaveFailure(`${skipped ? '“Not going”' : '“Going after all”'} for ${quoted(stop)}`, err);
+    }
   };
 
   const rescheduleStop = async (stopId: string, newStartMin: number) => {
+    const prevDays          = days;
     const day               = days[activeDayIdx];
     const dateStr           = day.date.split('T')[0];
     const newScheduledStart = `${dateStr}T${formatTime(newStartMin)}:00`;
@@ -488,23 +534,34 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
       ),
     }));
     setDays(updatedDays);
-    await saveTripCache(tripId, { ...(await getTripCache(tripId)), itinerary: updatedDays });
+    try {
+      await saveTripCache(tripId, { ...(await getTripCache(tripId)), itinerary: updatedDays });
 
-    const res = await sendOrQueue(
-      { type: 'RESCHEDULE_STOP', tripId, payload: { stopId, scheduledStart: newScheduledStart } },
-      () => fetch(`/api/trips/${tripId}/itinerary/stops/${stopId}`, {
-        method:  'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ scheduledStart: newScheduledStart }),
-      }),
-      savedDays(updatedDays),
-    );
-    if (!res) return;
-    const data = await res.json();
-    setDays(data.days);
+      const res = await sendOrQueue(
+        { type: 'RESCHEDULE_STOP', tripId, payload: { stopId, scheduledStart: newScheduledStart } },
+        () => fetch(`/api/trips/${tripId}/itinerary/stops/${stopId}`, {
+          method:  'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ scheduledStart: newScheduledStart }),
+        }),
+        savedDays(updatedDays),
+      );
+      if (res) setDays(await daysFrom(res));
+    } catch (err) {
+      // Snap it back to where it was
+      await undoDays(prevDays);
+      reportSaveFailure(`the new time for ${quoted(day.stops.find(s => s._id === stopId))}`, err);
+    }
   };
 
+  // A stop with no server id has nothing to PATCH, so a move would only ever exist on
+  // screen and vanish on reload. Refuse it out loud instead.
+  const cantMove = (stop: Stop) =>
+    reportCantSave(`${quoted(stop)} can’t be moved yet — it hasn’t been saved to the server. Reload and try again.`);
+
   const resizeStop = async (stop: Stop, newStartMin: number, newDuration: number) => {
+    if (!stop._id) { cantMove(stop); return; }
+    const prevDays          = days;
     const day               = days[activeDayIdx];
     const dateStr           = day.date.split('T')[0];
     const newScheduledStart = `${dateStr}T${formatTime(newStartMin)}:00`;
@@ -520,22 +577,24 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
       }),
     }));
     setDays(updatedDays);
-    await saveTripCache(tripId, { ...(await getTripCache(tripId)), itinerary: updatedDays });
+    try {
+      await saveTripCache(tripId, { ...(await getTripCache(tripId)), itinerary: updatedDays });
 
-    if (!stop._id) return;
-
-    const res = await sendOrQueue(
-      { type: 'RESCHEDULE_STOP', tripId, payload: { stopId: stop._id, scheduledStart: newScheduledStart, duration: newDuration } },
-      () => fetch(`/api/trips/${tripId}/itinerary/stops/${stop._id}`, {
-        method:  'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ scheduledStart: newScheduledStart, duration: newDuration }),
-      }),
-      savedDays(updatedDays),
-    );
-    if (!res) return;
-    const data = await res.json();
-    setDays(data.days);
+      const res = await sendOrQueue(
+        { type: 'RESCHEDULE_STOP', tripId, payload: { stopId: stop._id, scheduledStart: newScheduledStart, duration: newDuration } },
+        () => fetch(`/api/trips/${tripId}/itinerary/stops/${stop._id}`, {
+          method:  'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ scheduledStart: newScheduledStart, duration: newDuration }),
+        }),
+        savedDays(updatedDays),
+      );
+      if (res) setDays(await daysFrom(res));
+    } catch (err) {
+      // Snap it back to its old start and length
+      await undoDays(prevDays);
+      reportSaveFailure(`the new time for ${quoted(stop)}`, err);
+    }
   };
 
   const handleDragEnd = (event: DragEndEvent) => {
@@ -559,38 +618,28 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
     );
 
     if (newStartMin !== startMin) {
-      if (stop._id) {
-        rescheduleStop(stop._id, newStartMin);
-      } else {
-        const dateStr           = days[activeDayIdx].date.split('T')[0];
-        const newScheduledStart = `${dateStr}T${formatTime(newStartMin)}:00`;
-        const updatedDays = days.map(d => ({
-          ...d,
-          stops: d.stops.map(s =>
-            `${s.name}-${s.scheduledStart ?? s.time ?? 'notime'}` === stopId
-              ? { ...s, scheduledStart: newScheduledStart }
-              : s,
-          ),
-        }));
-        setDays(updatedDays);
-      }
+      if (stop._id) rescheduleStop(stop._id, newStartMin);
+      else cantMove(stop);
     }
   };
 
   const calculateTravel = async () => {
     setCalculating(true);
-    const res = await sendOrQueue(
-      { type: 'CALCULATE_TRAVEL', tripId },
-      () => fetch(`/api/trips/${tripId}/itinerary/calculate-travel`, { method: 'POST' }),
-    );
-    if (!res) {
+    try {
+      const res = await sendOrQueue(
+        { type: 'CALCULATE_TRAVEL', tripId },
+        () => fetch(`/api/trips/${tripId}/itinerary/calculate-travel`, { method: 'POST' }),
+      );
+      if (!res) return;
+      const calculated = await daysFrom(res);
+      setDays(calculated);
+      await saveTripCache(tripId, { ...(await getTripCache(tripId)), itinerary: calculated });
+    } catch (err) {
+      // Nothing was changed on screen or offline — the current plan stays as it is.
+      reportSaveFailure('the travel times', err);
+    } finally {
       setCalculating(false);
-      return;
     }
-    const data = await res.json();
-    setDays(data.days);
-    await saveTripCache(tripId, { ...(await getTripCache(tripId)), itinerary: data.days });
-    setCalculating(false);
   };
 
   // ── Loading / empty ───────────────────────────────────────────────────────────
@@ -967,6 +1016,19 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
             flex: 1, minWidth: 0, display: 'flex', gap: 0.5, overflowX: 'auto',
             scrollbarWidth: 'none', '&::-webkit-scrollbar': { display: 'none' },
           }}>
+            {typesToday.length > 1 && (
+              <Chip
+                label="All"
+                onClick={() => setTypeFilter([])}
+                sx={{
+                  flexShrink: 0, height: 32, fontFamily: D.body, fontWeight: 700, fontSize: '0.72rem',
+                  border: `1.5px solid ${typeFilter.length === 0 ? D.navy : alpha(D.navy, 0.2)}`,
+                  backgroundColor: typeFilter.length === 0 ? D.navy : 'transparent',
+                  color: typeFilter.length === 0 ? '#fff' : D.navy,
+                  '&:hover': { backgroundColor: typeFilter.length === 0 ? D.navy : alpha(D.navy, 0.06) },
+                }}
+              />
+            )}
             {typesToday.length > 1 && typesToday.map(t => {
               const c  = STOP_CONFIG[t];
               const on = typeFilter.includes(t);
@@ -1256,9 +1318,34 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
           const t = stopStartMinutes(s);
           openDrawer(t !== null ? formatTime(t) : '09:00', s.type, s);
         }}
-        onDelete={s => { setSheetKey(null); if (s._id) deleteStop(s._id); }}
+        onDelete={async s => {
+          // Closes once deleted or queued; a failed delete puts the stop (and this sheet) back
+          if (s._id && await deleteStop(s._id)) setSheetKey(k => (k === s._id ? null : k));
+        }}
         onOpenLogistics={() => { setSheetKey(null); onSwitchToLogistics?.(); }}
+        onFilterType={t => { setSheetKey(null); setTypeFilter([t]); }}
       />
+
+      {/* ── Filter on → a floating way back to everything, wherever you've scrolled ── */}
+      {typeFilter.length > 0 && (
+        <Button
+          variant="contained"
+          onClick={() => setTypeFilter([])}
+          endIcon={<CloseIcon />}
+          sx={{
+            position: 'fixed', left: '50%', transform: 'translateX(-50%)',
+            bottom: 'calc(env(safe-area-inset-bottom, 0px) + 24px)', zIndex: 1100,
+            borderRadius: 99, px: 2.25, minHeight: 48, maxWidth: 'calc(100vw - 120px)',
+            backgroundColor: D.navy, color: '#fff', boxShadow: '0 6px 20px rgba(0,0,0,0.25)',
+            fontFamily: D.body, fontWeight: 700, textTransform: 'none', fontSize: '0.88rem',
+            '&:hover': { backgroundColor: D.navy },
+          }}
+        >
+          <Box component="span" sx={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {typeFilter.map(t => (STOP_CONFIG[t]?.label.replace(/^\S+\s*/, '') || t)).join(', ')} only · Show all
+          </Box>
+        </Button>
+      )}
 
       {/* ── Free-slot suggestions modal ── */}
       <FreeSuggestionsModal

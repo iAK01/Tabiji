@@ -22,6 +22,7 @@ import SyncAltIcon         from '@mui/icons-material/SyncAlt';
 import CheckIcon           from '@mui/icons-material/Check';
 import { COUNTRY_LIST }    from '@/lib/data/countries';
 import { sendOrQueue, pendingId } from '@/lib/offline/writes';
+import { readSaved, reportSaveFailure } from '@/lib/offline/saveErrors';
 import AirportSearch       from '@/components/ui/AirportSearch';
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
@@ -309,7 +310,9 @@ export default function NewTripPage() {
       ? Math.round((parseISO(form.endDate).getTime() - parseISO(form.startDate).getTime()) / 86400000)
       : 0;
 
+  // On failure the form stays as filled in, on the last step, and the error toast says so.
   const handleSubmit = async () => {
+    if (saving) return;
     setSaving(true);
     const payload = {
       name: form.name, tripType: form.tripType, purpose: form.purpose,
@@ -326,19 +329,25 @@ export default function NewTripPage() {
     };
     // Shown on the dashboard (as waiting to sync) until the queued create reaches the server.
     const pendingTrip = { _id: pendingId(), ...payload, _pending: true };
-    const res = await sendOrQueue(
-      { type: 'CREATE_TRIP', body: payload, timestamp: Date.now() },
-      () => fetch('/api/trips', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
-      }),
-      { '/api/trips': saved => saved?.trips && { ...saved, trips: [...saved.trips, pendingTrip] } },
-    );
-    if (!res) {
-      setSaving(false); router.push('/dashboard'); return;
+    try {
+      const res = await sendOrQueue(
+        { type: 'CREATE_TRIP', body: payload, timestamp: Date.now() },
+        () => fetch('/api/trips', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+        }),
+        { '/api/trips': saved => saved?.trips && { ...saved, trips: [...saved.trips, pendingTrip] } },
+      );
+      if (!res) {
+        router.push('/dashboard'); return;
+      }
+      const data = await readSaved(res);
+      if (!data.trip?._id) throw new Error('No trip in response');
+      // `saving` stays set while the page navigates away, so a second tap can't create a duplicate.
+      router.push(`/trips/${data.trip._id}`);
+    } catch (err) {
+      reportSaveFailure('the new trip', err);
+      setSaving(false);
     }
-    const data = await res.json();
-    if (data.trip?._id) router.push(`/trips/${data.trip._id}`);
-    setSaving(false);
   };
 
   const canProceed = [

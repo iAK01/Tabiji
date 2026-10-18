@@ -9,6 +9,7 @@ const TripPackingSchema = new Schema({
   generationParams: { type: Schema.Types.Mixed },
   totalItems: Number,
   packedItems: Number,
+  skippedItems: Number,
   packingProgress: Number,
   regenerationHistory: [{ type: Schema.Types.Mixed }],
 }, { timestamps: true });

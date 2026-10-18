@@ -1,19 +1,13 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import {
   Box, Typography, Paper, CircularProgress, Alert, IconButton, Tooltip,
 } from '@mui/material';
 import RefreshIcon      from '@mui/icons-material/Refresh';
 import HomeIcon         from '@mui/icons-material/Home';
 import FlightLandIcon   from '@mui/icons-material/FlightLand';
-import WbSunnyIcon      from '@mui/icons-material/WbSunny';
-import FilterDramaIcon  from '@mui/icons-material/FilterDrama';
-import CloudIcon        from '@mui/icons-material/Cloud';
-import FoggyIcon        from '@mui/icons-material/Foggy';
-import UmbrellaIcon     from '@mui/icons-material/Umbrella';
-import ThunderstormIcon from '@mui/icons-material/Thunderstorm';
-import AcUnitIcon       from '@mui/icons-material/AcUnit';
 import WaterDropIcon    from '@mui/icons-material/WaterDrop';
 import AirIcon          from '@mui/icons-material/Air';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
@@ -23,21 +17,8 @@ import {
   watchOuts, wearGuide,
   type DayWeather, type HomeCompare, type WatchItem, type WearRow, type WeatherResult,
 } from '@/lib/weather-insights';
-
-// ─── Design tokens ─────────────────────────────────────────────────────────────
-
-const D = {
-  green:   '#6B7C5C',
-  terra:   '#C4714A',
-  navy:    '#1D2642',
-  bg:      '#F5F0E8',
-  paper:   '#FDFAF5',
-  muted:   'rgba(29,38,66,0.45)',
-  rule:    'rgba(29,38,66,0.10)',
-  cool:    '#0891b2',
-  display: '"Archivo Black", sans-serif',
-  body:    '"Archivo", "Inter", sans-serif',
-};
+import { D, weatherIcon, warmth, type IconComponent } from './weatherUi';
+import WeatherDaySheet from './WeatherDaySheet';
 
 interface Props {
   tripId:          string;
@@ -45,39 +26,6 @@ interface Props {
 }
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
-
-type IconComponent = typeof WbSunnyIcon;
-
-// By WMO code. Text matching only for v1 cached days, which carry no code.
-function weatherIcon(code: number | null | undefined, condition: string): { Icon: IconComponent; color: string } {
-  let c = code;
-  if (c == null) {
-    const t = condition.toLowerCase();
-    c = t.includes('thunder') ? 95
-      : /snow|sleet|blizzard/.test(t) ? 71
-      : /rain|drizzle|shower/.test(t) ? 61
-      : /fog|mist/.test(t) ? 45
-      : t.includes('overcast') ? 3
-      : /cloud|partly/.test(t) ? 2
-      : 0;
-  }
-  if (c >= 95)                                         return { Icon: ThunderstormIcon, color: '#5c35a0' };
-  if ((c >= 71 && c <= 77) || c === 85 || c === 86)    return { Icon: AcUnitIcon,       color: '#0369a1' };
-  if ((c >= 51 && c <= 67) || (c >= 80 && c <= 82))    return { Icon: UmbrellaIcon,     color: D.cool };
-  if (c === 45 || c === 48)                            return { Icon: FoggyIcon,        color: '#6b7280' };
-  if (c === 3)                                         return { Icon: CloudIcon,        color: '#6b7280' };
-  if (c === 2)                                         return { Icon: FilterDramaIcon,  color: '#8b7d6b' };
-  return { Icon: WbSunnyIcon, color: D.terra };
-}
-
-// Colour of a daytime high, so hot vs cold reads before the number does.
-function warmth(t: number): string {
-  if (t >= 30) return '#A8432A';
-  if (t >= 22) return D.terra;
-  if (t >= 14) return D.navy;
-  if (t >= 6)  return D.cool;
-  return '#0369a1';
-}
 
 function ageLabel(iso: string): string {
   const mins = Math.round((Date.now() - Date.parse(iso)) / 60000);
@@ -106,7 +54,9 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
 
 // ─── Day card ──────────────────────────────────────────────────────────────────
 
-function DayCard({ day, isToday, showCity }: { day: DayWeather; isToday: boolean; showCity: boolean }) {
+function DayCard({ day, isToday, showCity, onOpen }: {
+  day: DayWeather; isToday: boolean; showCity: boolean; onOpen: () => void;
+}) {
   const { Icon, color } = weatherIcon(day.code, day.condition);
   const typical = day.source === 'historical';
   const wet     = isWetDay(day);
@@ -117,15 +67,26 @@ function DayCard({ day, isToday, showCity }: { day: DayWeather; isToday: boolean
       : 'Dry';
 
   return (
-    <Paper elevation={0} sx={{
-      p: 1.5,
-      border: `1.5px solid ${isToday ? D.terra : D.rule}`,
-      borderRadius: '10px',
-      display: 'flex', flexDirection: 'column', alignItems: 'center',
-      gap: 0.4, textAlign: 'center',
-      minWidth: { xs: 112, md: 0 }, flex: '0 0 auto',
-      backgroundColor: D.paper,
-    }}>
+    <Paper
+      elevation={0}
+      role="button"
+      tabIndex={0}
+      aria-label={`${day.label} — hour by hour`}
+      onClick={onOpen}
+      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(); } }}
+      sx={{
+        p: 1.5,
+        border: `1.5px solid ${isToday ? D.terra : D.rule}`,
+        borderRadius: '10px',
+        display: 'flex', flexDirection: 'column', alignItems: 'center',
+        gap: 0.4, textAlign: 'center',
+        minWidth: { xs: 112, md: 0 }, flex: '0 0 auto',
+        backgroundColor: D.paper, cursor: 'pointer',
+        transition: 'border-color 0.15s, box-shadow 0.15s',
+        '&:hover': { borderColor: D.terra, boxShadow: '0 2px 10px rgba(29,38,66,0.08)' },
+        '&:focus-visible': { outline: `2px solid ${D.terra}`, outlineOffset: 2 },
+      }}
+    >
       <Typography sx={{
         fontSize: '0.8rem', fontWeight: 800, letterSpacing: '0.08em',
         textTransform: 'uppercase', color: D.terra, lineHeight: 1.1, fontFamily: D.body,
@@ -184,16 +145,25 @@ function DayCard({ day, isToday, showCity }: { day: DayWeather; isToday: boolean
           typical
         </Typography>
       )}
+
+      <Box sx={{ display: 'flex', alignItems: 'center', mt: 'auto', pt: 0.5, color: D.terra }}>
+        <Typography sx={{ fontSize: '0.72rem', fontWeight: 800, letterSpacing: '0.08em', textTransform: 'uppercase', fontFamily: D.body }}>
+          Hourly
+        </Typography>
+        <ChevronRightIcon sx={{ fontSize: '1rem' }} />
+      </Box>
     </Paper>
   );
 }
 
 // Scroll on phones and tablets; one row of equal columns on desktop (rows of 7
 // for long trips) so a 9-day trip never leaves an orphan card.
-function DayStrip({ days, today }: { days: DayWeather[]; today: string }) {
+function DayStrip({ days, today, onOpen }: { days: DayWeather[]; today: string; onOpen: (index: number) => void }) {
   const showCity = new Set(days.map(d => d.city)).size > 1;
   const cols  = days.length <= 10 ? days.length : 7;
-  const cards = days.map(d => <DayCard key={d.date} day={d} isToday={d.date === today} showCity={showCity} />);
+  const cards = days.map((d, i) => (
+    <DayCard key={d.date} day={d} isToday={d.date === today} showCity={showCity} onOpen={() => onOpen(i)} />
+  ));
   return (
     <>
       <Box sx={{
@@ -360,6 +330,7 @@ function HomeCompareView({ c }: { c: HomeCompare }) {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 export default function WeatherTab({ tripId, destinationCity }: Props) {
+  const searchParams = useSearchParams();
   const [weather,    setWeather]    = useState<WeatherResult | null>(null);
   const [loading,    setLoading]    = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -385,8 +356,21 @@ export default function WeatherTab({ tripId, destinationCity }: Props) {
 
   useEffect(() => { loadWeather(); }, [tripId]);
 
-  // Watch-out rows open that day in the Itinerary — same native pushState the
-  // trip page uses for tabs, so it works offline and Back returns here.
+  // The open day sheet lives in ?day= (1-based, the itinerary's numbering) so a
+  // refresh or shared link lands on it. replaceState, like the itinerary's stop
+  // sheet — Back steps through tabs, not sheets.
+  const setDayParam = useCallback((dayNumber: number | null) => {
+    const params = new URLSearchParams(window.location.search);
+    if (dayNumber == null) params.delete('day');
+    else params.set('day', String(dayNumber));
+    const qs = params.toString();
+    window.history.replaceState(null, '', qs ? `?${qs}` : window.location.pathname);
+  }, []);
+  const openDay  = useCallback((index: number) => setDayParam(index + 1), [setDayParam]);
+  const closeDay = useCallback(() => setDayParam(null), [setDayParam]);
+
+  // "Open in itinerary" from the sheet — same native pushState the trip page
+  // uses for tabs, so it works offline and Back returns here.
   const openItineraryDay = (dayNumber: number) => {
     const params = new URLSearchParams(window.location.search);
     params.set('tab', 'itinerary');
@@ -422,6 +406,10 @@ export default function WeatherTab({ tripId, destinationCity }: Props) {
   const places   = (weather.places ?? []).map(p => p.label).join(' → ');
   const years    = weather.historicalYears;
   const allTypical = days.every(d => d.source === 'historical');
+  const dayParam   = Number(searchParams.get('day'));
+  const sheetIndex = Number.isInteger(dayParam) && dayParam >= 1 && dayParam <= days.length ? dayParam - 1 : null;
+  const placeFor   = (d: DayWeather) =>
+    (weather.places ?? []).find(p => p.city === d.city)?.label ?? d.city;
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
@@ -463,7 +451,7 @@ export default function WeatherTab({ tripId, destinationCity }: Props) {
       {/* Day by day — main content */}
       <Box>
         <SectionLabel>{allTypical ? 'Typical days' : 'Day by day'}</SectionLabel>
-        <DayStrip days={days} today={onTrip ? today : ''} />
+        <DayStrip days={days} today={onTrip ? today : ''} onOpen={openDay} />
         {typical && (
           <Typography sx={{ fontSize: '0.85rem', color: D.muted, fontFamily: D.body, mt: 1 }}>
             {allTypical ? 'Typical conditions' : `From ${shortDay(typical.date)}: typical conditions`}
@@ -488,7 +476,7 @@ export default function WeatherTab({ tripId, destinationCity }: Props) {
       {watch.length > 0 && (
         <Box>
           <SectionLabel>Watch out</SectionLabel>
-          <WatchOut items={watch} onOpenDay={openItineraryDay} />
+          <WatchOut items={watch} onOpenDay={n => openDay(n - 1)} />
         </Box>
       )}
 
@@ -508,6 +496,16 @@ export default function WeatherTab({ tripId, destinationCity }: Props) {
       <Typography sx={{ fontSize: '0.75rem', color: D.muted, fontFamily: D.body }}>
         Forecast and records: Open-Meteo
       </Typography>
+
+      <WeatherDaySheet
+        days={days}
+        index={sheetIndex}
+        timezone={weather.timezone}
+        placeFor={placeFor}
+        onNavigate={openDay}
+        onClose={closeDay}
+        onOpenItinerary={openItineraryDay}
+      />
     </Box>
   );
 }

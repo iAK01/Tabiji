@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import {
-  Box, Typography, Paper, Button, CircularProgress,
+  Box, Typography, Button, CircularProgress,
   LinearProgress, IconButton,
 } from '@mui/material';
 import ChevronRightIcon         from '@mui/icons-material/ChevronRight';
@@ -13,16 +13,18 @@ import FolderOpenIcon           from '@mui/icons-material/FolderOpen';
 import MapIcon                  from '@mui/icons-material/Map';
 import UndoIcon                 from '@mui/icons-material/Undo';
 import RefreshIcon              from '@mui/icons-material/Refresh';
-import NavigateButton           from '@/components/ui/NavigateButton';
 import DocumentViewer, { type ViewableFile } from '@/components/files/DocumentViewer';
 import PreTripAppsCard from '@/components/overview/PreTripAppsCard';
 import { saveTripCache, getTripCache } from '@/lib/offline/db';
 import { sendOrQueue, savedTripPatch } from '@/lib/offline/writes';
+import { assertSaved, reportSaveFailure } from '@/lib/offline/saveErrors';
 import { totalFreeMinutes, freeLabelText } from '@/components/itinerary/Itinerary.helpers';
 import { getLogisticsFacts } from '@/lib/logistics/facts';
 import { getTransportLabel } from '@/components/logistics/logistics.helpers';
-import { displayStatus } from '@/lib/trips/onTrip';
+import { displayStatus, localYmd } from '@/lib/trips/onTrip';
+import { OnTripNow, OnTripGetAround } from '@/components/trips/OnTripScreen';
 import { summaryLine, wearHeadline, weatherHeadline, type WeatherResult } from '@/lib/weather-insights';
+import { packingCounts } from '@/lib/packing/counts';
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 
@@ -55,8 +57,9 @@ interface Props {
     tripType:         string;
     status:           string;
     purpose?:         string;
-    origin:           { city: string; country: string };
-    destination:      { city: string; country: string; countryCode?: string };
+    origin:           { city: string; country: string; countryCode?: string; timezone?: string; iataCode?: string };
+    destination:      { city: string; country: string; countryCode?: string; timezone?: string; iataCode?: string };
+    additionalDestinations?: Array<{ city: string; country?: string; countryCode?: string; timezone?: string; arrivalDate?: string; departureDate?: string }>;
     startDate:        string;
     endDate:          string;
     nights:           number;
@@ -118,15 +121,26 @@ export default function TripOverview({ trip, coverPhotoUrl, coverPhotoCredit, on
   const [dismissed,    setDismissed]    = useState<string[]>(trip.dismissedChecks ?? []);
   const [viewerFile,   setViewerFile]   = useState<ViewableFile | null>(null);
 
-  const saveDismissed = (checks: string[]) => sendOrQueue(
-    { type: 'UPDATE_TRIP', tripId: trip._id, payload: { dismissedChecks: checks } },
-    () => fetch(`/api/trips/${trip._id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ dismissedChecks: checks }),
-    }),
-    savedTripPatch(trip._id, { dismissedChecks: checks }),
-  ).catch(() => null);
+  // Shows the change at once; puts the hidden sections back if it doesn't save.
+  const saveDismissed = async (checks: string[]) => {
+    const before = dismissed;
+    setDismissed(checks);
+    try {
+      const res = await sendOrQueue(
+        { type: 'UPDATE_TRIP', tripId: trip._id, payload: { dismissedChecks: checks } },
+        () => fetch(`/api/trips/${trip._id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ dismissedChecks: checks }),
+        }),
+        savedTripPatch(trip._id, { dismissedChecks: checks }),
+      );
+      if (res) assertSaved(res);
+    } catch (err) {
+      setDismissed(before);
+      reportSaveFailure('the restored sections', err);
+    }
+  };
 
   useEffect(() => {
     async function load() {
@@ -168,37 +182,24 @@ export default function TripOverview({ trip, coverPhotoUrl, coverPhotoCredit, on
   }, [trip._id]);
 
   // ── Date maths ────────────────────────────────────────────────────────────
+  // Whole days between local midnights, rounded so a clock change can't add or drop one.
   const today     = new Date(); today.setHours(0, 0, 0, 0);
   const departure = new Date(trip.startDate); departure.setHours(0, 0, 0, 0);
-  const tripEnd   = new Date(trip.endDate);   tripEnd.setHours(23, 59, 59, 999);
-  const daysUntil = Math.ceil((departure.getTime() - today.getTime()) / 86400000);
-  const isPast    = today > tripEnd;
+  const lastDay   = new Date(trip.endDate);   lastDay.setHours(0, 0, 0, 0);
+  const daysBetween = (a: Date, b: Date) => Math.round((b.getTime() - a.getTime()) / 86400000);
+  const daysUntil = daysBetween(today, departure);
+  const isPast    = today > lastDay;
   const isToday   = daysUntil === 0;
   const isActive  = !isPast && today >= departure;
 
-  // ── What's Next ───────────────────────────────────────────────────────────
-  let nextStop: any = null;
-  if (isActive && itinerary?.days) {
-    const todayStr = new Date().toISOString().split('T')[0];
-    const todayDay = itinerary.days.find(
-      (d: any) => new Date(d.date).toISOString().split('T')[0] === todayStr,
-    );
-    if (todayDay?.stops?.length) {
-      const nowMins  = new Date().getHours() * 60 + new Date().getMinutes();
-      const upcoming = todayDay.stops
-        .filter((s: any) => !s.skipped)
-        .map((s: any) => ({ ...s, _startMins: stopStartMinutes(s) }))
-        .filter((s: any) => s._startMins !== null && s._startMins >= nowMins)
-        .sort((a: any, b: any) => a._startMins - b._startMins);
-      nextStop = upcoming[0] ?? null;
-    }
-  }
-
-  const nextStartMins  = nextStop ? stopStartMinutes(nextStop) : null;
-  const minsUntilNext  = nextStartMins !== null
-    ? nextStartMins - (new Date().getHours() * 60 + new Date().getMinutes())
-    : null;
-  const isUrgent = minsUntilNext !== null && minsUntilNext <= 30;
+  // On-trip, the Now card counts down to the minute.
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    if (!isActive) return;
+    setNow(new Date());
+    const id = setInterval(() => setNow(new Date()), 60_000);
+    return () => clearInterval(id);
+  }, [isActive]);
 
   // ── Logistics ─────────────────────────────────────────────────────────────
   // Single shared source of truth — the same function the dashboard's readiness
@@ -223,9 +224,10 @@ export default function TripOverview({ trip, coverPhotoUrl, coverPhotoCredit, on
 
   // ── Packing ───────────────────────────────────────────────────────────────
   const items         = packing?.items ?? [];
-  const packedItems   = items.filter((i: any) => i.packed).length;
-  const packPct       = items.length > 0 ? Math.round((packedItems / items.length) * 100) : 0;
-  const preTravelItems = items.filter((i: any) => !i.packed && i.preTravelAction);
+  const packCounts    = packingCounts(items);
+  const packedItems   = packCounts.packed;
+  const packPct       = packCounts.progress;
+  const preTravelItems = items.filter((i: any) => !i.packed && !i.skipped && i.preTravelAction);
 
   const avgStops     = totalDays > 0 ? totalStops / totalDays : 0;
   const scheduleDesc = avgStops >= 6 ? 'Packed schedule' : avgStops >= 4 ? 'Busy schedule' : avgStops >= 2 ? 'Balanced schedule' : 'Light schedule';
@@ -269,8 +271,8 @@ export default function TripOverview({ trip, coverPhotoUrl, coverPhotoCredit, on
   const hasResources = contacts.length > 0 || keyLinks.length > 0 || docCount > 0 || notes.length > 0;
 
   // ── Countdown label ───────────────────────────────────────────────────────
-  const currentDayNum   = isActive ? Math.floor((today.getTime() - departure.getTime()) / 86400000) + 1 : null;
-  const tripTotalDays   = isActive ? Math.floor((tripEnd.getTime()  - departure.getTime()) / 86400000) + 1 : null;
+  const currentDayNum   = isActive ? daysBetween(departure, today) + 1 : null;
+  const tripTotalDays   = isActive ? daysBetween(departure, lastDay) + 1 : null;
 
   const countdownNumber = isPast ? null : isActive ? currentDayNum : daysUntil;
   const countdownLabel  = isPast   ? 'TRIP COMPLETE'
@@ -421,7 +423,7 @@ export default function TripOverview({ trip, coverPhotoUrl, coverPhotoCredit, on
             <Box sx={{ mt: { xs: 2, md: 2.5 } }}>
               <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.75 }}>
                 <Typography sx={{ fontFamily: D.body, fontSize: '0.65rem', color: 'rgba(255,255,255,0.35)', fontWeight: 600, letterSpacing: '0.04em', textShadow: '0 1px 4px rgba(0,0,0,0.4)' }}>
-                  Packing · {packedItems} of {items.length}
+                  Packing · {packedItems} of {packCounts.total}
                 </Typography>
                 <Typography sx={{ fontFamily: D.display, fontSize: '0.65rem', color: packPct === 100 ? '#4ade80' : 'rgba(255,255,255,0.35)', textShadow: '0 1px 4px rgba(0,0,0,0.4)' }}>
                   {packPct}%
@@ -466,51 +468,15 @@ export default function TripOverview({ trip, coverPhotoUrl, coverPhotoCredit, on
       <Box sx={{ bgcolor: D.bg, pt: { xs: 3, md: 4 }, pb: 10 }}>
         <Box sx={{ maxWidth: '1200px', mx: 'auto', px: { xs: 2.5, sm: 4 } }}>
 
-          {/* What's Next */}
-          {isActive && nextStop && (
-            <Paper elevation={0} sx={{
-              mb: 3, overflow: 'hidden',
-              border: '1.5px solid',
-              borderColor: isUrgent ? 'rgba(237,108,2,0.5)' : 'rgba(107,124,92,0.4)',
-              borderRadius: '12px',
-            }}>
-              <Box sx={{ height: 4, background: isUrgent ? 'linear-gradient(90deg, #ed6c02, #fbbf24)' : 'linear-gradient(90deg, #6B7C5C, #9aad89)' }} />
-              <Box sx={{ p: 2.5, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 2 }}>
-                <Box sx={{ minWidth: 0 }}>
-                  <SectionTag color={isUrgent ? '#ed6c02' : D.green}>
-                    {isUrgent ? `Starting in ${minsUntilNext} min` : `Next up · ${nextStartMins !== null ? formatTime(nextStartMins) : ''}`}
-                  </SectionTag>
-                  <Typography sx={{ fontFamily: D.display, fontSize: '1.4rem', color: D.navy, lineHeight: 1.1, letterSpacing: '-0.02em', mt: 0.5 }}>
-                    {nextStop.name}
-                  </Typography>
-                  {nextStop.reference && (
-                    <Box sx={{ display: 'inline-flex', alignItems: 'center', mt: 0.75, px: 1.25, py: 0.4, borderRadius: '6px', backgroundColor: 'rgba(3,105,161,0.10)', border: '1.5px solid rgba(3,105,161,0.3)' }}>
-                      <Typography sx={{ fontFamily: D.body, fontSize: '0.9rem', fontWeight: 800, color: '#0369a1', letterSpacing: '0.03em', lineHeight: 1.3 }}>
-                        {nextStop.reference}
-                      </Typography>
-                    </Box>
-                  )}
-                  {nextStop.address && (
-                    <Typography sx={{ fontFamily: D.body, fontSize: '0.78rem', color: D.muted, mt: 0.5 }}>{nextStop.address}</Typography>
-                  )}
-                  {nextStop.notes && (
-                    <Typography sx={{ fontFamily: D.body, fontSize: '0.75rem', color: D.muted, mt: 0.4, fontStyle: 'italic' }}>{nextStop.notes}</Typography>
-                  )}
-                </Box>
-                <NavigateButton
-                  destination={{ name: nextStop.name, address: nextStop.address, coordinates: nextStop.coordinates ?? null }}
-                  suggestedMode="walking" variant="button" label="Navigate"
-                  sx={{ flexShrink: 0 }}
-                />
-              </Box>
-            </Paper>
-          )}
-
-          {isActive && !nextStop && (
-            <Box sx={{ mb: 3, p: 2.5, border: '1.5px solid rgba(107,124,92,0.4)', borderRadius: '12px', bgcolor: 'rgba(107,124,92,0.04)' }}>
-              <Typography sx={{ fontFamily: D.display, fontSize: '0.9rem', color: D.green }}>Nothing more scheduled today</Typography>
-              <Typography sx={{ fontFamily: D.body, fontSize: '0.78rem', color: D.muted, mt: 0.4 }}>Check the itinerary tab for tomorrow.</Typography>
-            </Box>
+          {isActive && !loading && (
+            <OnTripNow
+              tripId={trip._id}
+              days={itinerary?.days ?? []}
+              files={resources}
+              now={now}
+              onFilesChange={setResources}
+              onOpenFile={f => setViewerFile({ _id: f._id, name: f.name, mimeType: f.mimeType, gcsUrl: f.gcsUrl })}
+            />
           )}
 
           {loading ? (
@@ -582,8 +548,8 @@ export default function TripOverview({ trip, coverPhotoUrl, coverPhotoCredit, on
                         </Typography>
                       ) : isActive && itinerary?.days ? (
                         (() => {
-                          const todayStr   = new Date().toISOString().split('T')[0];
-                          const todayDay   = itinerary.days.find((d: any) => new Date(d.date).toISOString().split('T')[0] === todayStr);
+                          const todayStr   = localYmd();
+                          const todayDay   = itinerary.days.find((d: any) => String(d.date).slice(0, 10) === todayStr);
                           const todayStops = (todayDay?.stops ?? []).filter((s: any) => !s.skipped);
                           const nowMins    = new Date().getHours() * 60 + new Date().getMinutes();
                           const remaining  = todayStops.filter((s: any) => {
@@ -742,7 +708,7 @@ export default function TripOverview({ trip, coverPhotoUrl, coverPhotoCredit, on
                               {packPct}%
                             </Typography>
                             <Typography sx={{ fontFamily: D.body, fontSize: '0.78rem', color: D.muted }}>
-                              {packedItems} of {items.length} items
+                              {packedItems} of {packCounts.total} items
                             </Typography>
                           </Box>
                           <LinearProgress variant="determinate" value={packPct} sx={{
@@ -819,6 +785,13 @@ export default function TripOverview({ trip, coverPhotoUrl, coverPhotoCredit, on
                 </Box>
               )}
 
+              {/* ── ON-TRIP GET AROUND + MY APPS ── full width */}
+              {isActive && (
+                <Box sx={{ gridColumn: { md: '1 / -1' }, pt: { xs: 3, md: 4 } }}>
+                  <OnTripGetAround trip={trip} transportation={logistics?.transportation ?? []} now={now} />
+                </Box>
+              )}
+
               {/* Dismissed row */}
               {dismissed.length > 0 && (
                 <Box sx={{ gridColumn: { md: '1 / -1' }, display: 'flex', alignItems: 'center', gap: 1, pt: 3 }}>
@@ -828,10 +801,7 @@ export default function TripOverview({ trip, coverPhotoUrl, coverPhotoCredit, on
                   <Button
                     size="small"
                     startIcon={<UndoIcon sx={{ fontSize: '0.8rem !important' }} />}
-                    onClick={() => {
-                      setDismissed([]);
-                      saveDismissed([]);
-                    }}
+                    onClick={() => saveDismissed([])}
                     sx={{ fontFamily: D.body, fontSize: '0.72rem', color: D.muted, py: 0.25 }}
                   >
                     Restore all

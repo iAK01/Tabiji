@@ -9,15 +9,15 @@ function ymd(d: string | Date): string {
   return typeof d === 'string' ? d.slice(0, 10) : d.toISOString().slice(0, 10);
 }
 
-function localTodayYmd(): string {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+/** A date as YYYY-MM-DD on this device's calendar (not UTC's). */
+export function localYmd(d: Date = new Date()): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
 export function isOnTrip(trip: TripDates): boolean {
   if (trip.status !== 'active') return false;
   if (!trip.startDate) return true;
-  return localTodayYmd() >= ymd(trip.startDate);
+  return localYmd() >= ymd(trip.startDate);
 }
 
 // What the status pill should say: an 'active' trip that hasn't started yet is,

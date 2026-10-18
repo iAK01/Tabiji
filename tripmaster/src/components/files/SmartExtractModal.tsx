@@ -11,6 +11,7 @@ import LocationOnIcon     from '@mui/icons-material/LocationOn';
 import CalendarTodayIcon  from '@mui/icons-material/CalendarToday';
 import DirectionsIcon     from '@mui/icons-material/Directions';
 import { DOC_TYPE_LABEL } from '@/lib/files/documentTypes';
+import { readSaved } from '@/lib/offline/saveErrors';
 
 const D = {
   green:   '#6B7C5C',
@@ -201,7 +202,7 @@ export default function SmartExtractModal({
   const [selTrans,  setSelTrans]  = useState<boolean[]>(() => allTrans.map(() => true));
   const [importing, setImporting] = useState(false);
   const [progress,  setProgress]  = useState(0);
-  const [done,      setDone]      = useState<{ ok: number; failed: string[]; filed?: boolean } | null>(null);
+  const [done,      setDone]      = useState<{ ok: number; failed: string[]; offDates: string[]; filed?: boolean; fileFailed?: boolean } | null>(null);
 
   // File classification + linking (only when opened from a file card / upload)
   const suggestedType = classification?.documentType && classification.documentType !== 'other'
@@ -224,6 +225,7 @@ export default function SmartExtractModal({
     setProgress(0);
     let ok = 0;
     const failed: string[] = [];
+    const offDates: string[] = []; // stops dated on a day the trip doesn't have
     const step = () => setProgress(p => p + 1);
 
     // Track the last successful create per category so we can link the file to it.
@@ -292,7 +294,9 @@ export default function SmartExtractModal({
             },
           }),
         });
-        res.ok ? ok++ : failed.push(s.name);
+        if (res.ok) ok++;
+        else if ((await res.json().catch(() => null))?.error === 'Day not found') offDates.push(s.name);
+        else failed.push(s.name);
       } catch { failed.push(s.name); }
       step();
     }
@@ -327,7 +331,7 @@ export default function SmartExtractModal({
     }
 
     // ── Classify + link the source file ─────────────────────────────────────
-    let filed = false;
+    let filed = false, fileFailed = false;
     if (fileId && (setType || linkFile)) {
       const patch: Record<string, any> = {};
       if (setType && suggestedType) patch.type = suggestedType;
@@ -353,13 +357,19 @@ export default function SmartExtractModal({
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(patch),
           });
-          if (r.ok) { filed = true; onFileUpdated?.((await r.json().catch(() => ({}))).file); }
-        } catch { /* non-fatal */ }
+          const updated = (await readSaved(r)).file;
+          if (!updated) throw new Error('No file in response');
+          filed = true;
+          onFileUpdated?.(updated);
+        } catch (err) {
+          console.error('[save failed] filing the document', err);
+          fileFailed = true;
+        }
       }
     }
 
     setImporting(false);
-    setDone({ ok, failed, filed });
+    setDone({ ok, failed, offDates, filed, fileFailed });
   }
 
   return (
@@ -387,15 +397,19 @@ export default function SmartExtractModal({
       <DialogContent sx={{ px: 3, pt: 2 }}>
         {done ? (
           <Alert
-            severity={done.failed.length === 0 ? 'success' : 'warning'}
+            severity={done.failed.length === 0 && done.offDates.length === 0 && !done.fileFailed ? 'success' : 'warning'}
             sx={{ fontFamily: D.body, fontSize: '0.85rem' }}
           >
             {done.ok > 0
               ? <>Added {done.ok} item{done.ok !== 1 ? 's' : ''} to your trip — check the Logistics and Itinerary tabs.</>
               : <>Nothing was added.</>}
             {done.filed && <> The file’s been filed and linked.</>}
+            {done.fileFailed && <> Couldn’t file or link the document.</>}
             {done.failed.length > 0 && (
-              <> Couldn’t add: {done.failed.join(', ')}. These may fall outside the trip dates.</>
+              <> Couldn’t add: {done.failed.join(', ')}. Please try again.</>
+            )}
+            {done.offDates.length > 0 && (
+              <> Not added, as they fall outside the trip dates: {done.offDates.join(', ')}.</>
             )}
           </Alert>
         ) : (

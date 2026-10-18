@@ -17,11 +17,16 @@ export function useFlushQueueOnReconnect() {
         .catch(() => {});
     };
     flush();
+    // Coming back to the app (phone unlocked, tab switched back) is a retry point too —
+    // otherwise a change stuck behind a failed send waits until the next page load.
+    const onVisible = () => { if (document.visibilityState === 'visible') flush(); };
+    document.addEventListener('visibilitychange', onVisible);
     let wasOffline = isOffline();
-    return subscribeConnectivity(() => {
+    const unsubscribe = subscribeConnectivity(() => {
       const offline = isOffline();
       if (wasOffline && !offline) flush();
       wasOffline = offline;
     });
+    return () => { unsubscribe(); document.removeEventListener('visibilitychange', onVisible); };
   }, []);
 }

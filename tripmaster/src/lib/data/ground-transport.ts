@@ -13,6 +13,7 @@ export interface TransportService {
   deepLink?:    string;
   iosStore?:    string;
   androidStore?: string;
+  cities?:      string[];  // a city's own transit app: only offered there
 }
 
 export interface AppCatalogGroup {
@@ -187,29 +188,35 @@ export const TRANSPORT_SERVICES: Record<string, TransportService> = {
   },
   bvg: {
     id: 'bvg', name: 'BVG (Berlin)', category: 'transit',
+    cities: ['Berlin'],
     webUrl: 'https://www.bvg.de/en/subscriptions-and-tickets/bvg-app',
     note: 'Official Berlin S-Bahn, U-Bahn, tram, bus app',
   },
   mvv: {
     id: 'mvv', name: 'MVV (Munich)', category: 'transit',
+    cities: ['Munich', 'München'],
     webUrl: 'https://www.mvv-muenchen.de/en/mvv-app/',
   },
   ratp: {
     id: 'ratp', name: 'Bonjour RATP', category: 'transit',
+    cities: ['Paris'],
     webUrl: 'https://www.bonjour-ratp.fr/en/',
     note: 'Official Paris metro, bus, RER, tram app',
   },
   tmb: {
     id: 'tmb', name: 'TMB (Barcelona)', category: 'transit',
+    cities: ['Barcelona'],
     webUrl: 'https://www.tmb.cat/en/tmb-app-t-mobilitat',
     note: 'Metro + bus, buy T-mobilitat tickets in-app',
   },
   emt_madrid: {
     id: 'emt_madrid', name: 'EMT Madrid', category: 'transit',
+    cities: ['Madrid'],
     webUrl: 'https://www.emtmadrid.es/Bloques-EMT/EMT-BUS/App-EMT',
   },
   oasa: {
     id: 'oasa', name: 'OASA Telematics', category: 'transit',
+    cities: ['Athens', 'Athina'],
     webUrl: 'https://www.oasa.gr/en/passenger-service/tools/telematics-app/',
     note: 'Official Athens bus, trolley, metro real-time app',
   },
@@ -230,11 +237,13 @@ export const TRANSPORT_SERVICES: Record<string, TransportService> = {
   },
   ruter: {
     id: 'ruter', name: 'Ruter', category: 'transit',
+    cities: ['Oslo'],
     webUrl: 'https://ruter.no/en',
     note: 'Oslo and Akershus region',
   },
   sl: {
     id: 'sl', name: 'SL (Stockholm)', category: 'transit',
+    cities: ['Stockholm'],
     webUrl: 'https://sl.se',
   },
   skanetrafiken: {
@@ -244,6 +253,7 @@ export const TRANSPORT_SERVICES: Record<string, TransportService> = {
   },
   hsl: {
     id: 'hsl', name: 'HSL', category: 'transit',
+    cities: ['Helsinki'],
     webUrl: 'https://www.hsl.fi/en',
     note: 'Helsinki region — bus, tram, metro, commuter rail, Suomenlinna ferry',
   },
@@ -584,6 +594,13 @@ export function getCountryTransport(countryCode: string): CountryTransport | nul
 
 export function resolveServices(ids: string[]): TransportService[] {
   return ids.map(id => TRANSPORT_SERVICES[id]).filter(Boolean);
+}
+
+/** Whether a service works in `city` — always, unless it's one city's own transit app. */
+export function servesCity(svc: TransportService, city: string): boolean {
+  if (!svc.cities) return true;
+  const c = city.toLowerCase();
+  return svc.cities.some(name => c.includes(name.toLowerCase()));
 }
 
 export function resolvePreDownload(entries: PreDownloadEntry[]): Array<TransportService & { reason: string }> {

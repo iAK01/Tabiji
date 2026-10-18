@@ -489,6 +489,8 @@ export default function Dashboard() {
       try {
         const res  = await fetch('/api/trips');
         const data = await res.json();
+        // An error response must not wipe the offline trip list — fall back to it instead.
+        if (!res.ok || !Array.isArray(data.trips)) throw new Error(`Trip list load failed (${res.status})`);
         await saveTripList(data.trips ?? []);
         setTrips(data.trips ?? []);
         warmTrips(data.trips ?? []).catch(() => {});

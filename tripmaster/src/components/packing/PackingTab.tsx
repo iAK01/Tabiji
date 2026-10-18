@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Box, Typography, Button, Paper, CircularProgress,
   LinearProgress, Chip, Checkbox,
@@ -21,8 +21,17 @@ import WbSunnyIcon       from '@mui/icons-material/WbSunny';
 import InfoOutlinedIcon  from '@mui/icons-material/InfoOutlined';
 import TuneIcon          from '@mui/icons-material/Tune';
 import AssignmentTurnedInIcon from '@mui/icons-material/AssignmentTurnedIn';
+import ViewListIcon      from '@mui/icons-material/ViewList';
+import ViewCarouselIcon  from '@mui/icons-material/ViewCarousel';
+import LightModeIcon     from '@mui/icons-material/LightMode';
 import { sendOrQueue } from '@/lib/offline/writes';
+import { readSaved, assertSaved, reportSaveFailure, reportCantSave } from '@/lib/offline/saveErrors';
 import { PACKING_CATEGORIES } from '@/lib/data/packing-categories';
+import { packingCounts } from '@/lib/packing/counts';
+import { useUrlParam } from '@/lib/hooks/useUrlParam';
+import { useWakeLock } from '@/lib/hooks/useWakeLock';
+import PackingCardDeck from './PackingCardDeck';
+import { qtyLabel, type PackStatus } from './packing.helpers';
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 
@@ -54,6 +63,7 @@ interface PackingItem {
   essential:        boolean;
   packed:           boolean;
   packedAt:         string | null;
+  skipped?:         boolean;          // "not bringing"
   preTravelAction:  boolean;
   preTravelNote:    string;
   advisoryNote:     string;
@@ -129,21 +139,23 @@ interface CatalogueEditState {
   advisoryNote:       string;
 }
 
-// ─── Quantity label ───────────────────────────────────────────────────────────
+// ─── List helpers ─────────────────────────────────────────────────────────────
 
-function qtyLabel(item: PackingItem): string {
-  const q    = item.quantity;
-  const name = item.name.toLowerCase();
-  if (name.includes('underwear') || name.includes('sock'))    return `${q} pair${q !== 1 ? 's' : ''}`;
-  if (name.includes('shirt') || name.includes('t-shirt'))     return `${q} shirt${q !== 1 ? 's' : ''}`;
-  if (name.includes('trouser') || name.includes('jean') ||
-      name.includes('pant')   || name.includes('short'))      return `${q} pair${q !== 1 ? 's' : ''}`;
-  if (name.includes('shoe')   || name.includes('boot'))       return `${q} pair${q !== 1 ? 's' : ''}`;
-  if (name.includes('cable')  || name.includes('charger'))    return `${q} cable${q !== 1 ? 's' : ''}`;
-  if (name.includes('battery') || name.includes('batteries')) return `${q} spare${q !== 1 ? 's' : ''}`;
-  if (q === 1) return '× 1';
-  return `× ${q}`;
+// The list with one item replaced and the counters re-derived from it.
+function withItem(list: PackingList, idx: number, item: PackingItem): PackingList {
+  const items = list.items.map((it, i) => (i === idx ? item : it));
+  const c     = packingCounts(items);
+  return { ...list, items, totalItems: items.length, packedItems: c.packed, packingProgress: c.progress };
 }
+
+const toolSx = {
+  fontFamily: D.body, fontWeight: 700, fontSize: '0.74rem', textTransform: 'none',
+  px: 1.25, minHeight: 36, lineHeight: 1.2,
+} as const;
+
+const VIEWS = ['list', 'cards'] as const;
+const VIEW_KEY = 'tabiji-packing-view';
+const AWAKE_KEY = 'tabiji-packing-awake';
 
 // ─── Toggle group helper ──────────────────────────────────────────────────────
 
@@ -190,7 +202,7 @@ export default function PackingTab({ tripId, tripType, nights, startDate, fabTri
   const [packing,          setPacking]          = useState<PackingList | null>(null);
   const [loading,          setLoading]          = useState(true);
   const [generating,       setGenerating]       = useState(false);
-  const [toggling,         setToggling]         = useState<number | null>(null);
+  const [pending,          setPending]          = useState<Set<number>>(new Set());
   const [addOpen,          setAddOpen]          = useState(false);
   const [preTravel,        setPreTravel]        = useState(false);
   const [filterOpen,       setFilterOpen]       = useState(false);
@@ -199,8 +211,48 @@ export default function PackingTab({ tripId, tripType, nights, startDate, fabTri
   const [newItem,          setNewItem]          = useState({ name: '', category: 'Other', quantity: 1, advisoryNote: '' });
   const [catalogueEdit,    setCatalogueEdit]    = useState<CatalogueEditState | null>(null);
   const [catalogueSaving,  setCatalogueSaving]  = useState(false);
+  const [adding,           setAdding]           = useState(false);
   const [creatingAdvisory, setCreatingAdvisory] = useState(false);
   const [advisoryCreated,  setAdvisoryCreated]  = useState(false);
+  const [view,             setViewParam]        = useUrlParam('pack', VIEWS, 'list');
+
+  // Latest list, for status changes fired faster than React re-renders (the card deck).
+  const packingRef = useRef<PackingList | null>(null);
+  const pendingRef = useRef<Set<number>>(new Set());
+  useEffect(() => { packingRef.current = packing; }, [packing]);
+  const commitPacking = (next: PackingList) => { packingRef.current = next; setPacking(next); };
+
+  // Keep the screen on while packing, if they've asked to.
+  const [keepAwake, setKeepAwake] = useState(false);
+  const awakeAsked = useRef(false);   // a tap, as opposed to restoring last time's choice
+  const wake = useWakeLock(keepAwake, () => {
+    setKeepAwake(false);
+    // Restoring it on page load can be refused without a tap first; only a refused tap needs saying.
+    if (awakeAsked.current) {
+      reportCantSave('Couldn’t keep the screen on — your phone didn’t allow it. If Low Power Mode is on, turn it off and try again.');
+    }
+  });
+  const toggleAwake = () => {
+    const next = !keepAwake;
+    awakeAsked.current = true;
+    setKeepAwake(next);
+    try { localStorage.setItem(AWAKE_KEY, next ? '1' : '0'); } catch { /* storage blocked */ }
+  };
+
+  // Remember which view and screen setting this person prefers; the URL still wins for the view.
+  useEffect(() => {
+    try {
+      if (!new URLSearchParams(window.location.search).has('pack') && localStorage.getItem(VIEW_KEY) === 'cards') {
+        setViewParam('cards');
+      }
+      if (localStorage.getItem(AWAKE_KEY) === '1') setKeepAwake(true);
+    } catch { /* storage blocked */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const setView = (next: typeof VIEWS[number]) => {
+    setViewParam(next);
+    try { localStorage.setItem(VIEW_KEY, next); } catch { /* storage blocked */ }
+  };
 
   useEffect(() => {
     fetch(`/api/trips/${tripId}/packing`)
@@ -231,39 +283,60 @@ export default function PackingTab({ tripId, tripType, nights, startDate, fabTri
 
   const generate = async () => {
     setGenerating(true);
-    const res  = await fetch(`/api/trips/${tripId}/packing/generate`, { method: 'POST' });
-    const data = await res.json();
-    setPacking(data.packing);
-    setGenerating(false);
+    try {
+      const res  = await fetch(`/api/trips/${tripId}/packing/generate`, { method: 'POST' });
+      const data = await readSaved(res);
+      if (!data.packing) throw new Error('No packing list in response');
+      setPacking(data.packing);
+    } catch (err) {
+      // The current list stays on screen — a failed regenerate must never blank it.
+      reportSaveFailure('the regenerated packing list', err);
+    } finally {
+      setGenerating(false);
+    }
   };
 
-  const toggleItem = async (originalIndex: number) => {
-    if (!packing || toggling !== null) return;
-    const newPackedValue = !packing.items[originalIndex].packed;
-    setToggling(originalIndex);
-    const updated     = packing.items.map((item, i) =>
-      i === originalIndex ? { ...item, packed: newPackedValue } : item
-    );
-    const packedCount = updated.filter(i => i.packed).length;
-    const optimistic  = { ...packing, items: updated, packedItems: packedCount,
-      packingProgress: Math.round((packedCount / updated.length) * 100) };
-    setPacking(optimistic);
+  // Packed / not bringing / back to to-pack, for one item. Several can be in flight at
+  // once (swiping through cards), so each change only ever touches its own item: the
+  // optimistic update, the server's confirmation and any undo are all per item.
+  const setItemStatus = async (idx: number, status: PackStatus) => {
+    const list = packingRef.current;
+    if (!list || pendingRef.current.has(idx)) return;
+    const before = list.items[idx];
+    const after: PackingItem = {
+      ...before,
+      packed:   status === 'packed',
+      skipped:  status === 'skipped',
+      packedAt: status === 'packed' ? new Date().toISOString() : null,
+    };
+    const optimistic = withItem(list, idx, after);
+    commitPacking(optimistic);
+    pendingRef.current.add(idx);
+    setPending(new Set(pendingRef.current));
+
+    // The name lets the server refuse if the list changed under us and that index now
+    // holds a different item.
+    const payload = { itemIndex: idx, name: before.name, packed: status === 'packed', skipped: status === 'skipped' };
     try {
       const res = await sendOrQueue(
-        { type: 'TOGGLE_PACKED', tripId, payload: { itemIndex: originalIndex, packed: newPackedValue } },
+        { type: 'TOGGLE_PACKED', tripId, payload },
         () => fetch(`/api/trips/${tripId}/packing`, {
           method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ itemIndex: originalIndex, packed: newPackedValue }),
+          body: JSON.stringify(payload),
         }),
         savedPacking(optimistic),
       );
       if (!res) return;
-      const data = await res.json();
-      if (data.packing) setPacking(data.packing);
-    } catch {
-      setPacking(p => p ? { ...p, items: packing.items } : p);
+      const data  = await readSaved(res);
+      const saved = data.packing?.items?.[idx];
+      if (!saved || saved.name !== before.name) throw new Error('Saved list does not match');
+      if (packingRef.current) commitPacking(withItem(packingRef.current, idx, saved));
+    } catch (err) {
+      if (packingRef.current) commitPacking(withItem(packingRef.current, idx, before));
+      reportSaveFailure(`“${before.name}”`, err);
     } finally {
-      setToggling(null);
+      pendingRef.current.delete(idx);
+      setPending(new Set(pendingRef.current));
     }
   };
 
@@ -309,53 +382,70 @@ export default function PackingTab({ tripId, tripType, nights, startDate, fabTri
   const saveCatalogueEdit = async () => {
     if (!catalogueEdit) return;
     setCatalogueSaving(true);
-    const res  = await fetch(`/api/packing/catalogue/${catalogueEdit.masterItemId}`, {
-      method: 'PUT', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        essential:          catalogueEdit.essential,
-        tripTypes:          catalogueEdit.tripTypes,
-        transportTypes:     catalogueEdit.transportTypes,
-        accommodationTypes: catalogueEdit.accommodationTypes,
-        quantity:           catalogueEdit.quantity,
-        quantityType:       catalogueEdit.quantityType,
-        quantityMin:        catalogueEdit.quantityMin,
-        quantityMax:        catalogueEdit.quantityMax,
-        preTravelAction:    catalogueEdit.preTravelAction,
-        preTravelNote:      catalogueEdit.preTravelNote,
-        advisoryNote:       catalogueEdit.advisoryNote,
-      }),
-    });
-    const data = await res.json();
-    if (data.item && packing) {
-      const updatedItems = packing.items.map(i =>
+    try {
+      const res  = await fetch(`/api/packing/catalogue/${catalogueEdit.masterItemId}`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          essential:          catalogueEdit.essential,
+          tripTypes:          catalogueEdit.tripTypes,
+          transportTypes:     catalogueEdit.transportTypes,
+          accommodationTypes: catalogueEdit.accommodationTypes,
+          quantity:           catalogueEdit.quantity,
+          quantityType:       catalogueEdit.quantityType,
+          quantityMin:        catalogueEdit.quantityMin,
+          quantityMax:        catalogueEdit.quantityMax,
+          preTravelAction:    catalogueEdit.preTravelAction,
+          preTravelNote:      catalogueEdit.preTravelNote,
+          advisoryNote:       catalogueEdit.advisoryNote,
+        }),
+      });
+      const data = await readSaved(res);
+      if (!data.item) throw new Error('No item in response');
+      setPacking(p => p ? { ...p, items: p.items.map(i =>
         i.masterItemId === catalogueEdit.masterItemId
           ? { ...i, essential: data.item.essential, preTravelAction: data.item.preTravelAction,
               preTravelNote: data.item.preTravelNote ?? '', advisoryNote: data.item.advisoryNote ?? '' }
           : i
-      );
-      setPacking(p => p ? { ...p, items: updatedItems } : p);
+      ) } : p);
+      setCatalogueEdit(null);
+    } catch (err) {
+      // Dialog stays open with the edits intact so they can retry.
+      reportSaveFailure(`your changes to “${catalogueEdit.name}”`, err);
+    } finally {
+      setCatalogueSaving(false);
     }
-    setCatalogueEdit(null);
-    setCatalogueSaving(false);
   };
 
+  // The dialog only closes and clears once the item is saved or safely queued; on any
+  // failure it stays open with what they typed, and the error toast says so.
   const addItem = async () => {
-    const res = await sendOrQueue(
-      { type: 'ADD_PACKING_ITEM', tripId, payload: newItem },
-      () => fetch(`/api/trips/${tripId}/packing`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newItem),
-      }),
-      packing ? savedPacking(withManualItem(packing, newItem)) : undefined,
-    ).catch(() => null);
-    if (res) {
-      const data = await res.json();
-      setPacking(data.packing);
-    } else if (packing) {
-      setPacking(withManualItem(packing, newItem));
+    const name = newItem.name.trim();
+    if (adding || !name) return;
+    setAdding(true);
+    try {
+      const res = await sendOrQueue(
+        { type: 'ADD_PACKING_ITEM', tripId, payload: newItem },
+        () => fetch(`/api/trips/${tripId}/packing`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(newItem),
+        }),
+        packing ? savedPacking(withManualItem(packing, newItem)) : undefined,
+      );
+      if (res) {
+        const data  = await readSaved(res);
+        const saved = data.packing?.items?.some((i: PackingItem) => i.source === 'manual' && i.name === name);
+        if (!saved) throw new Error('Saved list does not contain the new item');
+        setPacking(data.packing);
+      } else if (packing) {
+        setPacking(withManualItem(packing, newItem));
+      }
+      setAddOpen(false);
+      setNewItem({ name: '', category: 'Other', quantity: 1, advisoryNote: '' });
+    } catch (err) {
+      reportSaveFailure(`“${name}”`, err);
+    } finally {
+      setAdding(false);
     }
-    setAddOpen(false);
-    setNewItem({ name: '', category: 'Other', quantity: 1, advisoryNote: '' });
   };
 
   const createPackingAdvisory = async (items: IndexedItem[]) => {
@@ -374,9 +464,10 @@ export default function PackingTab({ tripId, tripType, nights, startDate, fabTri
     fd.append('notification.enabled', 'false');
     try {
       const res = await fetch(`/api/trips/${tripId}/files`, { method: 'POST', body: fd });
-      if (res.ok) setAdvisoryCreated(true);
-    } catch {
-      // Silently fail
+      assertSaved(res);
+      setAdvisoryCreated(true);
+    } catch (err) {
+      reportSaveFailure('the pre-travel checklist', err);
     } finally {
       setCreatingAdvisory(false);
     }
@@ -442,21 +533,29 @@ export default function PackingTab({ tripId, tripType, nights, startDate, fabTri
   // ── Derived state ─────────────────────────────────────────────────────────
 
   const indexedItems: IndexedItem[] = packing.items.map((item, i) => ({ ...item, _idx: i }));
-  const preTravelItems = indexedItems.filter(i => i.preTravelAction && !i.packed);
-  const allDone        = packing.packingProgress === 100;
+  const counts         = packingCounts(packing.items);
+  const preTravelItems = indexedItems.filter(i => i.preTravelAction && !i.packed && !i.skipped);
+  const allDone        = counts.total > 0 && counts.packed === counts.total;
   const ws             = packing.generationParams?.weatherSnapshot;
 
   const filtered = indexedItems.filter(i => {
-    if (filter === 'unpacked') return !i.packed;
+    if (filter === 'unpacked') return !i.packed && !i.skipped;
     if (filter === 'packed')   return  i.packed;
     return true;
   });
 
+  const isDone    = (i: PackingItem) => i.packed || !!i.skipped;
   const sortGroup = (arr: IndexedItem[]) =>
     [...arr].sort((a, b) => {
-      if (a.packed !== b.packed) return Number(a.packed) - Number(b.packed);
+      if (isDone(a) !== isDone(b)) return Number(isDone(a)) - Number(isDone(b));
       return Number(b.essential) - Number(a.essential);
     });
+
+  // The card deck goes category by category like the list, but its order never changes
+  // as items are decided — cards don't jump around while you swipe.
+  const catRank   = (c: string) => { const r = CATEGORIES.indexOf(c); return r === -1 ? CATEGORIES.indexOf('Other') : r; };
+  const deckItems = [...indexedItems].sort((a, b) =>
+    catRank(a.category) - catRank(b.category) || Number(b.essential) - Number(a.essential) || a._idx - b._idx);
 
   const grouped = CATEGORIES.reduce((acc, cat) => {
     const catItems = filtered.filter(i => i.category === cat);
@@ -495,12 +594,14 @@ export default function PackingTab({ tripId, tripType, nights, startDate, fabTri
             }}>
             Add
           </Button>
-          <Button size="small" variant="outlined" startIcon={<FilterListIcon />}
-            onClick={() => setFilterOpen(p => !p)}
-            color={filter !== 'all' ? 'primary' : 'inherit'}
-            sx={{ fontFamily: D.body, fontWeight: 700, fontSize: '0.72rem', flexShrink: 0, ...(mobile && { minHeight: 36 }) }}>
-            {filter === 'all' ? 'Filter' : filter}
-          </Button>
+          {view === 'list' && (
+            <Button size="small" variant="outlined" startIcon={<FilterListIcon />}
+              onClick={() => setFilterOpen(p => !p)}
+              color={filter !== 'all' ? 'primary' : 'inherit'}
+              sx={{ fontFamily: D.body, fontWeight: 700, fontSize: '0.72rem', flexShrink: 0, ...(mobile && { minHeight: 36 }) }}>
+              {filter === 'all' ? 'Filter' : filter}
+            </Button>
+          )}
           <IconButton size="small" onClick={generate} disabled={generating}
             aria-label="Regenerate list"
             title={showLiveRefresh ? 'Live forecast available — refresh' : 'Regenerate list'}>
@@ -510,8 +611,30 @@ export default function PackingTab({ tripId, tripType, nights, startDate, fabTri
           </IconButton>
         </Box>
 
+        {/* View + screen */}
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.25, flexWrap: 'wrap' }}>
+          <ToggleButtonGroup value={view} exclusive size="small"
+            onChange={(_, v) => { if (v) setView(v); }}
+            aria-label="Packing view">
+            <ToggleButton value="list" sx={toolSx}>
+              <ViewListIcon sx={{ fontSize: '1.05rem', mr: 0.5 }} />List
+            </ToggleButton>
+            <ToggleButton value="cards" sx={toolSx}>
+              <ViewCarouselIcon sx={{ fontSize: '1.05rem', mr: 0.5 }} />Cards
+            </ToggleButton>
+          </ToggleButtonGroup>
+          <Box sx={{ flex: 1 }} />
+          {wake.supported && (
+            <ToggleButton value="awake" size="small" selected={keepAwake} onChange={toggleAwake}
+              aria-label="Keep screen on" sx={toolSx}>
+              <LightModeIcon sx={{ fontSize: '1.05rem', mr: 0.5, color: keepAwake ? D.terra : 'inherit' }} />
+              Keep screen on
+            </ToggleButton>
+          )}
+        </Box>
+
         {/* Filter chips */}
-        <Collapse in={filterOpen}>
+        <Collapse in={filterOpen && view === 'list'}>
           <Box sx={{ display: 'flex', gap: 1, mb: 1.25, flexWrap: 'wrap' }}>
             {(['all', 'unpacked', 'packed'] as const).map(f => (
               <Chip key={f}
@@ -527,7 +650,7 @@ export default function PackingTab({ tripId, tripType, nights, startDate, fabTri
         {/* Progress bar + counter + summary chips on one row */}
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap' }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flex: '1 1 220px', minWidth: 0 }}>
-            <LinearProgress variant="determinate" value={packing.packingProgress}
+            <LinearProgress variant="determinate" value={counts.progress}
               color={allDone ? 'success' : 'primary'}
               sx={{ flex: 1, height: 8, borderRadius: 4, backgroundColor: 'action.hover',
                 '& .MuiLinearProgress-bar': { borderRadius: 4 } }} />
@@ -537,10 +660,10 @@ export default function PackingTab({ tripId, tripType, nights, startDate, fabTri
                 fontFamily: D.display, fontSize: '1.1rem', letterSpacing: '-0.03em', lineHeight: 1,
                 color: allDone ? D.green : D.terra,
               }}>
-                {packing.packedItems}
+                {counts.packed}
               </Typography>
               <Typography sx={{ fontFamily: D.body, fontSize: '0.72rem', color: 'text.disabled', fontWeight: 600 }}>
-                /{packing.totalItems}
+                /{counts.total}
               </Typography>
             </Box>
           </Box>
@@ -554,6 +677,10 @@ export default function PackingTab({ tripId, tripType, nights, startDate, fabTri
                 size="small" color="warning" onClick={() => setPreTravel(true)}
                 sx={{ fontFamily: D.body, cursor: 'pointer', fontWeight: 700 }} />
             )}
+            {counts.skipped > 0 && (
+              <Chip label={`${counts.skipped} not bringing`} size="small" variant="outlined"
+                sx={{ fontFamily: D.body, fontWeight: 600 }} />
+            )}
             {indexedItems.filter(i => i.source === 'manual').length > 0 && (
               <Chip label={`${indexedItems.filter(i => i.source === 'manual').length} manual`}
                 size="small" variant="outlined"
@@ -563,10 +690,19 @@ export default function PackingTab({ tripId, tripType, nights, startDate, fabTri
         </Box>
       </Paper>
 
+      {/* ── One item at a time ── */}
+      {view === 'cards' && (
+        <PackingCardDeck
+          items={deckItems} nights={nights} pending={pending}
+          onStatus={setItemStatus} onShowList={() => setView('list')}
+        />
+      )}
+
       {/* ── Category sections ── */}
-      {Object.entries(grouped).map(([category, catItems]) => {
+      {view === 'list' && Object.entries(grouped).map(([category, catItems]) => {
         const packedCount  = catItems.filter(i => i.packed).length;
-        const allCatPacked = packedCount === catItems.length;
+        const bringing     = catItems.filter(i => !i.skipped).length;
+        const allCatPacked = catItems.every(isDone);
         const isOpen       = expanded[category] !== undefined ? expanded[category] : !allCatPacked;
 
         return (
@@ -611,7 +747,7 @@ export default function PackingTab({ tripId, tripType, nights, startDate, fabTri
                   {packedCount}
                 </Typography>
                 <Typography sx={{ fontFamily: D.body, fontSize: '0.68rem', color: 'text.disabled', fontWeight: 600 }}>
-                  /{catItems.length}
+                  /{bringing}
                 </Typography>
               </Box>
               {isOpen ? <ExpandLessIcon fontSize="small" sx={{ color: 'text.disabled' }} /> : <ExpandMoreIcon fontSize="small" sx={{ color: 'text.disabled' }} />}
@@ -624,12 +760,13 @@ export default function PackingTab({ tripId, tripType, nights, startDate, fabTri
                   <Box sx={{
                     display: 'flex', alignItems: 'flex-start',
                     px: { xs: 2, sm: 2.5 }, py: { xs: 1.5, sm: 1.25 }, gap: 1.5,
-                    opacity: item.packed ? 0.4 : 1, transition: 'opacity 0.2s',
+                    opacity: isDone(item) ? 0.4 : 1, transition: 'opacity 0.2s',
                     '&:hover': { backgroundColor: 'rgba(44,62,80,0.025)' },
                     '&:hover .catalogue-tune': { opacity: 1 },
-                    pointerEvents: toggling === item._idx ? 'none' : 'auto',
+                    pointerEvents: pending.has(item._idx) ? 'none' : 'auto',
                   }}>
-                    <Checkbox checked={item.packed} onChange={() => toggleItem(item._idx)}
+                    <Checkbox checked={item.packed}
+                      onChange={() => setItemStatus(item._idx, item.packed ? 'todo' : 'packed')}
                       sx={{ p: 0, flexShrink: 0, mt: 0.25, color: D.green,
                         '&.Mui-checked': { color: D.green } }} />
 
@@ -646,6 +783,12 @@ export default function PackingTab({ tripId, tripType, nights, startDate, fabTri
                           {item.name}
                         </Typography>
 
+                        {item.skipped && !item.packed && (
+                          <Typography sx={{ fontFamily: D.body, fontSize: '0.72rem', fontWeight: 700, color: 'text.secondary' }}>
+                            Not bringing
+                          </Typography>
+                        )}
+
                         {/* Quantity — Archivo Black, terracotta, jumps out */}
                         {item.quantity > 1 && (
                           <Typography sx={{
@@ -660,7 +803,7 @@ export default function PackingTab({ tripId, tripType, nights, startDate, fabTri
                         )}
                       </Box>
 
-                      {item.advisoryNote && !item.packed && (
+                      {item.advisoryNote && !isDone(item) && (
                         <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 0.5, mt: 0.5 }}>
                           <InfoOutlinedIcon sx={{ fontSize: 13, color: 'text.disabled', mt: 0.25, flexShrink: 0 }} />
                           <Typography sx={{ fontFamily: D.body, fontSize: '0.74rem',
@@ -670,7 +813,7 @@ export default function PackingTab({ tripId, tripType, nights, startDate, fabTri
                         </Box>
                       )}
 
-                      {item.preTravelAction && !item.packed && (
+                      {item.preTravelAction && !isDone(item) && (
                         <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 0.5, mt: 0.5 }}>
                           <WarningAmberIcon sx={{ fontSize: 13, color: 'warning.main', mt: 0.25, flexShrink: 0 }} />
                           <Typography sx={{ fontFamily: D.body, fontSize: '0.74rem',
@@ -818,14 +961,14 @@ export default function PackingTab({ tripId, tripType, nights, startDate, fabTri
         <DialogActions sx={{ px: 3, pb: 3, gap: 1, flexDirection: { xs: 'column-reverse', sm: 'row' } }}>
           <Button onClick={() => setAddOpen(false)} fullWidth={mobile} size="large"
             sx={{ fontFamily: D.body, fontWeight: 600 }}>Cancel</Button>
-          <Button variant="contained" onClick={addItem} disabled={!newItem.name}
+          <Button variant="contained" onClick={addItem} disabled={!newItem.name.trim() || adding}
             fullWidth={mobile} size="large"
             sx={{
               fontFamily: D.display, letterSpacing: '-0.01em',
               backgroundColor: D.navy, boxShadow: 'none',
               '&:hover': { backgroundColor: 'rgba(44,62,80,0.88)', boxShadow: 'none' },
             }}>
-            Add item
+            {adding ? 'Adding…' : 'Add item'}
           </Button>
         </DialogActions>
       </Dialog>

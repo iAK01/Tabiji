@@ -1,18 +1,17 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+// The on-trip parts of the Overview tab. OnTripNow sits above the section
+// summaries: the one thing happening now or next (rolling over to tomorrow's
+// first stop once today is done), plus todos due today. OnTripGetAround sits
+// below them: local ride and transit apps for wherever you've actually landed
+// (nothing while you're still at home or on the way), and your own apps.
+
+import { useEffect, useMemo, useState } from 'react';
 import {
-  Box, Typography, Paper, Chip, CircularProgress,
-  IconButton, Divider, alpha, Tooltip, Button, Collapse,
+  Box, Typography, Paper, Chip, IconButton, Divider, alpha, Tooltip, Button,
 } from '@mui/material';
 import FlightIcon               from '@mui/icons-material/Flight';
-import TrainIcon                from '@mui/icons-material/Train';
 import DirectionsBusIcon        from '@mui/icons-material/DirectionsBus';
-import DirectionsBoatIcon       from '@mui/icons-material/DirectionsBoat';
-import DirectionsCarIcon        from '@mui/icons-material/DirectionsCar';
-import LocalTaxiIcon            from '@mui/icons-material/LocalTaxi';
-import AirportShuttleIcon       from '@mui/icons-material/AirportShuttle';
-import PedalBikeIcon            from '@mui/icons-material/PedalBike';
 import HotelIcon                from '@mui/icons-material/Hotel';
 import EventIcon                from '@mui/icons-material/Event';
 import WorkIcon                 from '@mui/icons-material/Work';
@@ -20,22 +19,19 @@ import RestaurantIcon           from '@mui/icons-material/Restaurant';
 import ExploreIcon              from '@mui/icons-material/Explore';
 import FreeBreakfastIcon        from '@mui/icons-material/FreeBreakfast';
 import LocationOnIcon           from '@mui/icons-material/LocationOn';
-import CheckCircleIcon          from '@mui/icons-material/CheckCircle';
 import CheckBoxOutlineBlankIcon from '@mui/icons-material/CheckBoxOutlineBlank';
-import NavigationIcon           from '@mui/icons-material/Navigation';
-import RefreshIcon              from '@mui/icons-material/Refresh';
 import AssignmentIcon           from '@mui/icons-material/Assignment';
 import BoltIcon                 from '@mui/icons-material/Bolt';
-import LoginIcon                from '@mui/icons-material/Login';
-import LogoutIcon               from '@mui/icons-material/Logout';
 import CloseIcon                from '@mui/icons-material/Close';
-import ExpandMoreIcon           from '@mui/icons-material/ExpandMore';
-import ExpandLessIcon           from '@mui/icons-material/ExpandLess';
 import AttachFileIcon           from '@mui/icons-material/AttachFile';
-import DocumentViewer, { type ViewableFile } from '@/components/files/DocumentViewer';
+import NavigateButton from '@/components/ui/NavigateButton';
 import ArrivalTransportCard from '@/components/trips/ArrivalTransportCard';
 import QuickLaunchCard from '@/components/trips/QuickLaunchCard';
 import { sendOrQueue } from '@/lib/offline/writes';
+import { readSaved, reportSaveFailure } from '@/lib/offline/saveErrors';
+import { localYmd } from '@/lib/trips/onTrip';
+import { buildLegs, placeAt } from '@/lib/push/journey';
+import { placeTz } from '@/lib/push/timezones';
 
 // ─── Design tokens ─────────────────────────────────────────────────────────────
 
@@ -43,29 +39,15 @@ const D = {
   green:   '#6B7C5C',
   terra:   '#C4714A',
   navy:    '#1D2642',
-  bg:      '#F5F0E8',
   paper:   '#FDFAF5',
   muted:   'rgba(29,38,66,0.45)',
   rule:    'rgba(29,38,66,0.10)',
+  urgent:  '#ed6c02',
   display: '"Archivo Black", sans-serif',
   body:    '"Archivo", "Inter", sans-serif',
 };
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-
-interface Trip {
-  _id: string;
-  name: string;
-  destination: { city: string; country: string; countryCode?: string };
-  origin?: { city: string; country: string };
-  startDate: string;
-  endDate: string;
-  nights?: number;
-  tripType: string;
-  purpose?: string;
-  coverPhotoUrl?: string;
-  coverPhotoThumb?: string;
-}
 
 interface Stop {
   _id?: string;
@@ -78,44 +60,13 @@ interface Stop {
   time?: string;
   duration: number;
   notes?: string;
-  completed?: boolean;
-  source?: string;
+  skipped?: boolean;
+  logisticsRef?: { collection: string; index: number };
 }
 
 interface ItineraryDay {
   date: string;
-  dayNumber: number;
-  stops: Stop[];
-}
-
-interface Transport {
-  _id?: string;
-  type: string;
-  status: string;
-  departureLocation: string;
-  arrivalLocation: string;
-  departureTime: string;
-  arrivalTime: string;
-  confirmationNumber?: string;
-  details: {
-    airline?: string;
-    flightNumber?: string;
-    operator?: string;
-    rentalCompany?: string;
-    pickupLocation?: string;
-  };
-}
-
-interface Accommodation {
-  _id?: string;
-  type: string;
-  status: string;
-  name: string;
-  address?: string;
-  checkIn: string;
-  checkOut: string;
-  confirmationNumber?: string;
-  notes?: string;
+  stops?: Stop[];
 }
 
 interface Todo {
@@ -124,72 +75,36 @@ interface Todo {
   body?: string;
   type: string;
   dueAt?: string;
-  completed: boolean;
-  source?: 'manual' | 'packing_advisory';
 }
 
-// Unified timeline item
-type TimelineItem =
-  | { kind: 'stop';      sortMins: number; stop: Stop }
-  | { kind: 'transport'; sortMins: number; transport: Transport; event: 'departure' | 'arrival'; logisticsIndex: number }
-  | { kind: 'accom';     sortMins: number; accom: Accommodation; event: 'checkin' | 'checkout'; logisticsIndex: number };
+type Place = { city?: string; country?: string; countryCode?: string; timezone?: string; iataCode?: string };
 
-interface OnTripScreenProps {
-  tripId: string;
-  trip:   Trip;
+interface OnTripTrip {
+  startDate: string;
+  endDate: string;
+  origin?: Place;
+  destination: Place & { city: string };
+  additionalDestinations?: Array<Place & { arrivalDate?: string; departureDate?: string }>;
 }
+
+type Pick = { stop: Stop; startM: number; when: 'now' | 'today' | 'tomorrow' };
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
-const STOP_CONFIG: Record<string, { label: string; color: string; Icon: any }> = {
-  flight:      { label: 'Flight',        color: D.terra,  Icon: FlightIcon },
-  hotel:       { label: 'Accommodation', color: '#5c35a0', Icon: HotelIcon },
-  meeting:     { label: 'Meeting',       color: D.navy,   Icon: WorkIcon },
-  meal:        { label: 'Meal',          color: '#b45309', Icon: RestaurantIcon },
-  breakfast:   { label: 'Breakfast',     color: '#b45309', Icon: FreeBreakfastIcon },
-  activity:    { label: 'Activity',      color: D.green,  Icon: ExploreIcon },
-  sightseeing: { label: 'Sightseeing',   color: D.green,  Icon: ExploreIcon },
-  transport:   { label: 'Transport',     color: '#0369a1', Icon: DirectionsBusIcon },
-  work:        { label: 'Work block',    color: D.navy,   Icon: WorkIcon },
-  other:       { label: 'Other',         color: '#6b7280', Icon: EventIcon },
-};
-
-const TRANSPORT_ICON: Record<string, any> = {
-  flight:           FlightIcon,
-  train:            TrainIcon,
-  bus:              DirectionsBusIcon,
-  ferry:            DirectionsBoatIcon,
-  car:              DirectionsCarIcon,
-  car_hire:         DirectionsCarIcon,
-  taxi:             LocalTaxiIcon,
-  private_transfer: AirportShuttleIcon,
-  bicycle:          PedalBikeIcon,
-};
-
-const TRANSPORT_LABEL: Record<string, string> = {
-  flight: 'Flight', train: 'Train', bus: 'Bus', ferry: 'Ferry',
-  car: 'Car', car_hire: 'Car hire', taxi: 'Taxi',
-  private_transfer: 'Transfer', bicycle: 'Bicycle',
-};
-
-const STATUS_COLOR: Record<string, string> = {
-  not_booked: '#6b7280',
-  pending: '#b45309',
-  booked: '#0369a1',
-  confirmed: D.green,
-  cancelled: '#dc2626',
+const STOP_CONFIG: Record<string, { color: string; Icon: any }> = {
+  flight:      { color: D.terra,   Icon: FlightIcon },
+  hotel:       { color: '#5c35a0', Icon: HotelIcon },
+  meeting:     { color: D.navy,    Icon: WorkIcon },
+  meal:        { color: '#b45309', Icon: RestaurantIcon },
+  breakfast:   { color: '#b45309', Icon: FreeBreakfastIcon },
+  activity:    { color: D.green,   Icon: ExploreIcon },
+  sightseeing: { color: D.green,   Icon: ExploreIcon },
+  transport:   { color: '#0369a1', Icon: DirectionsBusIcon },
+  work:        { color: D.navy,    Icon: WorkIcon },
+  other:       { color: '#6b7280', Icon: EventIcon },
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function todayIso(): string {
-  return new Date().toISOString().split('T')[0];
-}
-
-function isoToMins(iso: string): number {
-  const d = new Date(iso);
-  return d.getHours() * 60 + d.getMinutes();
-}
 
 function stopStartMinutes(stop: Stop): number | null {
   const timeStr = stop.scheduledStart
@@ -203,279 +118,147 @@ function stopStartMinutes(stop: Stop): number | null {
 }
 
 function fmtMins(totalMins: number): string {
-  const h = Math.floor(totalMins / 60);
-  const m = totalMins % 60;
-  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+  const mins = ((totalMins % 1440) + 1440) % 1440;
+  return `${String(Math.floor(mins / 60)).padStart(2, '0')}:${String(mins % 60).padStart(2, '0')}`;
 }
 
-function fmtTime(iso: string): string {
-  return new Date(iso).toLocaleTimeString('en-IE', { hour: '2-digit', minute: '2-digit' });
+function fmtSpan(mins: number): string {
+  if (mins < 60) return `${mins} min`;
+  const h = Math.floor(mins / 60), m = mins % 60;
+  return m ? `${h}h ${m}m` : `${h}h`;
 }
 
-function dayOfTrip(startDate: string): number {
-  const start = new Date(startDate);
-  start.setHours(0, 0, 0, 0);
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  return Math.floor((today.getTime() - start.getTime()) / 86400000) + 1;
+function stopKey(s: Stop): string {
+  return s._id ?? `${s.name}@${s.scheduledStart ?? s.time ?? ''}`;
 }
 
-function tripNights(startDate: string, endDate: string): number {
-  const s = new Date(startDate);
-  const e = new Date(endDate);
-  return Math.round((e.getTime() - s.getTime()) / 86400000);
-}
+// ─── Now card ─────────────────────────────────────────────────────────────────
 
-function mapsLinks(name: string, address?: string, coords?: { lat: number; lng: number }) {
-  return {
-    apple: coords
-      ? `https://maps.apple.com/?ll=${coords.lat},${coords.lng}&q=${encodeURIComponent(name)}`
-      : `https://maps.apple.com/?q=${encodeURIComponent(address || name)}`,
-    google: coords
-      ? `https://www.google.com/maps/search/?api=1&query=${coords.lat},${coords.lng}`
-      : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address || name)}`,
-    waze: coords
-      ? `https://waze.com/ul?ll=${coords.lat},${coords.lng}&navigate=yes`
-      : `https://waze.com/ul?q=${encodeURIComponent(address || name)}&navigate=yes`,
-  };
-}
-
-// ─── Map buttons ──────────────────────────────────────────────────────────────
-
-function MapButtons({ name, address, coordinates }: {
-  name: string; address?: string; coordinates?: { lat: number; lng: number };
+function NowCard({ pick, nowMins, linkedFiles, onOpenFile, onDismiss }: {
+  pick: Pick; nowMins: number;
+  linkedFiles: any[]; onOpenFile: (f: any) => void;
+  onDismiss?: () => void;
 }) {
-  const links = mapsLinks(name, address, coordinates);
-  return (
-    <Box sx={{ display: 'flex', gap: 0.75, mt: 1.1, flexWrap: 'wrap' }}>
-      {[
-        { label: 'Apple Maps', href: links.apple,  color: D.navy },
-        { label: 'Google Maps', href: links.google, color: '#0369a1' },
-        { label: 'Waze', href: links.waze, color: '#00838f' },
-      ].map(({ label, href, color }) => (
-        <Button
-          key={label}
-          component="a"
-          href={href}
-          target="_blank"
-          rel="noopener noreferrer"
-          size="small"
-          startIcon={<NavigationIcon sx={{ fontSize: '0.85rem !important' }} />}
-          sx={{
-            minHeight: 28,
-            py: 0.4,
-            px: 1,
-            borderRadius: '999px',
-            textTransform: 'none',
-            fontSize: '0.72rem',
-            fontWeight: 800,
-            letterSpacing: '0.02em',
-            fontFamily: D.body,
-            backgroundColor: alpha(color, 0.08),
-            color,
-            border: `1px solid ${alpha(color, 0.12)}`,
-            '&:hover': { backgroundColor: alpha(color, 0.15) },
-          }}
-        >
-          {label}
-        </Button>
-      ))}
-    </Box>
-  );
-}
-
-// ─── Section label ────────────────────────────────────────────────────────────
-
-function SectionLabel({ children }: { children: React.ReactNode }) {
-  return (
-    <Typography sx={{
-      fontSize: '1.2rem',
-      fontWeight: 800,
-      letterSpacing: '0.1em',
-      textTransform: 'uppercase',
-      color: D.muted,
-      fontFamily: D.body,
-      display: 'block',
-      mb: 1.25,
-    }}>
-      {children}
-    </Typography>
-  );
-}
-
-// ─── Right Now card ───────────────────────────────────────────────────────────
-
-function RightNowCard({ stop, startMins, nowMins, linkedFiles = [], onOpenFile }: {
-  stop: Stop; startMins: number | null; nowMins: number;
-  linkedFiles?: any[]; onOpenFile?: (f: any) => void;
-}) {
+  const { stop, startM, when } = pick;
   const cfg    = STOP_CONFIG[stop.type] ?? STOP_CONFIG.other;
   const Icon   = cfg.Icon;
-  const endM   = startMins !== null ? startMins + stop.duration : null;
-  const inProg = startMins !== null && endM !== null && nowMins >= startMins && nowMins < endM;
-  const remaining = endM !== null && inProg ? endM - nowMins : null;
+  const endM   = startM + (stop.duration || 0);
+  const wait   = startM - nowMins;
+  const urgent = when === 'today' && wait <= 30;
+  const accent = urgent ? D.urgent : D.green;
   const hasLoc = !!(stop.address || stop.coordinates);
+
+  const label =
+    when === 'now'      ? `Right now · ${fmtSpan(endM - nowMins)} left` :
+    when === 'tomorrow' ? `Tomorrow · ${fmtMins(startM)}` :
+    urgent              ? `Starting in ${fmtSpan(wait)}` :
+                          `Next up · ${fmtMins(startM)} · in ${fmtSpan(wait)}`;
 
   return (
     <Paper elevation={0} sx={{
-      p: { xs: 2.25, sm: 2.75 },
-      border: `1.5px solid ${D.rule}`,
-      borderTop: `3px solid ${cfg.color}`,
+      overflow: 'hidden',
+      border: '1.5px solid',
+      borderColor: alpha(accent, 0.45),
       borderRadius: '12px',
-      background: `linear-gradient(135deg, ${alpha(cfg.color, 0.08)} 0%, transparent 58%)`,
+      backgroundColor: D.paper,
     }}>
-      <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1.5 }}>
+      <Box sx={{ height: 4, background: urgent ? 'linear-gradient(90deg, #ed6c02, #fbbf24)' : 'linear-gradient(90deg, #6B7C5C, #9aad89)' }} />
+      <Box sx={{ p: { xs: 2, sm: 2.5 }, display: 'flex', gap: 1.75 }}>
         <Box sx={{
-          width: 46,
-          height: 46,
-          borderRadius: '10px',
+          width: 44, height: 44, borderRadius: '10px', flexShrink: 0,
           backgroundColor: alpha(cfg.color, 0.12),
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          flexShrink: 0,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
         }}>
           <Icon sx={{ fontSize: 22, color: cfg.color }} />
         </Box>
 
         <Box sx={{ flexGrow: 1, minWidth: 0 }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1, minHeight: 20 }}>
             <Typography sx={{
-              fontFamily: D.display,
-              fontSize: { xs: '1.15rem', sm: '1.3rem' },
-              lineHeight: 1.15,
-              color: D.navy,
+              fontFamily: D.body, fontSize: '0.72rem', fontWeight: 700,
+              letterSpacing: '0.10em', textTransform: 'uppercase', color: accent,
             }}>
-              {stop.name}
+              {label}
             </Typography>
-
-            {inProg
-              ? (
-                <Chip
-                  label="In progress"
-                  size="small"
-                  sx={{
-                    height: 20,
-                    fontSize: '0.68rem',
-                    fontWeight: 800,
-                    fontFamily: D.body,
-                    letterSpacing: '0.03em',
-                    backgroundColor: alpha(cfg.color, 0.12),
-                    color: cfg.color,
-                  }}
-                />
-              )
-              : startMins !== null
-                ? (
-                  <Chip
-                    label={`at ${fmtMins(startMins)}`}
-                    size="small"
-                    sx={{
-                      height: 20,
-                      fontSize: '0.68rem',
-                      fontWeight: 800,
-                      fontFamily: D.body,
-                      letterSpacing: '0.03em',
-                      backgroundColor: alpha(cfg.color, 0.10),
-                      color: cfg.color,
-                    }}
-                  />
-                )
-                : null}
+            {onDismiss && (
+              <Tooltip title="Done — show what's after">
+                <IconButton
+                  aria-label="Done — show what's after"
+                  onClick={onDismiss}
+                  sx={{ width: 44, height: 44, m: -1.5, color: D.muted, '&:hover': { color: D.navy } }}
+                >
+                  <CloseIcon sx={{ fontSize: '1.1rem' }} />
+                </IconButton>
+              </Tooltip>
+            )}
           </Box>
+
+          <Typography sx={{
+            fontFamily: D.display, fontSize: { xs: '1.25rem', sm: '1.4rem' },
+            color: D.navy, lineHeight: 1.15, letterSpacing: '-0.02em', mt: 0.5,
+          }}>
+            {stop.name}
+          </Typography>
+
+          {endM > startM && (
+            <Typography sx={{ fontFamily: D.body, fontSize: '0.82rem', color: D.muted, mt: 0.25 }}>
+              {when === 'now' ? `Until ${fmtMins(endM)}` : `${fmtMins(startM)}–${fmtMins(endM)}`}
+            </Typography>
+          )}
 
           {stop.reference && (
             <Box sx={{
               display: 'inline-flex', alignItems: 'center',
-              mt: 0.6, px: 1.25, py: 0.35,
-              borderRadius: '6px',
+              mt: 0.75, px: 1.25, py: 0.4, borderRadius: '6px',
               backgroundColor: 'rgba(3,105,161,0.10)',
               border: '1.5px solid rgba(3,105,161,0.3)',
             }}>
-              <Typography sx={{
-                fontFamily: D.body, fontSize: '0.95rem', fontWeight: 800,
-                color: '#0369a1', letterSpacing: '0.03em', lineHeight: 1.3,
-              }}>
+              <Typography sx={{ fontFamily: D.body, fontSize: '0.9rem', fontWeight: 800, color: '#0369a1', letterSpacing: '0.03em', lineHeight: 1.3 }}>
                 {stop.reference}
               </Typography>
             </Box>
           )}
 
-          {linkedFiles.length > 0 && onOpenFile && (
-            <Box sx={{ display: 'flex', gap: 0.75, mt: 0.75, flexWrap: 'wrap' }}>
-              {linkedFiles.map((f: any) => (
-                <Button
-                  key={f._id}
-                  size="small"
-                  startIcon={<AttachFileIcon sx={{ fontSize: '0.8rem !important' }} />}
-                  onClick={() => onOpenFile(f)}
-                  sx={{
-                    fontFamily: D.body, fontSize: '0.72rem', fontWeight: 700,
-                    py: 0.3, px: 1, minHeight: 28,
-                    backgroundColor: 'rgba(8,145,178,0.08)', color: '#0891b2',
-                    border: '1px solid rgba(8,145,178,0.2)', borderRadius: '6px',
-                    '&:hover': { backgroundColor: 'rgba(8,145,178,0.14)' },
-                  }}
-                >
-                  {f.name.length > 22 ? `${f.name.slice(0, 22)}…` : f.name}
-                </Button>
-              ))}
-            </Box>
-          )}
-
-          {remaining !== null && (
-            <Typography sx={{
-              color: cfg.color,
-              fontWeight: 800,
-              mt: 0.35,
-              fontSize: '0.92rem',
-              fontFamily: D.body,
-            }}>
-              {remaining < 60
-                ? `${remaining} min${remaining !== 1 ? 's' : ''} remaining`
-                : `${Math.floor(remaining / 60)}h ${remaining % 60}m remaining`}
-            </Typography>
-          )}
-
-          {!inProg && startMins !== null && endM !== null && (
-            <Typography sx={{
-              fontSize: '0.82rem',
-              mt: 0.25,
-              color: D.muted,
-              fontFamily: D.body,
-            }}>
-              Until {fmtMins(endM)}
-            </Typography>
-          )}
-
           {stop.address && (
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mt: 0.7 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mt: 0.75 }}>
               <LocationOnIcon sx={{ fontSize: 14, color: D.muted }} />
-              <Typography sx={{
-                fontSize: '0.82rem',
-                color: D.muted,
-                lineHeight: 1.4,
-                fontFamily: D.body,
-              }}>
+              <Typography sx={{ fontFamily: D.body, fontSize: '0.8rem', color: D.muted, lineHeight: 1.4 }}>
                 {stop.address}
               </Typography>
             </Box>
           )}
 
           {stop.notes && (
-            <Typography sx={{
-              fontSize: '0.82rem',
-              mt: 0.65,
-              color: D.muted,
-              lineHeight: 1.45,
-              fontFamily: D.body,
-            }}>
+            <Typography sx={{ fontFamily: D.body, fontSize: '0.78rem', color: D.muted, mt: 0.5, fontStyle: 'italic', lineHeight: 1.45 }}>
               {stop.notes}
             </Typography>
           )}
 
-          {hasLoc && (
-            <MapButtons name={stop.name} address={stop.address} coordinates={stop.coordinates} />
+          {(hasLoc || linkedFiles.length > 0) && (
+            <Box sx={{ display: 'flex', gap: 1, mt: 1.5, flexWrap: 'wrap', alignItems: 'center' }}>
+              {hasLoc && (
+                <NavigateButton
+                  destination={{ name: stop.name, address: stop.address, coordinates: stop.coordinates ?? null }}
+                  suggestedMode="walking" variant="button" label="Navigate"
+                />
+              )}
+              {linkedFiles.map((f: any) => (
+                <Button
+                  key={f._id}
+                  startIcon={<AttachFileIcon sx={{ fontSize: '0.9rem !important' }} />}
+                  onClick={() => onOpenFile(f)}
+                  sx={{
+                    fontFamily: D.body, fontSize: '0.78rem', fontWeight: 700, textTransform: 'none',
+                    minHeight: 44, px: 1.5,
+                    backgroundColor: 'rgba(8,145,178,0.08)', color: '#0891b2',
+                    border: '1px solid rgba(8,145,178,0.2)', borderRadius: '8px',
+                    '&:hover': { backgroundColor: 'rgba(8,145,178,0.14)' },
+                  }}
+                >
+                  {f.name.length > 24 ? `${f.name.slice(0, 24)}…` : f.name}
+                </Button>
+              ))}
+            </Box>
           )}
         </Box>
       </Box>
@@ -483,433 +266,44 @@ function RightNowCard({ stop, startMins, nowMins, linkedFiles = [], onOpenFile }
   );
 }
 
-// ─── Timeline row ─────────────────────────────────────────────────────────────
-
-function TimelineRow({ item, past, linkedFiles = [], onOpenFile }: {
-  item: TimelineItem; past: boolean;
-  linkedFiles?: any[]; onOpenFile?: (f: any) => void;
-}) {
-  if (item.kind === 'stop') {
-    const { stop } = item;
-    const cfg  = STOP_CONFIG[stop.type] ?? STOP_CONFIG.other;
-    const Icon = cfg.Icon;
-    const hasLoc = !!(stop.address || stop.coordinates);
-
-    return (
-      <Box sx={{
-        display: 'flex',
-        gap: 1.5,
-        py: 1.6,
-        px: { xs: 2, sm: 2.5 },
-        opacity: past ? 0.45 : 1,
-        backgroundColor: stop.completed ? alpha(D.green, 0.03) : 'transparent',
-      }}>
-        <Box sx={{
-          width: 36,
-          height: 36,
-          borderRadius: '10px',
-          flexShrink: 0,
-          mt: 0.15,
-          backgroundColor: alpha(cfg.color, 0.10),
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}>
-          {stop.completed
-            ? <CheckCircleIcon sx={{ fontSize: 18, color: cfg.color }} />
-            : <Icon sx={{ fontSize: 17, color: cfg.color }} />
-          }
-        </Box>
-
-        <Box sx={{ flexGrow: 1, minWidth: 0 }}>
-          <Box sx={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 1 }}>
-            <Typography sx={{
-              fontSize: '0.94rem',
-              fontWeight: 800,
-              color: D.navy,
-              lineHeight: 1.35,
-              fontFamily: D.body,
-            }}>
-              {stop.name}
-            </Typography>
-
-            {item.sortMins >= 0 && (
-              <Typography sx={{
-                fontSize: '0.74rem',
-                flexShrink: 0,
-                color: D.muted,
-                fontFamily: D.body,
-              }}>
-                {fmtMins(item.sortMins)}
-              </Typography>
-            )}
-          </Box>
-
-          {stop.reference && (
-            <Typography sx={{
-              fontSize: '0.74rem', fontWeight: 800, color: '#0369a1',
-              display: 'block', mt: 0.2, fontFamily: D.body,
-            }}>
-              {stop.reference}
-            </Typography>
-          )}
-
-          {stop.address && (
-            <Typography sx={{
-              fontSize: '0.78rem',
-              color: D.muted,
-              mt: 0.15,
-              lineHeight: 1.4,
-              fontFamily: D.body,
-            }}>
-              {stop.address}
-            </Typography>
-          )}
-
-          {hasLoc && <MapButtons name={stop.name} address={stop.address} coordinates={stop.coordinates} />}
-
-          {linkedFiles.length > 0 && onOpenFile && (
-            <Box sx={{ display: 'flex', gap: 0.5, mt: 0.6, flexWrap: 'wrap' }}>
-              {linkedFiles.map((f: any) => (
-                <Button
-                  key={f._id}
-                  size="small"
-                  startIcon={<AttachFileIcon sx={{ fontSize: '0.75rem !important' }} />}
-                  onClick={() => onOpenFile(f)}
-                  sx={{
-                    fontFamily: D.body, fontSize: '0.68rem', fontWeight: 700,
-                    py: 0.2, px: 0.75, minHeight: 24,
-                    backgroundColor: 'rgba(8,145,178,0.08)', color: '#0891b2',
-                    border: '1px solid rgba(8,145,178,0.2)', borderRadius: '6px',
-                    '&:hover': { backgroundColor: 'rgba(8,145,178,0.14)' },
-                  }}
-                >
-                  {f.name.length > 20 ? `${f.name.slice(0, 20)}…` : f.name}
-                </Button>
-              ))}
-            </Box>
-          )}
-        </Box>
-      </Box>
-    );
-  }
-
-  if (item.kind === 'transport') {
-    const { transport: t, event } = item;
-    const TIcon  = TRANSPORT_ICON[t.type] ?? FlightIcon;
-    const color  = t.type === 'flight' ? D.terra : t.type === 'train' ? '#0369a1' : D.green;
-    const isArr  = event === 'arrival';
-    const label  = isArr ? `Arrive ${t.arrivalLocation}` : `${TRANSPORT_LABEL[t.type] ?? 'Depart'} — ${t.departureLocation} → ${t.arrivalLocation}`;
-    const time   = isArr ? t.arrivalTime : t.departureTime;
-    const subline = t.type === 'flight'
-      ? [t.details.airline, t.details.flightNumber].filter(Boolean).join(' ')
-      : t.details.operator ?? '';
-
-    return (
-      <Box sx={{
-        display: 'flex',
-        gap: 1.5,
-        py: 1.6,
-        px: { xs: 2, sm: 2.5 },
-        opacity: past ? 0.45 : 1,
-      }}>
-        <Box sx={{
-          width: 36,
-          height: 36,
-          borderRadius: '10px',
-          flexShrink: 0,
-          mt: 0.15,
-          backgroundColor: alpha(color, 0.10),
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}>
-          <TIcon sx={{ fontSize: 17, color }} />
-        </Box>
-
-        <Box sx={{ flexGrow: 1, minWidth: 0 }}>
-          <Box sx={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 1 }}>
-            <Typography sx={{
-              fontSize: '0.94rem',
-              fontWeight: 800,
-              color: D.navy,
-              lineHeight: 1.35,
-              fontFamily: D.body,
-            }}>
-              {label}
-            </Typography>
-
-            {time && (
-              <Typography sx={{
-                fontSize: '0.74rem',
-                flexShrink: 0,
-                color: D.muted,
-                fontFamily: D.body,
-              }}>
-                {fmtTime(time)}
-              </Typography>
-            )}
-          </Box>
-
-          {subline && (
-            <Typography sx={{
-              fontSize: '0.78rem',
-              color: D.muted,
-              mt: 0.15,
-              lineHeight: 1.4,
-              fontFamily: D.body,
-            }}>
-              {subline}
-            </Typography>
-          )}
-
-          {t.confirmationNumber && (
-            <Typography sx={{
-              fontSize: '0.74rem',
-              fontWeight: 800,
-              color,
-              display: 'block',
-              mt: 0.35,
-              fontFamily: D.body,
-            }}>
-              Ref: {t.confirmationNumber}
-            </Typography>
-          )}
-
-          <Chip
-            label={t.status.replace('_', ' ')}
-            size="small"
-            sx={{
-              mt: 0.55,
-              height: 18,
-              fontSize: '0.65rem',
-              fontWeight: 800,
-              fontFamily: D.body,
-              letterSpacing: '0.03em',
-              backgroundColor: alpha(STATUS_COLOR[t.status] ?? '#6b7280', 0.10),
-              color: STATUS_COLOR[t.status] ?? '#6b7280',
-            }}
-          />
-
-          {linkedFiles.length > 0 && onOpenFile && (
-            <Box sx={{ display: 'flex', gap: 0.5, mt: 0.6, flexWrap: 'wrap' }}>
-              {linkedFiles.map((f: any) => (
-                <Button
-                  key={f._id}
-                  size="small"
-                  startIcon={<AttachFileIcon sx={{ fontSize: '0.75rem !important' }} />}
-                  onClick={() => onOpenFile(f)}
-                  sx={{
-                    fontFamily: D.body, fontSize: '0.68rem', fontWeight: 700,
-                    py: 0.2, px: 0.75, minHeight: 24,
-                    backgroundColor: 'rgba(8,145,178,0.08)', color: '#0891b2',
-                    border: '1px solid rgba(8,145,178,0.2)', borderRadius: '6px',
-                    '&:hover': { backgroundColor: 'rgba(8,145,178,0.14)' },
-                  }}
-                >
-                  {f.name.length > 20 ? `${f.name.slice(0, 20)}…` : f.name}
-                </Button>
-              ))}
-            </Box>
-          )}
-        </Box>
-      </Box>
-    );
-  }
-
-  const { accom: a, event } = item;
-  const isCheckIn = event === 'checkin';
-  const EventIcon2 = isCheckIn ? LoginIcon : LogoutIcon;
-  const color = '#5c35a0';
-
-  return (
-    <Box sx={{
-      display: 'flex',
-      gap: 1.5,
-      py: 1.6,
-      px: { xs: 2, sm: 2.5 },
-      opacity: past ? 0.45 : 1,
-    }}>
-      <Box sx={{
-        width: 36,
-        height: 36,
-        borderRadius: '10px',
-        flexShrink: 0,
-        mt: 0.15,
-        backgroundColor: alpha(color, 0.10),
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-      }}>
-        <EventIcon2 sx={{ fontSize: 17, color }} />
-      </Box>
-
-      <Box sx={{ flexGrow: 1, minWidth: 0 }}>
-        <Box sx={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 1 }}>
-          <Typography sx={{
-            fontSize: '0.94rem',
-            fontWeight: 800,
-            color: D.navy,
-            lineHeight: 1.35,
-            fontFamily: D.body,
-          }}>
-            {isCheckIn ? `Check in — ${a.name}` : `Check out — ${a.name}`}
-          </Typography>
-        </Box>
-
-        {a.address && (
-          <Typography sx={{
-            fontSize: '0.78rem',
-            color: D.muted,
-            mt: 0.15,
-            lineHeight: 1.4,
-            fontFamily: D.body,
-          }}>
-            {a.address}
-          </Typography>
-        )}
-
-        {a.confirmationNumber && (
-          <Typography sx={{
-            fontSize: '0.74rem',
-            fontWeight: 800,
-            color,
-            display: 'block',
-            mt: 0.35,
-            fontFamily: D.body,
-          }}>
-            Ref: {a.confirmationNumber}
-          </Typography>
-        )}
-
-        {a.address && <MapButtons name={a.name} address={a.address} />}
-
-        {linkedFiles.length > 0 && onOpenFile && (
-          <Box sx={{ display: 'flex', gap: 0.5, mt: 0.6, flexWrap: 'wrap' }}>
-            {linkedFiles.map((f: any) => (
-              <Button
-                key={f._id}
-                size="small"
-                startIcon={<AttachFileIcon sx={{ fontSize: '0.75rem !important' }} />}
-                onClick={() => onOpenFile(f)}
-                sx={{
-                  fontFamily: D.body, fontSize: '0.68rem', fontWeight: 700,
-                  py: 0.2, px: 0.75, minHeight: 24,
-                  backgroundColor: 'rgba(8,145,178,0.08)', color: '#0891b2',
-                  border: '1px solid rgba(8,145,178,0.2)', borderRadius: '6px',
-                  '&:hover': { backgroundColor: 'rgba(8,145,178,0.14)' },
-                }}
-              >
-                {f.name.length > 20 ? `${f.name.slice(0, 20)}…` : f.name}
-              </Button>
-            ))}
-          </Box>
-        )}
-      </Box>
-    </Box>
-  );
-}
-
 // ─── Todo row ─────────────────────────────────────────────────────────────────
 
-function TodoRow({ todo, onComplete }: { todo: Todo; onComplete: (id: string) => void }) {
-  const [completing, setCompleting] = useState(false);
+function TodoRow({ todo, now, onComplete }: { todo: Todo; now: Date; onComplete: (todo: Todo) => void }) {
   const isPacking = todo.type === 'packing_advisory';
-  const color = isPacking ? '#b45309' : D.navy;
-  const isOverdue = todo.dueAt && new Date(todo.dueAt) < new Date();
-
-  const handle = async () => {
-    setCompleting(true);
-    await onComplete(todo._id);
-    setCompleting(false);
-  };
+  const color     = isPacking ? '#b45309' : D.navy;
+  const isOverdue = !!todo.dueAt && new Date(todo.dueAt) < now;
 
   return (
-    <Box sx={{
-      display: 'flex',
-      gap: 1.5,
-      py: 1.6,
-      px: { xs: 2, sm: 2.5 },
-      alignItems: 'flex-start',
-    }}>
-      <IconButton
-        size="small"
-        onClick={handle}
-        disabled={completing}
-        sx={{
-          p: 0.5,
-          flexShrink: 0,
-          mt: 0.15,
-          color: D.muted,
-        }}
-      >
-        {completing
-          ? <CircularProgress size={20} sx={{ color: D.green }} />
-          : <CheckBoxOutlineBlankIcon sx={{ fontSize: 22 }} />
-        }
+    <Box sx={{ display: 'flex', gap: 1, py: 1, pr: { xs: 2, sm: 2.5 }, pl: 0.5, alignItems: 'flex-start' }}>
+      <IconButton aria-label={`Mark “${todo.name}” done`} onClick={() => onComplete(todo)}
+        sx={{ width: 44, height: 44, flexShrink: 0, color: D.muted }}>
+        <CheckBoxOutlineBlankIcon sx={{ fontSize: 22 }} />
       </IconButton>
 
-      <Box sx={{
-        width: 3,
-        alignSelf: 'stretch',
-        borderRadius: 2,
-        backgroundColor: isOverdue ? '#dc2626' : color,
-        flexShrink: 0,
-      }} />
+      <Box sx={{ width: 3, alignSelf: 'stretch', my: 0.75, borderRadius: 2, backgroundColor: isOverdue ? '#dc2626' : color, flexShrink: 0 }} />
 
-      <Box sx={{ flexGrow: 1, minWidth: 0 }}>
+      <Box sx={{ flexGrow: 1, minWidth: 0, py: 0.75 }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, flexWrap: 'wrap' }}>
           {isPacking && <BoltIcon sx={{ fontSize: 14, color: '#b45309' }} />}
-
-          <Typography sx={{
-            fontSize: '0.94rem',
-            fontWeight: 800,
-            color: D.navy,
-            lineHeight: 1.35,
-            fontFamily: D.body,
-          }}>
+          <Typography sx={{ fontFamily: D.body, fontSize: '0.94rem', fontWeight: 800, color: D.navy, lineHeight: 1.35 }}>
             {todo.name}
           </Typography>
-
           {isOverdue && (
-            <Chip
-              label="Overdue"
-              size="small"
-              sx={{
-                height: 18,
-                fontSize: '0.65rem',
-                fontWeight: 800,
-                fontFamily: D.body,
-                letterSpacing: '0.03em',
-                backgroundColor: alpha('#dc2626', 0.10),
-                color: '#dc2626',
-              }}
-            />
+            <Chip label="Overdue" size="small" sx={{
+              height: 18, fontSize: '0.65rem', fontWeight: 800, fontFamily: D.body, letterSpacing: '0.03em',
+              backgroundColor: alpha('#dc2626', 0.10), color: '#dc2626',
+            }} />
           )}
         </Box>
 
         {todo.body && (
-          <Typography sx={{
-            fontSize: '0.78rem',
-            display: 'block',
-            mt: 0.2,
-            color: D.muted,
-            lineHeight: 1.45,
-            fontFamily: D.body,
-          }}>
+          <Typography sx={{ fontFamily: D.body, fontSize: '0.78rem', mt: 0.2, color: D.muted, lineHeight: 1.45 }}>
             {todo.body.length > 120 ? `${todo.body.slice(0, 120)}…` : todo.body}
           </Typography>
         )}
 
         {todo.dueAt && (
-          <Typography sx={{
-            fontSize: '0.74rem',
-            fontWeight: 700,
-            color: isOverdue ? '#dc2626' : D.muted,
-            display: 'block',
-            mt: 0.3,
-            fontFamily: D.body,
-          }}>
+          <Typography sx={{ fontFamily: D.body, fontSize: '0.74rem', fontWeight: 700, mt: 0.3, color: isOverdue ? '#dc2626' : D.muted }}>
             {isOverdue ? 'Was due' : 'Due'} {new Date(todo.dueAt).toLocaleTimeString('en-IE', { hour: '2-digit', minute: '2-digit' })}
           </Typography>
         )}
@@ -918,85 +312,65 @@ function TodoRow({ todo, onComplete }: { todo: Todo; onComplete: (id: string) =>
   );
 }
 
-// ─── Main ─────────────────────────────────────────────────────────────────────
+// ─── Now + due today ──────────────────────────────────────────────────────────
 
-export default function OnTripScreen({ tripId, trip }: OnTripScreenProps) {
-  const [itinerary,  setItinerary]  = useState<ItineraryDay[]>([]);
-  const [logistics,  setLogistics]  = useState<{ transportation: Transport[]; accommodation: Accommodation[] } | null>(null);
-  const [todos,      setTodos]      = useState<Todo[]>([]);
-  const [loading,        setLoading]        = useState(true);
-  const [refreshing,     setRefreshing]     = useState(false);
-  const [now,            setNow]            = useState(new Date());
-  const [dismissedIds,   setDismissedIds]   = useState<Set<string>>(new Set());
-  const [myAppIds,       setMyAppIds]       = useState<string[]>([]);
-  const [todayOpen,      setTodayOpen]      = useState(false);
-  const [filesByStop,    setFilesByStop]    = useState<Map<string, any[]>>(new Map());
-  const [viewerFile,     setViewerFile]     = useState<ViewableFile | null>(null);
+export function OnTripNow({ tripId, days, files, now, onFilesChange, onOpenFile }: {
+  tripId: string;
+  days:   ItineraryDay[];
+  files:  any[];
+  now:    Date;
+  onFilesChange: (update: (files: any[]) => any[]) => void;
+  onOpenFile:    (f: any) => void;
+}) {
+  const [dismissed, setDismissed] = useState<Set<string>>(new Set());
 
-  useEffect(() => {
-    const id = setInterval(() => setNow(new Date()), 60_000);
-    return () => clearInterval(id);
-  }, []);
+  const nowMins  = now.getHours() * 60 + now.getMinutes();
+  const today    = localYmd(now);
+  const tomorrow = localYmd(new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1));
 
-  useEffect(() => {
-    fetch('/api/user/my-apps').then(r => r.json()).then(data => {
-      if (Array.isArray(data.myApps)) setMyAppIds(data.myApps);
-    }).catch(() => {});
-  }, []);
+  const timedOn = (date: string) =>
+    (days.find(d => String(d.date).slice(0, 10) === date)?.stops ?? [])
+      .filter(s => !s.skipped)
+      .map(stop => ({ stop, startM: stopStartMinutes(stop) }))
+      .filter((x): x is { stop: Stop; startM: number } => x.startM !== null)
+      .sort((a, b) => a.startM - b.startM);
 
-  const load = useCallback(async (quiet = false) => {
-    if (quiet) setRefreshing(true); else setLoading(true);
+  const todayTimed = timedOn(today);
+  const inProgress = todayTimed.find(x => nowMins >= x.startM && nowMins < x.startM + (x.stop.duration || 0));
+  const nextToday  = [
+    ...(inProgress ? [inProgress] : []),
+    ...todayTimed.filter(x => x !== inProgress && x.startM >= nowMins),
+  ].find(x => !dismissed.has(stopKey(x.stop)));
+  const firstTomorrow = timedOn(tomorrow)[0];
+
+  const pick: Pick | null =
+    nextToday     ? { ...nextToday, when: nextToday === inProgress ? 'now' : 'today' } :
+    firstTomorrow ? { ...firstTomorrow, when: 'tomorrow' } :
+    null;
+
+  // Files attached to the stop itself or to the booking it mirrors.
+  const ref = pick?.stop.logisticsRef;
+  const linkedFiles = pick ? files.filter(f =>
+    f.resourceType === 'file' && !!f.linkedTo?.entryId && (
+      f.linkedTo.entryId === pick.stop._id ||
+      (!!ref && f.linkedTo.collection === ref.collection && f.linkedTo.entryId === String(ref.index))
+    )) : [];
+
+  const endOfToday = new Date(now); endOfToday.setHours(23, 59, 59, 999);
+  const todos: Todo[] = files
+    .filter(f => f.resourceType === 'todo' && !f.completed && f.dueAt && new Date(f.dueAt) <= endOfToday)
+    .sort((a, b) => new Date(a.dueAt).getTime() - new Date(b.dueAt).getTime());
+
+  const setCompleted = (id: string, completed: boolean) =>
+    onFilesChange(fs => fs.map(f => (f._id === id ? { ...f, completed } : f)));
+
+  // Leaves the list at once; comes back, with an error toast, if it doesn't save.
+  const completeTodo = async (todo: Todo) => {
+    setCompleted(todo._id, true);
     try {
-      const [itin, log, files] = await Promise.all([
-        fetch(`/api/trips/${tripId}/itinerary`).then(r => r.json()),
-        fetch(`/api/trips/${tripId}/logistics`).then(r => r.json()),
-        fetch(`/api/trips/${tripId}/files`).then(r => r.json()),
-      ]);
-      setItinerary(itin.days ?? []);
-      setLogistics(log.logistics ?? null);
-
-      const todayEnd = new Date();
-      todayEnd.setHours(23, 59, 59, 999);
-      const allFiles = (files.files ?? []) as any[];
-
-      setTodos(
-        allFiles
-          .filter(f =>
-            f.resourceType === 'todo' &&
-            !f.completed &&
-            f.dueAt &&
-            new Date(f.dueAt) <= todayEnd
-          )
-          .sort((a: any, b: any) => new Date(a.dueAt).getTime() - new Date(b.dueAt).getTime())
-      );
-
-      const map = new Map<string, any[]>();
-      for (const f of allFiles) {
-        if (f.resourceType === 'file' && f.linkedTo?.entryId) {
-          const entry = f;
-          const k1 = f.linkedTo.entryId;
-          const arr1 = map.get(k1) ?? []; arr1.push(entry); map.set(k1, arr1);
-          if (f.linkedTo.collection) {
-            const k2 = `${f.linkedTo.collection}:${f.linkedTo.entryId}`;
-            const arr2 = map.get(k2) ?? []; arr2.push(entry); map.set(k2, arr2);
-          }
-        }
-      }
-      setFilesByStop(map);
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, [tripId]);
-
-  useEffect(() => { load(); }, [load]);
-
-  const completeTodo = async (id: string) => {
-    setTodos(prev => prev.filter(t => t._id !== id));
-    try {
-      await sendOrQueue(
-        { type: 'COMPLETE_TODO', tripId, fileId: id },
-        () => fetch(`/api/trips/${tripId}/files/${id}`, {
+      const res = await sendOrQueue(
+        { type: 'COMPLETE_TODO', tripId, fileId: todo._id },
+        () => fetch(`/api/trips/${tripId}/files/${todo._id}`, {
           method:  'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body:    JSON.stringify({ completed: true }),
@@ -1004,293 +378,88 @@ export default function OnTripScreen({ tripId, trip }: OnTripScreenProps) {
         {
           [`/api/trips/${tripId}/files`]: saved => saved?.files && {
             ...saved,
-            files: saved.files.map((f: any) => (f._id === id ? { ...f, completed: true } : f)),
+            files: saved.files.map((f: any) => (f._id === todo._id ? { ...f, completed: true } : f)),
           },
         },
       );
-    } catch {
-      load(true);
+      if (!res) return;
+      const data = await readSaved(res);
+      if (!data.file) throw new Error('No file in response');
+    } catch (err) {
+      setCompleted(todo._id, false);
+      reportSaveFailure(`“${todo.name}” as done`, err);
     }
   };
 
-  // ── Derived ───────────────────────────────────────────────────────────────
-
-  const today   = todayIso();
-  const nowMins = now.getHours() * 60 + now.getMinutes();
-  const dayNum  = dayOfTrip(trip.startDate);
-  const totalNights = trip.nights ?? tripNights(trip.startDate, trip.endDate);
-  const totalDays   = totalNights + 1;
-
-  const todayDay   = itinerary.find(d => d.date.split('T')[0] === today);
-  const todayStops = (todayDay?.stops ?? []).filter(s => !(s as any).skipped);
-
-  const timedStops = todayStops
-    .map(s => ({ stop: s, startM: stopStartMinutes(s) }))
-    .filter(x => x.startM !== null)
-    .sort((a, b) => a.startM! - b.startM!);
-
-  const inProgress = timedStops.find(x => {
-    const endM = x.startM! + x.stop.duration;
-    return nowMins >= x.startM! && nowMins < endM;
-  });
-
-  const candidates = [
-    ...(inProgress ? [inProgress] : []),
-    ...timedStops.filter(x => x.startM! > nowMins),
-  ].filter(x => !dismissedIds.has(x.stop._id ?? ''));
-
-  const rightNow = candidates[0] ?? null;
-  const isRightNowInProgress = rightNow === inProgress;
-
-  const timelineItems: TimelineItem[] = [];
-
-  for (const stop of todayStops) {
-    const startM = stopStartMinutes(stop) ?? -1;
-    timelineItems.push({ kind: 'stop', sortMins: startM, stop });
-  }
-
-  for (const [tIdx, t] of (logistics?.transportation ?? []).entries()) {
-    if (t.departureTime) {
-      const depDate = t.departureTime.split('T')[0];
-      if (depDate === today) {
-        timelineItems.push({ kind: 'transport', sortMins: isoToMins(t.departureTime), transport: t, event: 'departure', logisticsIndex: tIdx });
-      }
-    }
-    if (t.arrivalTime) {
-      const arrDate = t.arrivalTime.split('T')[0];
-      if (arrDate === today) {
-        timelineItems.push({ kind: 'transport', sortMins: isoToMins(t.arrivalTime), transport: t, event: 'arrival', logisticsIndex: tIdx });
-      }
-    }
-  }
-
-  for (const [aIdx, a] of (logistics?.accommodation ?? []).entries()) {
-    if (a.checkIn?.split('T')[0] === today) {
-      const mins = a.checkIn.includes('T') ? isoToMins(a.checkIn) : 14 * 60;
-      timelineItems.push({ kind: 'accom', sortMins: mins, accom: a, event: 'checkin', logisticsIndex: aIdx });
-    }
-    if (a.checkOut?.split('T')[0] === today) {
-      const mins = a.checkOut.includes('T') ? isoToMins(a.checkOut) : 11 * 60;
-      timelineItems.push({ kind: 'accom', sortMins: mins, accom: a, event: 'checkout', logisticsIndex: aIdx });
-    }
-  }
-
-  const seenTransportKeys = new Set<string>();
-  const dedupedTimeline = timelineItems
-    .sort((a, b) => {
-      const aM = a.sortMins < 0 ? 99999 : a.sortMins;
-      const bM = b.sortMins < 0 ? 99999 : b.sortMins;
-      return aM - bM;
-    })
-    .filter(item => {
-      if (item.kind === 'stop' && item.stop.source === 'logistics') return false;
-      if (item.kind === 'transport') {
-        const key = `${item.transport.type}-${item.transport.departureLocation}-${item.transport.arrivalLocation}-${item.event}`;
-        if (seenTransportKeys.has(key)) return false;
-        seenTransportKeys.add(key);
-      }
-      return true;
-    });
-
-  // ── Render ────────────────────────────────────────────────────────────────
-
-  if (loading) {
-    return (
-      <Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}>
-        <CircularProgress size={32} sx={{ color: D.green }} />
-      </Box>
-    );
-  }
-
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, mb: 3 }}>
-      {/* ── Header row ── */}
-      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <Box>
-          <Typography sx={{
-            fontFamily: D.display,
-            fontSize: { xs: '1.8rem', sm: '2rem' },
-            color: D.navy,
-            lineHeight: 1,
-          }}>
-            Day {dayNum}
-          </Typography>
-
-          <Typography sx={{
-            fontSize: '0.85rem',
-            color: D.muted,
-            fontFamily: D.body,
-            mt: 0.4,
-          }}>
-            {new Date(today).toLocaleDateString('en-IE', { weekday: 'long', day: 'numeric', month: 'long' })} · {dayNum} of {totalDays}
-          </Typography>
-        </Box>
-
-        <Tooltip title="Refresh">
-          <span>
-            <IconButton onClick={() => load(true)} disabled={refreshing} size="small">
-              {refreshing
-                ? <CircularProgress size={18} sx={{ color: D.green }} />
-                : (
-                  <RefreshIcon sx={{
-                    fontSize: '1.1rem',
-                    color: D.muted,
-                    animation: refreshing ? 'spin 1s linear infinite' : 'none',
-                    '@keyframes spin': {
-                      '0%':   { transform: 'rotate(0deg)' },
-                      '100%': { transform: 'rotate(360deg)' },
-                    },
-                  }} />
-                )
-              }
-            </IconButton>
-          </span>
-        </Tooltip>
-      </Box>
-
-      {/* ── 1. RIGHT NOW / UP NEXT ── */}
-      {rightNow && (
-        <Box>
-          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1.25 }}>
-            <Typography sx={{
-              fontSize: '1.2rem', fontWeight: 800, letterSpacing: '0.1em',
-              textTransform: 'uppercase', color: D.muted, fontFamily: D.body,
-            }}>
-              {isRightNowInProgress ? 'Right now' : 'Up next'}
-            </Typography>
-            <Tooltip title="Dismiss">
-              <IconButton
-                size="small"
-                onClick={() => setDismissedIds(prev => new Set([...prev, rightNow.stop._id ?? '']))}
-                sx={{ p: 0.5, color: D.muted, '&:hover': { color: D.navy } }}
-              >
-                <CloseIcon sx={{ fontSize: '1rem' }} />
-              </IconButton>
-            </Tooltip>
-          </Box>
-          <RightNowCard
-            stop={rightNow.stop}
-            startMins={rightNow.startM}
-            nowMins={nowMins}
-            linkedFiles={(() => {
-              const byId  = filesByStop.get(rightNow.stop._id ?? '') ?? [];
-              const ref   = (rightNow.stop as any).logisticsRef;
-              const byRef = ref ? (filesByStop.get(`${ref.collection}:${String(ref.index)}`) ?? []) : [];
-              const seen  = new Set<string>();
-              return [...byId, ...byRef].filter(f => { if (seen.has(f._id)) return false; seen.add(f._id); return true; });
-            })()}
-            onOpenFile={f => setViewerFile({ _id: f._id, name: f.name, mimeType: f.mimeType, gcsUrl: f.gcsUrl })}
-          />
+    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mb: 3 }}>
+      {pick ? (
+        <NowCard
+          pick={pick}
+          nowMins={nowMins}
+          linkedFiles={linkedFiles}
+          onOpenFile={onOpenFile}
+          onDismiss={pick.when === 'tomorrow' ? undefined : () => setDismissed(prev => new Set([...prev, stopKey(pick.stop)]))}
+        />
+      ) : (
+        <Box sx={{ p: 2.5, border: `1.5px solid ${alpha(D.green, 0.4)}`, borderRadius: '12px', bgcolor: alpha(D.green, 0.04) }}>
+          <Typography sx={{ fontFamily: D.display, fontSize: '0.9rem', color: D.green }}>Nothing more scheduled</Typography>
         </Box>
       )}
 
-      {/* ── 2. TODAY TIMELINE ── */}
-      <Box>
-        <Box
-          onClick={() => setTodayOpen(o => !o)}
-          sx={{
-            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-            cursor: 'pointer', mb: 1.25, userSelect: 'none',
-          }}
-        >
-          <Typography sx={{
-            fontSize: '1.2rem', fontWeight: 800, letterSpacing: '0.1em',
-            textTransform: 'uppercase', color: D.muted, fontFamily: D.body,
-          }}>
-            Today
-          </Typography>
-          {todayOpen
-            ? <ExpandLessIcon sx={{ fontSize: '1.1rem', color: D.muted }} />
-            : <ExpandMoreIcon sx={{ fontSize: '1.1rem', color: D.muted }} />
-          }
-        </Box>
-
-        <Collapse in={todayOpen}>
-          {dedupedTimeline.length > 0 ? (
-            <Paper elevation={0} sx={{
-              border: `1.5px solid ${D.rule}`,
-              borderRadius: '12px',
-              overflow: 'hidden',
-              backgroundColor: D.paper,
-            }}>
-              {dedupedTimeline.map((item, i) => {
-                const past = item.sortMins >= 0 && item.sortMins < nowMins;
-                return (
-                  <Box key={i}>
-                    {i > 0 && <Divider sx={{ borderColor: D.rule }} />}
-                    <TimelineRow
-                      item={item}
-                      past={past}
-                      linkedFiles={
-                      item.kind === 'stop'      ? (filesByStop.get(item.stop._id ?? '') ?? []) :
-                      item.kind === 'transport' ? (filesByStop.get(`transport:${String((item as any).logisticsIndex)}`) ?? []) :
-                                                  (filesByStop.get(`accommodation:${String((item as any).logisticsIndex)}`) ?? [])
-                    }
-                      onOpenFile={f => setViewerFile({ _id: f._id, name: f.name, mimeType: f.mimeType, gcsUrl: f.gcsUrl })}
-                    />
-                  </Box>
-                );
-              })}
-            </Paper>
-          ) : (
-            <Paper elevation={0} sx={{
-              p: 3,
-              textAlign: 'center',
-              border: `1.5px solid ${D.rule}`,
-              borderRadius: '12px',
-              backgroundColor: D.paper,
-            }}>
-              <Typography sx={{
-                fontSize: '0.95rem',
-                fontWeight: 700,
-                color: D.muted,
-                fontFamily: D.body,
-              }}>
-                Nothing scheduled for today
-              </Typography>
-            </Paper>
-          )}
-        </Collapse>
-      </Box>
-
-      {/* ── 3. ACTION NEEDED (todos due today / overdue) ── */}
       {todos.length > 0 && (
         <Box>
-          <SectionLabel>
-            <Box component="span" sx={{ display: 'flex', alignItems: 'center', gap: 0.6 }}>
-              <AssignmentIcon sx={{ fontSize: 14, color: D.muted }} />
-              {'Action needed'}
-            </Box>
-          </SectionLabel>
-
-          <Paper elevation={0} sx={{
-            border: `1.5px solid ${D.rule}`,
-            borderRadius: '12px',
-            overflow: 'hidden',
-            backgroundColor: D.paper,
-          }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, mb: 1 }}>
+            <AssignmentIcon sx={{ fontSize: 14, color: D.muted }} />
+            <Typography sx={{
+              fontFamily: D.body, fontSize: '0.72rem', fontWeight: 700,
+              letterSpacing: '0.10em', textTransform: 'uppercase', color: D.muted,
+            }}>
+              Due today
+            </Typography>
+          </Box>
+          <Paper elevation={0} sx={{ border: `1.5px solid ${D.rule}`, borderRadius: '12px', overflow: 'hidden', backgroundColor: D.paper }}>
             {todos.map((todo, i) => (
               <Box key={todo._id}>
                 {i > 0 && <Divider sx={{ borderColor: D.rule }} />}
-                <TodoRow todo={todo} onComplete={completeTodo} />
+                <TodoRow todo={todo} now={now} onComplete={completeTodo} />
               </Box>
             ))}
           </Paper>
         </Box>
       )}
+    </Box>
+  );
+}
 
-      {/* ── 4. GET AROUND — always visible for the full trip ── */}
-      {trip.destination.countryCode && (
-        <ArrivalTransportCard
-          countryCode={trip.destination.countryCode}
-          cityName={trip.destination.city}
-        />
-      )}
+// ─── Get around + my apps ─────────────────────────────────────────────────────
 
-      {/* ── 5. QUICK LAUNCH — rides and navigation only in this context ── */}
+export function OnTripGetAround({ trip, transportation, now }: {
+  trip: OnTripTrip;
+  transportation: any[];
+  now: Date;
+}) {
+  const [myAppIds, setMyAppIds] = useState<string[]>([]);
+
+  useEffect(() => {
+    fetch('/api/user/my-apps').then(r => r.json()).then(data => {
+      if (Array.isArray(data.myApps)) setMyAppIds(data.myApps);
+    }).catch(() => {});
+  }, []);
+
+  const home = useMemo(
+    () => ({ countryCode: trip.origin?.countryCode ?? null, zone: placeTz(trip.origin) ?? undefined }),
+    [trip.origin],
+  );
+  const legs  = useMemo(() => buildLegs(trip, transportation, home), [trip, transportation, home]);
+  const place = placeAt(trip, legs, home, now.getTime());
+
+  if (!place?.countryCode && myAppIds.length === 0) return null;
+
+  return (
+    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
+      {place?.countryCode && <ArrivalTransportCard countryCode={place.countryCode} cityName={place.city} />}
       <QuickLaunchCard myAppIds={myAppIds} onlyTransport />
-
-      <DocumentViewer file={viewerFile} onClose={() => setViewerFile(null)} />
     </Box>
   );
 }

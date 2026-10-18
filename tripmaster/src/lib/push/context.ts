@@ -10,6 +10,7 @@ import { drivingTime, estimateDrive } from '@/lib/geo/drive';
 import { buildLegs, coords, departurePoint, setOffPoint } from '@/lib/push/journey';
 import { placeTz, tripZones } from '@/lib/push/timezones';
 import { resolvePrefs } from '@/lib/push/prefs';
+import { packingCounts } from '@/lib/packing/counts';
 import type { DriveTimes, NavApp, Recipient, TripData } from '@/lib/push/plan';
 
 const DEFAULT_AIRPORT_BUFFER_MIN = 120;
@@ -23,7 +24,7 @@ export async function loadTripData(trip: any): Promise<TripData> {
     TripLogistics.findOne({ tripId }).lean(),
     TripFile.find({ tripId }).lean(),
     TripExpense.find({ tripId }).lean(),
-    TripPacking.findOne({ tripId }).select('items.packed').lean(),
+    TripPacking.findOne({ tripId }).select('items.packed items.skipped').lean(),
   ]);
   const items = ((packing as any)?.items ?? []) as any[];
   return {
@@ -32,7 +33,7 @@ export async function loadTripData(trip: any): Promise<TripData> {
     itinerary,
     files:    (files ?? []) as any[],
     expenses: (expenses ?? []) as any[],
-    packing:  items.length ? { packed: items.filter(i => i?.packed).length, total: items.length } : null,
+    packing:  items.length ? packingCounts(items) : null,
   };
 }
 
