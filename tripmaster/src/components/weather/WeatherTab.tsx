@@ -54,17 +54,22 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
 
 // ─── Day card ──────────────────────────────────────────────────────────────────
 
-function DayCard({ day, isToday, showCity, onOpen }: {
-  day: DayWeather; isToday: boolean; showCity: boolean; onOpen: () => void;
+// Every card is built from fixed one-line rows — weekday, date, rain amount,
+// rain chance — so a wider weekday ("Wed") or a longer rain reading never wraps
+// and pushes the rest of that card out of line with its neighbours.
+const cardDate = (date: string, opts: Intl.DateTimeFormatOptions) =>
+  new Date(`${date}T12:00:00Z`).toLocaleDateString('en-IE', { ...opts, timeZone: 'UTC' });
+
+function DayCard({ day, isToday, showCity, typicalSlot, onOpen }: {
+  day: DayWeather; isToday: boolean; showCity: boolean; typicalSlot: boolean; onOpen: () => void;
 }) {
   const { Icon, color } = weatherIcon(day.code, day.condition);
   const typical = day.source === 'historical';
   const wet     = isWetDay(day);
-  const rain = typical
-    ? `${day.chanceOfRain ?? 0}%`
-    : day.precipMm >= 0.1
-      ? `${day.precipMm} mm${day.chanceOfRain != null ? ` · ${day.chanceOfRain}%` : ''}`
-      : 'Dry';
+  // Daytime rain: the models' median amount, and the chance of 1 mm or more.
+  const dry = typical ? (day.chanceOfRain ?? 0) < 10 : day.precipMm < 0.1 && (day.chanceOfRain ?? 0) < 35;
+  const rainAmount = dry ? 'Dry' : `${typical ? '~' : ''}${day.precipMm} mm`;
+  const rainChance = dry || day.chanceOfRain == null ? null : `${day.chanceOfRain}% chance`;
 
   return (
     <Paper
@@ -87,12 +92,17 @@ function DayCard({ day, isToday, showCity, onOpen }: {
         '&:focus-visible': { outline: `2px solid ${D.terra}`, outlineOffset: 2 },
       }}
     >
-      <Typography sx={{
-        fontSize: '0.8rem', fontWeight: 800, letterSpacing: '0.08em',
-        textTransform: 'uppercase', color: D.terra, lineHeight: 1.1, fontFamily: D.body,
-      }}>
-        {isToday ? 'Today' : day.label}
-      </Typography>
+      <Box sx={{ maxWidth: '100%' }}>
+        <Typography noWrap sx={{
+          fontSize: '0.8rem', fontWeight: 800, letterSpacing: '0.08em',
+          textTransform: 'uppercase', color: D.terra, lineHeight: 1.25, fontFamily: D.body,
+        }}>
+          {isToday ? 'Today' : cardDate(day.date, { weekday: 'short' })}
+        </Typography>
+        <Typography noWrap sx={{ fontSize: '0.8rem', fontWeight: 600, color: D.muted, lineHeight: 1.25, fontFamily: D.body }}>
+          {cardDate(day.date, { day: 'numeric', month: 'short' })}
+        </Typography>
+      </Box>
       {showCity && (
         <Typography noWrap sx={{ fontSize: '0.75rem', color: D.muted, maxWidth: '100%', fontFamily: D.body }}>
           {day.city}
@@ -116,31 +126,42 @@ function DayCard({ day, isToday, showCity, onOpen }: {
         </Typography>
       )}
 
-      <Tooltip title={typical ? 'Chance of a wet day' : 'Expected rain · chance'}>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.4, mt: 0.5 }}>
-          <WaterDropIcon sx={{ fontSize: '0.9rem', color: wet ? D.cool : D.muted }} />
-          <Typography sx={{
-            fontSize: '0.85rem', fontFamily: D.body,
-            color: wet ? D.cool : D.muted, fontWeight: wet ? 800 : 400,
+      <Tooltip title={typical ? 'Typical rain 08:00–22:00 · chance of a wet day' : 'Rain 08:00–22:00 · chance of 1 mm or more'}>
+        <Box sx={{ mt: 0.5, maxWidth: '100%' }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.4 }}>
+            <WaterDropIcon sx={{ fontSize: '0.9rem', color: wet ? D.cool : D.muted, flexShrink: 0 }} />
+            <Typography noWrap sx={{
+              fontSize: '0.85rem', fontFamily: D.body, lineHeight: 1.3,
+              color: wet ? D.cool : D.muted, fontWeight: wet ? 800 : 400,
+            }}>
+              {rainAmount}
+            </Typography>
+          </Box>
+          {/* Second line always takes its space, so dry days stay level with wet ones */}
+          <Typography noWrap sx={{
+            fontSize: '0.78rem', fontFamily: D.body, lineHeight: 1.3,
+            color: wet ? D.cool : D.muted, fontWeight: wet ? 700 : 400,
+            visibility: rainChance ? 'visible' : 'hidden',
           }}>
-            {rain}
+            {rainChance ?? '–'}
           </Typography>
         </Box>
       </Tooltip>
 
       {day.windKph != null && (
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.4 }}>
-          <AirIcon sx={{ fontSize: '0.9rem', color: D.muted }} />
-          <Typography sx={{ fontSize: '0.85rem', color: D.muted, fontFamily: D.body }}>
+          <AirIcon sx={{ fontSize: '0.9rem', color: D.muted, flexShrink: 0 }} />
+          <Typography noWrap sx={{ fontSize: '0.85rem', color: D.muted, fontFamily: D.body }}>
             {day.windKph} km/h
           </Typography>
         </Box>
       )}
 
-      {typical && (
+      {typicalSlot && (
         <Typography sx={{
           fontSize: '0.7rem', fontWeight: 800, letterSpacing: '0.08em',
           textTransform: 'uppercase', color: D.terra, opacity: 0.75, fontFamily: D.body,
+          visibility: typical ? 'visible' : 'hidden',
         }}>
           typical
         </Typography>
@@ -159,10 +180,14 @@ function DayCard({ day, isToday, showCity, onOpen }: {
 // Scroll on phones and tablets; one row of equal columns on desktop (rows of 7
 // for long trips) so a 9-day trip never leaves an orphan card.
 function DayStrip({ days, today, onOpen }: { days: DayWeather[]; today: string; onOpen: (index: number) => void }) {
-  const showCity = new Set(days.map(d => d.city)).size > 1;
+  const showCity    = new Set(days.map(d => d.city)).size > 1;
+  const typicalSlot = days.some(d => d.source === 'historical');
   const cols  = days.length <= 10 ? days.length : 7;
   const cards = days.map((d, i) => (
-    <DayCard key={d.date} day={d} isToday={d.date === today} showCity={showCity} onOpen={() => onOpen(i)} />
+    <DayCard
+      key={d.date} day={d} isToday={d.date === today}
+      showCity={showCity} typicalSlot={typicalSlot} onOpen={() => onOpen(i)}
+    />
   ));
   return (
     <>
@@ -494,7 +519,7 @@ export default function WeatherTab({ tripId, destinationCity }: Props) {
       )}
 
       <Typography sx={{ fontSize: '0.75rem', color: D.muted, fontFamily: D.body }}>
-        Forecast and records: Open-Meteo
+        Rain from up to 8 forecast models · records from ERA5 · via Open-Meteo
       </Typography>
 
       <WeatherDaySheet

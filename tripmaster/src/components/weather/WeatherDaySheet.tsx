@@ -134,12 +134,21 @@ function DayBody({
   const { Icon, color } = weatherIcon(day.code, day.condition);
 
   const facts: { name: string; value: string; sub?: string }[] = [];
+  // Rain by day = 08:00–22:00. Overnight rain is real but needs no umbrella, so it's noted, not counted.
+  const kindWord  = day.rainKind === 'drizzle' ? 'drizzle' : 'rain';
+  const overnight = (day.nightMm ?? 0) >= 0.5 ? `${day.nightMm} mm overnight` : null;
   facts.push(typical
-    ? { name: 'Rain', value: `${day.chanceOfRain ?? 0}%`, sub: 'chance of a wet day' }
+    ? {
+        name: 'Rain by day', value: `${day.chanceOfRain ?? 0}%`,
+        sub: ['chance of a wet day', overnight].filter(Boolean).join(' · '),
+      }
     : {
-        name: 'Rain', value: `${day.precipMm} mm`,
-        sub: [day.chanceOfRain != null ? `${day.chanceOfRain}% chance` : null,
-              day.rainHours ? `${day.rainHours} h of rain` : null].filter(Boolean).join(' · ') || undefined,
+        name: 'Rain by day', value: `${day.precipMm} mm`,
+        sub: [
+          day.chanceOfRain != null ? `${day.chanceOfRain}% chance` : null,
+          day.rainHours ? `${day.rainHours} h of ${kindWord}` : null,
+          overnight,
+        ].filter(Boolean).join(' · ') || undefined,
       });
   if (day.windKph != null) {
     facts.push({
@@ -242,7 +251,16 @@ function DayBody({
         {rows.length > 0 && (
           <Box>
             <Box sx={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', mb: 1 }}>
-              <Typography sx={label}>{typical ? 'Typical hours' : 'Hour by hour'}</Typography>
+              <Box>
+                <Typography sx={label}>{typical ? 'Typical hours' : 'Hour by hour'}</Typography>
+                <Typography sx={{ fontSize: '0.78rem', color: D.muted, fontFamily: D.body, mt: 0.25 }}>
+                  {typical
+                    ? 'Rain: how often past years had rain that hour'
+                    : (day.rainModels ?? 1) > 1
+                      ? `Rain: how many of ${day.rainModels} forecast models show it`
+                      : 'Rain: chance in the forecast'}
+                </Typography>
+              </Box>
               {hidden > 0 && (
                 <Button size="small" onClick={() => setShowEarlier(true)} sx={{ fontFamily: D.body, fontWeight: 700, color: D.terra, minHeight: 32 }}>
                   Show earlier

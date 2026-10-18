@@ -5,7 +5,7 @@
 // All pure functions over the stored WeatherResult, so changing a threshold or a
 // phrase applies to cached data without a refetch. Fetching lives in weather.ts.
 
-export const WEATHER_VERSION = 3;
+export const WEATHER_VERSION = 4;
 
 export type DaySource = 'forecast' | 'historical';
 
@@ -14,8 +14,8 @@ export interface DayHours {
   temp:  (number | null)[];
   feels: (number | null)[];
   code:  (number | null)[];
-  rain:  (number | null)[];   // forecast: chance % · typical: % of past hours with rain
-  mm:    (number | null)[];   // forecast only
+  rain:  (number | null)[];   // forecast: % of models with rain that hour · typical: % of past days
+  mm:    (number | null)[];   // forecast only — the models' median
   cloud: (number | null)[];
   wind:  (number | null)[];
   gust:  (number | null)[];   // forecast only
@@ -37,8 +37,9 @@ export interface DayWeather {
   feelsMax:      number | null;  // apparent temperature
   feelsMin:      number | null;
   feelsEvening:  number | null;  // apparent temperature, 20:00–22:00 local
-  chanceOfRain:  number | null;  // forecast: peak hourly chance · historical: % of past days with ≥1 mm
-  precipMm:      number;
+  // Rain is read over waking hours (08:00–22:00) — drizzle at 4am needs no umbrella.
+  chanceOfRain:  number | null;  // % chance of ≥1 mm: forecast = share of weather models, typical = share of past days
+  precipMm:      number;         // waking hours: the models' median (typical: mean)
   windKph:       number | null;  // daily max sustained wind
   uvIndex:       number | null;  // historical: clear-sky estimate
   sunshineHours: number | null;
@@ -52,6 +53,10 @@ export interface DayWeather {
   rainHours?:    number | null;
   humidity?:     number | null;  // mean relative humidity %
   hours?:        DayHours | null;
+  // v4 — rain consensus
+  nightMm?:      number | null;  // before 08:00 and after 22:00
+  rainKind?:     'drizzle' | 'rain' | null;
+  rainModels?:   number | null;  // forecast models that agreed on the read (1 = best match alone)
 }
 
 export interface CurrentWeather {
@@ -147,28 +152,24 @@ export const feelsEvening = (d: DayWeather) =>
 const isTypical = (days: DayWeather[]) => days.length > 0 && days.every(d => d.source === 'historical');
 
 // ─── Rain ─────────────────────────────────────────────────────────────────────
-// ≥1 mm is the standard wet day. Forecast probability alone overstates — it's the
-// peak hourly chance, so 45% can mean 0.1 mm — so a forecast day also needs rain
-// that adds up to something.
+// A wet day is ≥1 mm in waking hours, called when at least half the evidence —
+// weather models for a forecast, past years for a typical day — says so. Both
+// kinds of day speak the same "chance", so counts and comparisons mix freely.
 
 export interface RainFields {
   source?:       string;
   chanceOfRain?: number | null;
   precipMm?:     number | null;
+  rainKind?:     'drizzle' | 'rain' | null;
 }
 
-export function isWetDay(d: RainFields): boolean {
-  const mm = d.precipMm ?? 0;
-  if (d.source === 'historical') return (d.chanceOfRain ?? 0) >= 50;
-  if (mm >= 5) return true;
-  return mm >= 1 && (d.chanceOfRain == null || d.chanceOfRain >= 40);
-}
+export const isWetDay = (d: RainFields) => (d.chanceOfRain ?? 0) >= 50;
 
-export const isHeavyRainDay = (d: RainFields) => d.source !== 'historical' && (d.precipMm ?? 0) >= 10;
+export const isHeavyRainDay = (d: RainFields) =>
+  d.source !== 'historical' && (d.precipMm ?? 0) >= 10 && isWetDay(d);
 
-// The amount comes from one high-res model, the chance from a 30-member ensemble.
-// 12 mm at 2% means the ensemble mostly disagrees — still worth naming, as "possible".
-export const isUnsureRain = (d: RainFields) => d.chanceOfRain != null && d.chanceOfRain < 30;
+// Heavy but not settled — most models wet, yet fewer than 60% agree.
+export const isUnsureRain = (d: RainFields) => (d.chanceOfRain ?? 0) < 60;
 
 /** Forecast days count as wet or not; typical days add their odds, so "about 5 of 9" isn't all-or-nothing. */
 export function wetDayCount(days: RainFields[]): number {
@@ -233,32 +234,54 @@ export function rainOutlook(days: RainDay[]): RainOutlook {
   const heavy = days.filter(isHeavyRainDay);
 
   if (days.every(d => d.source === 'historical')) {
-    const value = wet === 0 ? 'Rare' : `~${wet} of ${n} days`;
-    if (wet === 0)      return { gear: 'none',     wet, heavy: 0, value, text: 'Usually dry — leave the umbrella' };
-    if (wet / n >= 0.5) return { gear: 'jacket',   wet, heavy: 0, value, text: 'Rain is common — waterproof jacket' };
-    if (wet <= 2)       return { gear: 'umbrella', wet, heavy: 0, value, text: 'A shower or two is typical — a compact umbrella' };
+    const value   = wet === 0 ? 'Rare' : `~${wet} of ${n} days`;
+    const drizzly = days.filter(d => (d.chanceOfRain ?? 0) >= 35).every(d => d.rainKind !== 'rain');
+    if (wet === 0)              return { gear: 'none',     wet, heavy: 0, value, text: 'Usually dry — leave the umbrella' };
+    if (drizzly && wet / n < 0.5) return { gear: 'none',   wet, heavy: 0, value, text: 'Drizzle now and then is typical — a light layer covers it' };
+    if (wet / n >= 0.5)         return { gear: 'jacket',   wet, heavy: 0, value, text: 'Rain is common — waterproof jacket' };
+    if (wet <= 2)               return { gear: 'umbrella', wet, heavy: 0, value, text: 'A shower or two is typical — a compact umbrella' };
     return { gear: 'umbrella', wet, heavy: 0, value, text: `Rain on about ${wet} of ${n} days — a compact umbrella` };
   }
 
-  const value    = wet === 0 ? 'Dry' : `${wet} of ${n} days`;
-  const wetDays  = days.filter(d => d.source !== 'historical' && isWetDay(d));
-  const frequent = wet / n >= 0.5;
-  const totalMm  = days.filter(d => d.source !== 'historical').reduce((s, d) => s + (d.precipMm ?? 0), 0);
+  const fc      = days.filter(d => d.source !== 'historical');
+  const wetDays = fc.filter(isWetDay);
+  const rainy   = wetDays.filter(d => d.rainKind !== 'drizzle');
+  const drizzly = wetDays.filter(d => d.rainKind === 'drizzle');
+  const maybe   = fc.filter(d => !isWetDay(d) && (d.chanceOfRain ?? 0) >= 35);
+  const value   = wet === 0 ? (maybe.length ? 'Mostly dry' : 'Dry') : `${wet} of ${n} days`;
   const heavyLabel = (d: RainDay) => `Heavy rain${isUnsureRain(d) ? ' possible' : ''} ${shortDay(d.date)}`;
   const out = (gear: RainGear, text: string): RainOutlook => ({ gear, wet, heavy: heavy.length, value, text });
 
-  if (wet === 0)                    return out('none', totalMm < 2 ? 'Dry — leave the umbrella' : 'Mostly dry — the odd light shower');
+  if (!wetDays.length) {
+    if (!maybe.length) return out('none', 'Dry — leave the umbrella');
+    const what = maybe.every(d => d.rainKind !== 'rain') ? 'drizzle' : 'a shower';
+    return out('none', `Mostly dry — ${what} possible ${listDays(maybe)}`);
+  }
+
+  // Drizzle alone doesn't need an umbrella — unless it's most of the trip.
+  if (!rainy.length) {
+    return drizzly.length / n >= 0.5
+      ? out('umbrella', 'Drizzle most days — a hooded layer or compact umbrella')
+      : out('none', `Drizzle ${listDays(drizzly)} — light, a layer covers it`);
+  }
+
+  const frequent = rainy.length / n >= 0.5;
   if (frequent && heavy.length >= 2) return out('jacket+shoes', `Rain most days, heavy ${listDays(heavy)} — waterproof jacket and shoes`);
-  if (frequent)                     return out('jacket', 'Rain most days — waterproof jacket');
-  if (heavy.length >= 2)            return out('jacket', `Heavy rain ${listDays(heavy)} — waterproof jacket`);
-  if (heavy.length === 1 && wet === 1) return out('umbrella', `${heavyLabel(heavy[0])} — one wet day, a compact umbrella covers it`);
-  if (wetDays.length === wet && wet <= 3) {
-    const others = wetDays.filter(d => !isHeavyRainDay(d));
-    const parts  = [...heavy.map(heavyLabel), ...(others.length ? [`showers ${listDays(others)}`] : [])];
-    const lead   = parts.join(', ');
+  if (frequent)                      return out('jacket', 'Rain most days — waterproof jacket');
+  if (heavy.length >= 2)             return out('jacket', `Heavy rain ${listDays(heavy)} — waterproof jacket`);
+  if (heavy.length === 1 && rainy.length === 1 && !drizzly.length)
+    return out('umbrella', `${heavyLabel(heavy[0])} — one wet day, a compact umbrella covers it`);
+  if (rainy.length <= 3) {
+    const showers = rainy.filter(d => !isHeavyRainDay(d));
+    const parts = [
+      ...heavy.map(heavyLabel),
+      ...(showers.length ? [`rain ${listDays(showers)}`] : []),
+      ...(drizzly.length ? [`drizzle ${listDays(drizzly)}`] : []),
+    ];
+    const lead = parts.join(', ');
     return out('umbrella', `${lead.charAt(0).toUpperCase()}${lead.slice(1)} — a compact umbrella`);
   }
-  return out('umbrella', `Rain on ${wet} of ${n} days — a compact umbrella`);
+  return out('umbrella', `Rain on ${rainy.length} of ${n} days — a compact umbrella`);
 }
 
 const GEAR_PACK: Record<RainGear, string | undefined> = {
@@ -634,6 +657,8 @@ export function hourRows(day: DayWeather): HourRow[] {
 
 export const hourLabel = (h: number) => `${String(h % 24).padStart(2, '0')}:00`;
 
+const one1 = (x: number) => Math.round(x * 10) / 10;
+
 const COMPASS = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
 /** Where the wind comes from — "a SW wind". */
 export const compass = (deg: number | null | undefined) =>
@@ -715,28 +740,36 @@ export function dayPlan(day: DayWeather, fromHour = 0): PlanItem[] {
     items.push({ key: 'evening', text: `Evening feels ${f}° at ${hourLabel(eve.hour)} — ${feelsBand(f).evening.toLowerCase()}` });
   }
 
-  // Rain — when, not just whether
-  const waking = rows.filter(r => r.hour >= 7 && r.hour <= 23);
-  const wetHour = (r: HourRow) => typical ? (r.rain ?? 0) >= 35 : (r.mm ?? 0) >= 0.2 || (r.rain ?? 0) >= 50;
-  const wet = waking.filter(wetHour).map(r => r.hour);
-  if (wet.length) {
-    const total = rows.reduce((s, r) => s + (r.mm ?? 0), 0);
-    items.push({
-      key: 'rain',
-      text: typical
-        ? `Showers most likely ${spans(wet).join(', ')}`
-        : `Rain likely ${spans(wet).join(', ')}${total >= 0.5 ? ` · ${Math.round(total * 10) / 10} mm in all` : ''}`,
-    });
-    const dry = longestRun(rows.filter(r => r.hour >= 8 && r.hour <= 21 && !wetHour(r) && (r.rain ?? 0) < 30).map(r => r.hour));
-    if (dry.length >= 2) items.push({ key: 'dry', text: `Driest ${hourLabel(dry[0])}–${hourLabel(dry[dry.length - 1] + 1)}` });
+  // Rain — when, and how sure. An hour's chance is the share of weather models
+  // (typical: past years) with rain in it, so "likely" means most of them agree.
+  const LIKELY   = typical ? 40 : 50;
+  const POSSIBLE = typical ? 25 : 30;
+  const chanceAt = (r: HourRow) => r.rain ?? 0;
+  const awake    = rows.filter(r => r.hour >= 8 && r.hour < 22);
+  const likely   = awake.filter(r => chanceAt(r) >= LIKELY);
+  const possible = awake.filter(r => chanceAt(r) >= POSSIBLE && chanceAt(r) < LIKELY);
+  const overnight = rows.filter(r => (r.hour < 8 || r.hour >= 22) && chanceAt(r) >= LIKELY);
+  // Drizzle vs rain by the models' median amount — typical hours have none, so the day's read decides.
+  const drizzle = (hrs: HourRow[]) =>
+    typical ? day.rainKind !== 'rain' : hrs.every(r => (r.mm ?? 0) < 0.5);
+  const hoursOf = (hrs: HourRow[]) => spans(hrs.map(r => r.hour)).join(', ');
+
+  let rainText: string;
+  if (likely.length) {
+    const mm = one1(likely.reduce((s, r) => s + (r.mm ?? 0), 0));
+    rainText = `${drizzle(likely) ? 'Drizzle' : 'Rain'} ${typical ? 'most likely' : 'likely'} ${hoursOf(likely)}`
+      + (!typical && mm >= 0.5 ? ` · about ${mm} mm` : '');
+  } else if (possible.length) {
+    rainText = `${drizzle(possible) ? 'Drizzle' : 'A shower'} possible ${hoursOf(possible)}`;
   } else {
-    const peak = waking.reduce<HourRow | null>((a, b) => ((b.rain ?? 0) > (a?.rain ?? 0) ? b : a), null);
-    items.push({
-      key: 'rain',
-      text: peak && (peak.rain ?? 0) >= 25
-        ? `Small chance of a shower — ${peak.rain}% around ${hourLabel(peak.hour)}`
-        : typical ? 'Usually dry all day' : 'Dry all day',
-    });
+    rainText = overnight.length ? 'Dry by day' : typical ? 'Usually dry all day' : 'Dry all day';
+  }
+  if (overnight.length) rainText += ` · ${drizzle(overnight) ? 'drizzle' : 'rain'} overnight ${hoursOf(overnight)}`;
+  items.push({ key: 'rain', text: rainText });
+
+  if (likely.length || possible.length) {
+    const dry = longestRun(awake.filter(r => chanceAt(r) < POSSIBLE).map(r => r.hour));
+    if (dry.length >= 2) items.push({ key: 'dry', text: `Driest ${hourLabel(dry[0])}–${hourLabel(dry[dry.length - 1] + 1)}` });
   }
 
   // Sun cream hours

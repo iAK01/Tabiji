@@ -143,17 +143,6 @@ const WMO_MAP: Record<number, { condition: string; icon: string }> = {
 const wmo = (code: number | null | undefined) =>
   (isNum(code) && WMO_MAP[code]) || { condition: 'Unknown', icon: '🌡️' };
 
-// Typical days have no single weather code — describe the odds instead.
-function typicalCondition(chance: number, tMax: number, sunFrac: number | null): { condition: string; code: number } {
-  if (tMax <= 2 && chance >= 30) return { condition: 'Snow possible',    code: 71 };
-  if (chance >= 60)              return { condition: 'Often rainy',      code: 61 };
-  if (chance >= 30)              return { condition: 'Showers possible', code: 80 };
-  if (sunFrac == null)           return { condition: 'Typical day',      code: 2 };
-  if (sunFrac >= 0.65)           return { condition: 'Mostly sunny',     code: 1 };
-  if (sunFrac >= 0.4)            return { condition: 'Sunny spells',     code: 2 };
-  return { condition: 'Mostly cloudy', code: 3 };
-}
-
 // ─── HTTP ─────────────────────────────────────────────────────────────────────
 
 async function getJson(url: URL): Promise<any> {
@@ -171,6 +160,9 @@ function omUrl(base: string, point: { lat: number; lon: number }, params: Record
   for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
   return url;
 }
+
+const FORECAST_API = 'https://api.open-meteo.com/v1/forecast';
+const ARCHIVE_API  = 'https://archive-api.open-meteo.com/v1/archive';
 
 // Hourly arrays regrouped as date → variable → 24 local hours. Keyed by the
 // timestamp's own hour, so a DST gap stays null rather than shifting the day.
@@ -196,6 +188,142 @@ function groupHourly(hourly: any): Map<string, HourCols> {
   return out;
 }
 
+// ─── Rain: waking hours, several models ───────────────────────────────────────
+// Rain is where weather models disagree most — drizzle under trade-wind cloud on
+// islands above all, which coarse global grids over-produce. So a day's rain is
+// read from several models together, weighted by how finely they resolve coasts
+// and terrain, and only over waking hours: drizzle at 4am needs no umbrella.
+
+const WAKE_FROM = 8;    // [08:00, 22:00)
+const WAKE_TO   = 22;
+const MIN_MODELS = 3;
+const DRIZZLE_RATE = 0.5;   // mm/h — below this it's drizzle, not rain
+
+const RAIN_MODELS: Record<string, number> = {
+  icon_seamless:        2,     // 13 km global, 7 km Europe
+  ukmo_seamless:        2,     // 10 km global
+  meteofrance_seamless: 1,     // 11 km Europe, 25 km elsewhere
+  ecmwf_ifs025:         1,     // 25 km
+  ecmwf_aifs025_single: 1,
+  gfs_seamless:         1,
+  gem_seamless:         1,     // 15 km
+  jma_seamless:         0.5,   // 55 km
+};
+
+interface ModelRain { w: number; mm: (number | null)[] }
+
+// date → each model's 24 hourly amounts. Models with no data there (out of
+// domain, past their range) simply drop out.
+async function fetchModelRain(point: Point, start: string, end: string): Promise<Map<string, ModelRain[]>> {
+  const data = await getJson(omUrl(FORECAST_API, point, {
+    hourly: 'precipitation', models: Object.keys(RAIN_MODELS).join(','),
+    start_date: start, end_date: end,
+  }));
+  const out = new Map<string, ModelRain[]>();
+  for (const [date, cols] of groupHourly(data.hourly)) {
+    const models: ModelRain[] = [];
+    for (const [m, w] of Object.entries(RAIN_MODELS)) {
+      const mm = cols[`precipitation_${m}`];
+      if (mm && mm.filter(isNum).length >= 20) models.push({ w, mm });
+    }
+    out.set(date, models);
+  }
+  return out;
+}
+
+function weightedMedian(pairs: [number, number][]): number {
+  const sorted = [...pairs].sort((a, b) => a[0] - b[0]);
+  const half   = sorted.reduce((s, [, w]) => s + w, 0) / 2;
+  let acc = 0;
+  for (const [v, w] of sorted) { acc += w; if (acc >= half) return v; }
+  return 0;
+}
+
+const sumHours = (mm: (number | null)[], from: number, to: number) =>
+  mm.slice(from, to).reduce<number>((s, v) => s + (v ?? 0), 0);
+
+interface RainRead {
+  chance:     number;                 // % (by weight) with ≥1 mm in waking hours
+  dayMm:      number;                 // weighted median, waking hours
+  nightMm:    number;                 // the rest of the day
+  kind:       'drizzle' | 'rain' | null;
+  wetHours:   number;                 // waking hours where most say rain
+  hourChance: (number | null)[];      // % (by weight) with ≥0.1 mm that hour
+  hourMm:     (number | null)[];      // weighted median that hour
+}
+
+function rainConsensus(models: ModelRain[]): RainRead | null {
+  if (models.length < MIN_MODELS) return null;
+  const total = models.reduce((s, m) => s + m.w, 0);
+  const per = models.map(m => ({
+    w:     m.w,
+    day:   sumHours(m.mm, WAKE_FROM, WAKE_TO),
+    night: sumHours(m.mm, 0, WAKE_FROM) + sumHours(m.mm, WAKE_TO, 24),
+    peak:  Math.max(0, ...m.mm.slice(WAKE_FROM, WAKE_TO).map(v => v ?? 0)),
+  }));
+  const wet = per.filter(p => p.day >= 1);
+
+  const hourChance: (number | null)[] = [];
+  const hourMm: (number | null)[] = [];
+  for (let h = 0; h < 24; h++) {
+    const at = models.filter(m => isNum(m.mm[h]));
+    const w  = at.reduce((s, m) => s + m.w, 0);
+    if (!w) { hourChance.push(null); hourMm.push(null); continue; }
+    hourChance.push(Math.round(100 * at.filter(m => m.mm[h]! >= 0.1).reduce((s, m) => s + m.w, 0) / w));
+    hourMm.push(one(weightedMedian(at.map(m => [m.mm[h]!, m.w]))));
+  }
+
+  return {
+    chance:  Math.round(100 * wet.reduce((s, p) => s + p.w, 0) / total),
+    dayMm:   one(weightedMedian(per.map(p => [p.day, p.w]))) ?? 0,
+    nightMm: one(weightedMedian(per.map(p => [p.night, p.w]))) ?? 0,
+    kind:    wet.length ? (weightedMedian(wet.map(p => [p.peak, p.w])) < DRIZZLE_RATE ? 'drizzle' : 'rain') : null,
+    wetHours: hourChance.slice(WAKE_FROM, WAKE_TO).filter(c => (c ?? 0) >= 50).length,
+    hourChance, hourMm,
+  };
+}
+
+// A day's icon and words come from its waking hours, scaled to how sure the
+// rain is: an umbrella only when most models put real rain on the day; a
+// drizzle cloud when it's possible or light; otherwise the sky.
+function skyCode(cloud: number | null): { code: number; condition: string } {
+  if (cloud == null) return { code: 2, condition: 'Partly cloudy' };
+  if (cloud < 15)    return { code: 0, condition: 'Sunny' };
+  if (cloud < 40)    return { code: 1, condition: 'Mostly sunny' };
+  if (cloud < 70)    return { code: 2, condition: 'Partly cloudy' };
+  if (cloud < 90)    return { code: 3, condition: 'Mostly cloudy' };
+  return { code: 3, condition: 'Overcast' };
+}
+
+function dayLook(
+  chance: number, dayMm: number, kind: RainRead['kind'],
+  codes: (number | null)[], cloud: (number | null)[],
+): { code: number; condition: string } {
+  const waking  = (xs: (number | null)[]) => xs.slice(WAKE_FROM, WAKE_TO);
+  const thunder = waking(codes).some(c => (c ?? 0) >= 95);
+  const fog     = waking(codes).filter(c => c === 45 || c === 48).length >= 3;
+  const likely  = chance >= 60;
+  const possible = chance >= 35;
+
+  if (thunder && possible) return { code: 95, condition: likely ? 'Thunderstorms likely' : 'Thunderstorms possible' };
+  if (likely && kind === 'drizzle') return { code: 53, condition: 'Drizzle' };
+  if (likely) {
+    if (dayMm >= 10)  return { code: 65, condition: 'Heavy rain' };
+    if (dayMm >= 2.5) return { code: 63, condition: 'Rain' };
+    return { code: 61, condition: 'Light rain' };
+  }
+  if (possible) return { code: 51, condition: kind === 'rain' ? 'Showers possible' : 'Drizzle possible' };
+  if (fog)      return { code: 45, condition: 'Foggy at times' };
+  return skyCode(round(mean(waking(cloud))));
+}
+
+function hourCode(chance: number | null, mm: number | null, code: number | null, cloud: number | null): number {
+  if ((code ?? 0) >= 95 && (chance ?? 0) >= 30) return 95;
+  if ((chance ?? 0) >= 50) return (mm ?? 0) < DRIZZLE_RATE ? 51 : (mm ?? 0) < 2.5 ? 61 : 63;
+  if (code === 45 || code === 48) return 45;
+  return skyCode(cloud).code;
+}
+
 // Mean apparent temperature 20:00–22:00 — what going out to dinner feels like.
 const eveningOf = (feels: (number | null)[] | undefined) => mean(feels?.slice(20, 23) ?? []);
 
@@ -208,23 +336,27 @@ const col  = (xs: (number | null)[] | undefined, f: (v: number) => number | null
 interface Point { lat: number; lon: number }
 
 async function fetchForecastDays(point: Point, start: string, end: string, city: string) {
-  const data = await getJson(omUrl('https://api.open-meteo.com/v1/forecast', point, {
-    daily: [
-      'weather_code', 'temperature_2m_max', 'temperature_2m_min',
-      'apparent_temperature_max', 'apparent_temperature_min',
-      'precipitation_sum', 'precipitation_probability_max', 'precipitation_hours',
-      'wind_speed_10m_max', 'wind_gusts_10m_max', 'wind_direction_10m_dominant',
-      'uv_index_max', 'sunshine_duration', 'sunrise', 'sunset',
-    ].join(','),
-    hourly: [
-      'temperature_2m', 'apparent_temperature', 'weather_code',
-      'precipitation_probability', 'precipitation', 'cloud_cover',
-      'wind_speed_10m', 'wind_gusts_10m', 'wind_direction_10m',
-      'relative_humidity_2m', 'uv_index', 'is_day',
-    ].join(','),
-    start_date: start,
-    end_date:   end,
-  }));
+  const [data, modelRain] = await Promise.all([
+    getJson(omUrl(FORECAST_API, point, {
+      daily: [
+        'temperature_2m_max', 'temperature_2m_min',
+        'apparent_temperature_max', 'apparent_temperature_min',
+        'wind_speed_10m_max', 'wind_gusts_10m_max', 'wind_direction_10m_dominant',
+        'uv_index_max', 'sunshine_duration', 'sunrise', 'sunset',
+      ].join(','),
+      hourly: [
+        'temperature_2m', 'apparent_temperature', 'weather_code',
+        'precipitation_probability', 'precipitation', 'cloud_cover',
+        'wind_speed_10m', 'wind_gusts_10m', 'wind_direction_10m',
+        'relative_humidity_2m', 'uv_index', 'is_day',
+      ].join(','),
+      start_date: start,
+      end_date:   end,
+    })),
+    // Rain consensus is the accuracy upgrade, not a dependency — without it the
+    // single best-match model still answers.
+    fetchModelRain(point, start, end).catch(() => new Map<string, ModelRain[]>()),
+  ]);
   const d      = data.daily;
   const hourly = groupHourly(data.hourly);
 
@@ -232,19 +364,36 @@ async function fetchForecastDays(point: Point, start: string, end: string, city:
   (d.time as string[]).forEach((date, i) => {
     const tMax = round(d.temperature_2m_max[i]);
     const tMin = round(d.temperature_2m_min[i]);
-    if (tMax == null || tMin == null) return;    // gap → filled from averages
-    const code = isNum(d.weather_code[i]) ? d.weather_code[i] : null;
-    const sun  = d.sunshine_duration[i];
     const h    = hourly.get(date);
+    if (tMax == null || tMin == null || !h) return;    // gap → filled from averages
+
+    // One model alone: its own waking-hours rain, chance from its ensemble.
+    const single: RainRead = {
+      chance:  Math.round(Math.max(0, ...h.precipitation_probability.slice(WAKE_FROM, WAKE_TO).map(v => v ?? 0))),
+      dayMm:   one(sumHours(h.precipitation, WAKE_FROM, WAKE_TO)) ?? 0,
+      nightMm: one(sumHours(h.precipitation, 0, WAKE_FROM) + sumHours(h.precipitation, WAKE_TO, 24)) ?? 0,
+      kind:    Math.max(0, ...h.precipitation.slice(WAKE_FROM, WAKE_TO).map(v => v ?? 0)) >= DRIZZLE_RATE ? 'rain'
+             : sumHours(h.precipitation, WAKE_FROM, WAKE_TO) >= 1 ? 'drizzle' : null,
+      wetHours: h.precipitation.slice(WAKE_FROM, WAKE_TO).filter(v => (v ?? 0) >= 0.1).length,
+      hourChance: h.precipitation_probability,
+      hourMm:     col(h.precipitation, v => Math.round(v * 10) / 10),
+    };
+    const r    = rainConsensus(modelRain.get(date) ?? []) ?? single;
+    const look = dayLook(r.chance, r.dayMm, r.kind, h.weather_code, h.cloud_cover);
+    const sun  = d.sunshine_duration[i];
+
     days.push({
       date, label: formatLabel(date), city,
-      ...wmo(code), code,
+      code: look.code, condition: look.condition, icon: wmo(look.code).icon,
       tempMax: tMax, tempMin: tMin,
       feelsMax:      round(d.apparent_temperature_max[i]),
       feelsMin:      round(d.apparent_temperature_min[i]),
-      feelsEvening:  round(eveningOf(h?.apparent_temperature)),
-      chanceOfRain:  isNum(d.precipitation_probability_max[i]) ? d.precipitation_probability_max[i] : null,
-      precipMm:      one(d.precipitation_sum[i]) ?? 0,
+      feelsEvening:  round(eveningOf(h.apparent_temperature)),
+      chanceOfRain:  r.chance,
+      precipMm:      r.dayMm,
+      nightMm:       r.nightMm,
+      rainKind:      r.kind,
+      rainModels:    (modelRain.get(date) ?? []).length >= MIN_MODELS ? modelRain.get(date)!.length : 1,
       windKph:       round(d.wind_speed_10m_max[i]),
       uvIndex:       one(d.uv_index_max[i]),
       sunshineHours: isNum(sun) ? one(sun / 3600) : null,
@@ -254,14 +403,14 @@ async function fetchForecastDays(point: Point, start: string, end: string, city:
       sunset:        hhmm(d.sunset[i]),
       gustKph:       round(d.wind_gusts_10m_max[i]),
       windDir:       round(d.wind_direction_10m_dominant[i]),
-      rainHours:     round(d.precipitation_hours[i]),
-      humidity:      round(mean(h?.relative_humidity_2m ?? [])),
-      hours: h ? {
+      rainHours:     r.wetHours,
+      humidity:      round(mean(h.relative_humidity_2m)),
+      hours: {
         temp:  col(h.temperature_2m, Math.round),
         feels: col(h.apparent_temperature, Math.round),
-        code:  col(h.weather_code),
-        rain:  col(h.precipitation_probability),
-        mm:    col(h.precipitation, v => Math.round(v * 10) / 10),
+        code:  Array.from({ length: 24 }, (_, k) => hourCode(r.hourChance[k], r.hourMm[k], h.weather_code[k], h.cloud_cover[k])),
+        rain:  r.hourChance.map(v => (isNum(v) ? Math.round(v) : null)),
+        mm:    r.hourMm,
         cloud: col(h.cloud_cover, Math.round),
         wind:  col(h.wind_speed_10m, Math.round),
         gust:  col(h.wind_gusts_10m, Math.round),
@@ -269,37 +418,47 @@ async function fetchForecastDays(point: Point, start: string, end: string, city:
         rh:    col(h.relative_humidity_2m, Math.round),
         uv:    col(h.uv_index, v => Math.round(v * 10) / 10),
         isDay: col(h.is_day),
-      } : null,
+      },
     });
   });
   return { days, timezone: (data.timezone as string) ?? null };
 }
 
 // ─── Typical days — pooled ERA5 records ───────────────────────────────────────
+// Rain comes from ERA5 specifically. The archive's default for recent years is
+// ECMWF IFS 9 km, which puts 2–3× too much drizzle on trade-wind coasts (Las
+// Palmas: 44 mm / 8 wet days in October vs 17 mm / 4 days in ERA5 and ~15 mm
+// observed). Elsewhere the two agree, so nothing is lost.
 
 interface Sample {
   tMax: number | null; tMin: number | null;
   fMax: number | null; fMin: number | null; fEve: number | null;
-  precip: number | null; wind: number | null; sun: number | null;
+  wind: number | null; sun: number | null;
   sunrise: string | null; sunset: string | null;
   hours: HourCols | null;
+  rain: (number | null)[] | null;    // 24 hourly mm, ERA5
 }
 
 async function fetchArchiveWindow(point: Point, start: string, len: number) {
-  const data = await getJson(omUrl('https://archive-api.open-meteo.com/v1/archive', point, {
-    daily: [
-      'temperature_2m_max', 'temperature_2m_min',
-      'apparent_temperature_max', 'apparent_temperature_min',
-      'precipitation_sum', 'wind_speed_10m_max', 'sunshine_duration',
-      'sunrise', 'sunset',
-    ].join(','),
-    hourly: [
-      'temperature_2m', 'apparent_temperature', 'precipitation',
-      'cloud_cover', 'wind_speed_10m', 'relative_humidity_2m',
-    ].join(','),
-    start_date: start,
-    end_date:   addDays(start, len - 1),
-  }));
+  const end = addDays(start, len - 1);
+  const [data, era5] = await Promise.all([
+    getJson(omUrl(ARCHIVE_API, point, {
+      daily: [
+        'temperature_2m_max', 'temperature_2m_min',
+        'apparent_temperature_max', 'apparent_temperature_min',
+        'wind_speed_10m_max', 'sunshine_duration', 'sunrise', 'sunset',
+      ].join(','),
+      hourly: [
+        'temperature_2m', 'apparent_temperature', 'precipitation',
+        'cloud_cover', 'wind_speed_10m', 'relative_humidity_2m',
+      ].join(','),
+      start_date: start,
+      end_date:   end,
+    })),
+    getJson(omUrl(ARCHIVE_API, point, {
+      hourly: 'precipitation', models: 'era5', start_date: start, end_date: end,
+    })).then(r => groupHourly(r.hourly)).catch(() => null),
+  ]);
   const d      = data.daily;
   const hourly = groupHourly(data.hourly);
   const samples: Sample[] = (d.time as string[]).map((date, i) => {
@@ -308,22 +467,27 @@ async function fetchArchiveWindow(point: Point, start: string, len: number) {
       tMax: d.temperature_2m_max[i], tMin: d.temperature_2m_min[i],
       fMax: d.apparent_temperature_max[i], fMin: d.apparent_temperature_min[i],
       fEve: eveningOf(h?.apparent_temperature),
-      precip: d.precipitation_sum[i], wind: d.wind_speed_10m_max[i],
+      wind: d.wind_speed_10m_max[i],
       sun: isNum(d.sunshine_duration[i]) ? d.sunshine_duration[i] / 3600 : null,
       sunrise: hhmm(d.sunrise?.[i]), sunset: hhmm(d.sunset?.[i]),
       hours: h,
+      rain: era5?.get(date)?.precipitation ?? h?.precipitation ?? null,
     };
   });
   return { samples, timezone: (data.timezone as string) ?? null };
 }
 
-// Typical hours have no weather code — describe the odds and the cloud.
-function typicalHourCode(rain: number | null, cloud: number | null): number {
-  if ((rain ?? 0) >= 35) return 80;
-  if (cloud == null)     return 2;
-  if (cloud >= 75)       return 3;
-  if (cloud >= 40)       return 2;
-  return cloud >= 15 ? 1 : 0;
+// Typical days have no single weather code — describe the odds instead.
+function typicalCondition(
+  chance: number, kind: RainRead['kind'], tMax: number, sunFrac: number | null,
+): { condition: string; code: number } {
+  if (tMax <= 2 && chance >= 30) return { condition: 'Snow possible', code: 71 };
+  if (chance >= 60) return kind === 'drizzle' ? { condition: 'Often drizzly', code: 53 } : { condition: 'Often rainy', code: 61 };
+  if (chance >= 35) return { condition: kind === 'drizzle' ? 'Drizzle possible' : 'Showers possible', code: 51 };
+  if (sunFrac == null)  return { condition: 'Typical day',   code: 2 };
+  if (sunFrac >= 0.65)  return { condition: 'Mostly sunny',  code: 1 };
+  if (sunFrac >= 0.4)   return { condition: 'Sunny spells',  code: 2 };
+  return { condition: 'Mostly cloudy', code: 3 };
 }
 
 // One typical day hour by hour: means across the pool, rain as how often it rained that hour.
@@ -334,7 +498,7 @@ function typicalHours(pool: Sample[], sunrise: string | null, sunset: string | n
     gust: [], dir: [], rh: [], uv: [], isDay: [],
   };
   for (let h = 0; h < 24; h++) {
-    const wet   = at('precipitation', h).filter(isNum);
+    const wet   = pool.map(s => s.rain?.[h] ?? null).filter(isNum);
     const rain  = wet.length ? Math.round(100 * wet.filter(v => v >= 0.1).length / wet.length) : null;
     const cloud = round(mean(at('cloud_cover', h)));
     const mid   = `${String(h).padStart(2, '0')}:30`;
@@ -344,7 +508,7 @@ function typicalHours(pool: Sample[], sunrise: string | null, sunset: string | n
     hours.cloud.push(cloud);
     hours.wind.push(round(mean(at('wind_speed_10m', h))));
     hours.rh.push(round(mean(at('relative_humidity_2m', h))));
-    hours.code.push(typicalHourCode(rain, cloud));
+    hours.code.push((rain ?? 0) >= 35 ? 80 : skyCode(cloud).code);
     hours.isDay.push(sunrise && sunset ? (mid >= sunrise && mid < sunset ? 1 : 0) : (h >= 7 && h < 19 ? 1 : 0));
     hours.mm.push(null);
     hours.gust.push(null);
@@ -376,11 +540,20 @@ async function fetchTypicalDays(point: Point, start: string, end: string, city: 
     const pool  = windows.flatMap(w => w.samples.slice(i, i + 2 * POOL_DAYS + 1));
     const tMax  = round(mean(pool.map(s => s.tMax))) ?? 0;
     const tMin  = round(mean(pool.map(s => s.tMin))) ?? 0;
-    const rainy = pool.filter(s => isNum(s.precip)).length;
-    const chance = rainy ? Math.round(100 * pool.filter(s => (s.precip ?? 0) >= 1).length / rainy) : 0;
+
+    // Rain over waking hours, as for the forecast: how often a past day like
+    // this got ≥1 mm between 08:00 and 22:00, and whether that was drizzle.
+    const rainy  = pool.filter(s => s.rain && s.rain.filter(isNum).length >= 20);
+    const dayMm  = rainy.map(s => sumHours(s.rain!, WAKE_FROM, WAKE_TO));
+    const wet    = rainy.filter((_, k) => dayMm[k] >= 1);
+    const chance = rainy.length ? Math.round(100 * wet.length / rainy.length) : 0;
+    const kind: RainRead['kind'] = wet.length
+      ? (weightedMedian(wet.map(s => [Math.max(0, ...s.rain!.slice(WAKE_FROM, WAKE_TO).map(v => v ?? 0)), 1])) < DRIZZLE_RATE ? 'drizzle' : 'rain')
+      : null;
+
     const light = daylightHours(point.lat, date);
     const sun   = mean(pool.map(s => s.sun));
-    const typ   = typicalCondition(chance, tMax, sun != null && light > 0 ? sun / light : null);
+    const typ   = typicalCondition(chance, kind, tMax, sun != null && light > 0 ? sun / light : null);
     // Sunrise/sunset from the most recent year's same date — they barely move year to year.
     const recent = windows[0].samples[i + POOL_DAYS];
     const hours  = typicalHours(pool, recent?.sunrise ?? null, recent?.sunset ?? null);
@@ -392,7 +565,10 @@ async function fetchTypicalDays(point: Point, start: string, end: string, city: 
       feelsMin:      round(mean(pool.map(s => s.fMin))),
       feelsEvening:  round(mean(pool.map(s => s.fEve))),
       chanceOfRain:  chance,
-      precipMm:      one(mean(pool.map(s => s.precip))) ?? 0,
+      precipMm:      one(mean(dayMm)) ?? 0,
+      nightMm:       one(mean(rainy.map(s => sumHours(s.rain!, 0, WAKE_FROM) + sumHours(s.rain!, WAKE_TO, 24)))) ?? 0,
+      rainKind:      kind,
+      rainModels:    null,
       windKph:       round(mean(pool.map(s => s.wind))),
       uvIndex:       clearSkyUv(point.lat, date),
       sunshineHours: one(sun),
@@ -402,7 +578,7 @@ async function fetchTypicalDays(point: Point, start: string, end: string, city: 
       sunset:        recent?.sunset ?? null,
       gustKph:       null,
       windDir:       null,
-      rainHours:     round(mean(pool.map(s => s.hours?.precipitation?.filter(v => isNum(v) && v >= 0.1).length ?? null))),
+      rainHours:     round(mean(rainy.map(s => s.rain!.slice(WAKE_FROM, WAKE_TO).filter(v => (v ?? 0) >= 0.1).length))),
       humidity:      round(mean(hours.rh)),
       hours,
     };
@@ -449,7 +625,7 @@ async function fetchSeries(point: Point, start: string, end: string, city: strin
 // ─── Current conditions ───────────────────────────────────────────────────────
 
 async function fetchCurrent(point: Point): Promise<{ current: CurrentWeather; timezone: string | null } | null> {
-  const data = await getJson(omUrl('https://api.open-meteo.com/v1/forecast', point, {
+  const data = await getJson(omUrl(FORECAST_API, point, {
     current:       'temperature_2m,apparent_temperature,weather_code,wind_speed_10m',
     forecast_days: '1',
   }));
@@ -505,7 +681,7 @@ async function homeMonthlyHighs(user: any, point: Point): Promise<number[] | nul
     return cached.monthlyHighs;
   }
   const last = new Date().getUTCFullYear() - 1;
-  const data = await getJson(omUrl('https://archive-api.open-meteo.com/v1/archive', point, {
+  const data = await getJson(omUrl(ARCHIVE_API, point, {
     daily: 'temperature_2m_max', start_date: `${last - 4}-01-01`, end_date: `${last}-12-31`,
   }));
   const buckets: number[][] = Array.from({ length: 12 }, () => []);
