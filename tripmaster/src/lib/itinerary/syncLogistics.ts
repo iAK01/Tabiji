@@ -155,9 +155,10 @@ export async function syncLogisticsToItinerary(tripId: string, logistics?: any) 
     const overrides = new Map<string, any>();
     for (const day of itinerary.days) {
       for (const s of day.stops ?? []) {
-        if (s.source === 'logistics' && s.userOverride && s.logisticsRef && s.metadata?.phase) {
+        const phase = s.metadata?.phase ?? (s.logisticsRef?.collection === 'venue' ? 'venue' : null);
+        if (s.source === 'logistics' && s.userOverride && s.logisticsRef && phase) {
           overrides.set(
-            overrideKey(s.logisticsRef.collection, s.logisticsRef.index, s.metadata.phase, day.date),
+            overrideKey(s.logisticsRef.collection, s.logisticsRef.index, phase, day.date),
             s.userOverride,
           );
         }
@@ -476,7 +477,7 @@ export async function syncLogisticsToItinerary(tripId: string, logistics?: any) 
           v.website            ? `🔗 ${v.website}`              : null,
           (v.status === 'confirmed' || v.status === 'booked') ? '✅ Confirmed' : '⏳ Not booked',
         ].filter(Boolean).join(' · '),
-        metadata:     { venueType: v.type, ...(time ? {} : { allDay: true }) },
+        metadata:     { venueType: v.type, phase: 'venue', ...(time ? {} : { allDay: true }) },
         logisticsRef: { collection: 'venue', index: vIdx },
       });
     }
@@ -484,11 +485,14 @@ export async function syncLogisticsToItinerary(tripId: string, logistics?: any) 
     // ── Re-apply user re-timings to derived stops ─────────────────────────────
     if (overrides.size) {
       for (const stop of newStops) {
-        if (stop.locked || !stop.logisticsRef || !stop.metadata?.phase) continue;
+        if (!stop.logisticsRef || !stop.metadata?.phase) continue;
         const ov = overrides.get(
           overrideKey(stop.logisticsRef.collection, stop.logisticsRef.index, stop.metadata.phase, stop.date),
         );
         if (!ov) continue;
+        // "Not going" applies to facts too; everything else only to derived stops
+        if (ov.skipped !== undefined) stop.skipped = ov.skipped;
+        if (stop.locked) { stop.userOverride = ov; continue; }
         if (ov.scheduledStart) {
           stop.scheduledStart = ov.scheduledStart;
           stop.time = ov.scheduledStart.split('T')[1]?.slice(0, 5) ?? stop.time;

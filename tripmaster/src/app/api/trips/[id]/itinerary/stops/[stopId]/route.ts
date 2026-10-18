@@ -32,8 +32,9 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   await connectDB();
 
   const body = await req.json();
-  const { scheduledStart, duration, name, type, notes, address, locationName, coordinates, notificationLeadMins, reference } = body;
-  if (!scheduledStart) return NextResponse.json({ error: 'scheduledStart required' }, { status: 400 });
+  const { scheduledStart, duration, name, type, notes, address, locationName, coordinates, notificationLeadMins, reference, skipped } = body;
+  // A skip/unskip alone needs no time — all-day items don't have one
+  if (!scheduledStart && skipped === undefined) return NextResponse.json({ error: 'scheduledStart required' }, { status: 400 });
 
   const itinerary = await TripItinerary.findOne({ tripId: id });
   if (!itinerary) return NextResponse.json({ error: 'Not found' }, { status: 404 });
@@ -42,7 +43,8 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   for (const day of itinerary.days) {
     const stop = day.stops.find((s: any) => s._id?.toString() === stopId);
     if (stop) {
-      stop.scheduledStart = scheduledStart;
+      if (scheduledStart) stop.scheduledStart = scheduledStart;
+      if (skipped !== undefined) stop.skipped = !!skipped;
       if (duration             !== undefined) stop.duration             = duration;
       if (name                 !== undefined) stop.name                 = name;
       if (type                 !== undefined) stop.type                 = type;
@@ -55,12 +57,13 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
 
       // A logistics-mirrored stop is regenerated on every logistics sync. Record
       // the traveller's change as an override so syncLogistics can re-apply it
-      // instead of clobbering it. (Facts — locked:true — never reach here: the UI
-      // gives them no edit affordance.)
+      // instead of clobbering it. Facts (locked:true) only ever send `skipped` —
+      // the UI gives them no other edit affordance.
       if (stop.source === 'logistics') {
         stop.userOverride = {
           ...(stop.userOverride || {}),
-          scheduledStart,
+          ...(scheduledStart     ? { scheduledStart }     : {}),
+          ...(skipped !== undefined ? { skipped: !!skipped } : {}),
           ...(duration !== undefined ? { duration } : {}),
           ...(name     !== undefined ? { name }     : {}),
           ...(notes    !== undefined ? { notes }    : {}),

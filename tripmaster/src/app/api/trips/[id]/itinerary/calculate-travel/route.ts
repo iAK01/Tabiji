@@ -77,6 +77,7 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
       const next = day.stops[i + 1];
       if (!current.coordinates || !next.coordinates) continue;
       if (!current.scheduledStart || !next.scheduledStart) continue;
+      if (current.skipped || next.skipped) continue;
 
       const metres = crowFlies(current.coordinates, next.coordinates);
       const mode: 'walk' | 'taxi' = metres < 800 ? 'walk' : 'taxi';

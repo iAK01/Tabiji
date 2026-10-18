@@ -73,6 +73,8 @@ export interface Stop {
   duration: number;
   notes?: string;
   completed?: boolean;
+  // "Not going" — hidden from the plan, no reminders, out of calendar exports; reversible
+  skipped?: boolean;
   source?: string;
   icon?: string;
   notificationLeadMins?: number | null;

@@ -156,3 +156,55 @@ export function snappedPreviewMinutes(
     ),
   );
 }
+// "1h 30m" / "45m"
+export function fmtDuration(mins: number): string {
+  if (mins >= 60) {
+    const h = Math.floor(mins / 60);
+    const m = mins % 60;
+    return m > 0 ? `${h}h ${m}m` : `${h}h`;
+  }
+  return `${mins}m`;
+}
+
+// "11:00–12:45", or just "11:00" for an instant marker
+export function timeRangeLabel(stop: Stop): string {
+  const start = stopStartMinutes(stop);
+  if (start === null) return 'All day';
+  const dur = stopDuration(stop);
+  return dur > 0 ? `${formatTime(start)}–${formatTime(start + dur)}` : formatTime(start);
+}
+
+// Timed stops grouped into runs that overlap each other (transitively), in time
+// order — "3 things at once" reads as one group in the list view.
+export function overlapClusters(stops: Stop[]): Stop[][] {
+  const timed = stops
+    .map(s => ({ s, start: stopStartMinutes(s) }))
+    .filter((x): x is { s: Stop; start: number } => x.start !== null)
+    .sort((a, b) => a.start - b.start || stopDuration(b.s) - stopDuration(a.s));
+  const clusters: Stop[][] = [];
+  let end = -Infinity;
+  for (const { s, start } of timed) {
+    if (start >= end || !clusters.length) { clusters.push([s]); end = start + Math.max(stopDuration(s), 1); }
+    else { clusters[clusters.length - 1].push(s); end = Math.max(end, start + Math.max(stopDuration(s), 1)); }
+  }
+  return clusters;
+}
+
+// Other timed stops that overlap this one
+export function concurrentWith(stop: Stop, stops: Stop[]): Stop[] {
+  const start = stopStartMinutes(stop);
+  if (start === null) return [];
+  const end = start + Math.max(stopDuration(stop), 1);
+  return stops.filter(o => {
+    if (o === stop || (o._id && o._id === stop._id)) return false;
+    const os = stopStartMinutes(o);
+    if (os === null) return false;
+    return os < end && start < os + Math.max(stopDuration(o), 1);
+  }).sort((a, b) => (stopStartMinutes(a) ?? 0) - (stopStartMinutes(b) ?? 0));
+}
+
+// What "Not going" can apply to: anything except travel and hotel bookings
+export function canSkip(stop: Stop): boolean {
+  if (stop.source !== 'logistics') return !!stop._id;
+  return !['flight', 'transport', 'transfer', 'checkin', 'hotel'].includes(stop.type);
+}

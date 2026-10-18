@@ -17,7 +17,7 @@ import {
   STOP_CONFIG, QUICK_ADD_TYPES, DEFAULT_DURATIONS, D,
 } from './Itinerary.config';
 import type { Stop, KnownLocation } from './Itinerary.config';
-import { stopDuration } from './Itinerary.helpers';
+import { stopDuration, fmtDuration } from './Itinerary.helpers';
 
 interface Props {
   open:           boolean;
@@ -30,16 +30,6 @@ interface Props {
   editStop?:      Stop;
   isMobile:       boolean;
   knownLocations: KnownLocation[];
-}
-
-// Format minutes → "1h 30m" / "45m"
-function fmtDuration(mins: number): string {
-  if (mins >= 60) {
-    const h = Math.floor(mins / 60);
-    const m = mins % 60;
-    return m > 0 ? `${h}h ${m}m` : `${h}h`;
-  }
-  return `${mins}m`;
 }
 
 // Which known location a stop is at. Rooms/stages at one venue all geocode to the

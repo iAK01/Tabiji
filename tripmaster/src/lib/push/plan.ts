@@ -273,6 +273,7 @@ function weatherLine(trip: any, date: string): string | null {
 function timedStops(days: any[], date: string, read: (dayDate: string, stop: any) => DateTime | null): Array<{ dt: DateTime; name: string }> {
   const day = days.find(d => d.date && ymd(d.date) === date);
   return (day?.stops ?? [])
+    .filter((s: any) => !s.skipped)
     .map((s: any) => ({ dt: read(day.date, s), name: String(s.name ?? '').trim() }))
     .filter((s: any): s is { dt: DateTime; name: string } => !!s.dt && !!s.name)
     .sort((a: any, b: any) => a.dt.toMillis() - b.dt.toMillis());
@@ -628,6 +629,8 @@ export function planTrip(data: TripData, r: Recipient, drive: DriveTimes, nowMs:
     for (const stop of day.stops ?? []) {
       // Copies of bookings are reminded about through the booking itself.
       if (stop.source === 'logistics') continue;
+      // "Not going" on the itinerary.
+      if (stop.skipped) continue;
       // "Off" in the stop editor. Missing (stops from imports/AI) means the default.
       if (stop.notificationLeadMins === null) continue;
       const event = localStopTime(day.date, stop);

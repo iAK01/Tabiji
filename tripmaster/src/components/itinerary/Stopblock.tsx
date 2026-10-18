@@ -41,6 +41,8 @@ interface Props {
   reminder?:    { local: string; sent: boolean } | null;
   /** Ringed briefly when a notification link lands on this stop. */
   highlighted?: boolean;
+  /** Drag, resize and delete only in edit mode — a stray touch must not re-time a stop. */
+  editMode?:    boolean;
 }
 
 // Bell + the time the notification goes out, beside the stop's name.
@@ -62,16 +64,16 @@ function ReminderMark({ reminder, size }: { reminder: { local: string; sent: boo
   );
 }
 
-export function StopBlock({ stop, onDelete, onClick, onResize, pxPerMin, isMobile, colIndex = 0, totalCols = 1, colSpan = 1, linkedFiles = [], startHour = DAY_START_HOUR, reminder = null, highlighted = false }: Props) {
+export function StopBlock({ stop, onDelete, onClick, onResize, pxPerMin, isMobile, colIndex = 0, totalCols = 1, colSpan = 1, linkedFiles = [], startHour = DAY_START_HOUR, reminder = null, highlighted = false, editMode = false }: Props) {
   const startMin = stopStartMinutes(stop);
   if (startMin === null) return null;
 
   // Logistics-mirrored stops split two ways:
-  //   fact    (locked:true)  → flight/checkout times etc. Read-only here; tap
-  //                            jumps to the Logistics record via onClick.
+  //   fact    (locked:true)  → flight/checkout times etc. Never draggable here;
+  //                            changed only on the Logistics record.
   //   derived (locked:false) → airport buffer / hotel check-in / breakfast.
-  //                            Behaves like a normal stop (drag, resize, edit);
-  //                            the change is persisted as an override.
+  //                            Behaves like a normal stop (drag, resize, edit in
+  //                            edit mode); the change is persisted as an override.
   const fromLogistics = stop.source === 'logistics';
   const isFact        = fromLogistics && stop.locked === true;
   const duration    = stopDuration(stop);
@@ -80,6 +82,7 @@ export function StopBlock({ stop, onDelete, onClick, onResize, pxPerMin, isMobil
   const hasLocation = !!(stop.address || stop.coordinates);
   const displayName = stop.name?.trim() || 'Unnamed stop';
   const hasFiles    = linkedFiles.length > 0;
+  const canMove     = editMode && !isFact;
 
   const [viewerFile, setViewerFile] = useState<ViewableFile | null>(null);
 
@@ -139,7 +142,7 @@ export function StopBlock({ stop, onDelete, onClick, onResize, pxPerMin, isMobil
 
   // ── DnD ───────────────────────────────────────────────────────────────────────
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
-    id: dragId, disabled: isResizing || isFact,
+    id: dragId, disabled: isResizing || !canMove,
   });
 
   const previewMin = transform
@@ -181,7 +184,8 @@ export function StopBlock({ stop, onDelete, onClick, onResize, pxPerMin, isMobil
         style={{
           transform:   isDragging ? `translateY(${translateY}px)` : undefined,
           willChange:  isDragging ? 'transform' : undefined,
-          touchAction: 'none',
+          // Outside edit mode the page must scroll and pinch straight through the card
+          touchAction: canMove ? 'none' : 'pan-x pan-y',
         }}
         sx={{
           position:   'absolute',
@@ -205,7 +209,8 @@ export function StopBlock({ stop, onDelete, onClick, onResize, pxPerMin, isMobil
           display:    'flex',
           alignItems: 'stretch',
           overflow:   'hidden',
-          cursor:     isDragging ? 'grabbing' : isFact ? 'pointer' : 'grab',
+          cursor:     isDragging ? 'grabbing' : canMove ? 'grab' : 'pointer',
+          opacity:    stop.skipped ? 0.45 : 1,
           transition: isDragging || isResizing ? 'none' : 'box-shadow 0.15s',
           userSelect: 'none',
 
@@ -215,7 +220,7 @@ export function StopBlock({ stop, onDelete, onClick, onResize, pxPerMin, isMobil
         }}
       >
         {/* ── Top resize handle ── */}
-        {!isFact && (
+        {canMove && (
           <Box
             onPointerDown={e => handleResizePointerDown(e, 'top')}
             sx={{
@@ -303,6 +308,7 @@ export function StopBlock({ stop, onDelete, onClick, onResize, pxPerMin, isMobil
                 fontSize:     isMobile ? '0.8rem' : '0.72rem',
                 lineHeight:   1,
                 color:        D.navy,
+                textDecoration: stop.skipped ? 'line-through' : 'none',
                 whiteSpace:   'nowrap',
                 overflow:     'hidden',
                 textOverflow: 'ellipsis',
@@ -358,6 +364,7 @@ export function StopBlock({ stop, onDelete, onClick, onResize, pxPerMin, isMobil
                   fontSize:     isMobile ? '0.88rem' : '0.82rem',
                   lineHeight:   1.15,
                   color:        D.navy,
+                  textDecoration: stop.skipped ? 'line-through' : 'none',
                   overflow:     'hidden',
                   flex:         1,
                   ...(nameLines > 1
@@ -440,7 +447,7 @@ export function StopBlock({ stop, onDelete, onClick, onResize, pxPerMin, isMobil
                 sx={{ p: isMobile ? 0.75 : 0.25, minWidth: isMobile ? 32 : 22, minHeight: isMobile ? 32 : 22 }}
               />
             )}
-            {!fromLogistics && onDelete && (
+            {editMode && !fromLogistics && onDelete && (
               <IconButton
                 size="small"
                 onClick={e => { e.stopPropagation(); onDelete(); }}
@@ -459,7 +466,7 @@ export function StopBlock({ stop, onDelete, onClick, onResize, pxPerMin, isMobil
         )}
 
         {/* ── Bottom resize handle + nub ── */}
-        {!isFact && (
+        {canMove && (
         <Box
           onPointerDown={e => handleResizePointerDown(e, 'bottom')}
           sx={{

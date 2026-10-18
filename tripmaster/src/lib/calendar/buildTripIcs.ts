@@ -115,6 +115,7 @@ export function buildTripIcs(
   if (want.has('itinerary')) {
     for (const day of itinerary?.days ?? []) {
       for (const stop of day?.stops ?? []) {
+        if (stop?.skipped) continue;
         const raw = stop?.scheduledStart;
         if (!raw) continue;
         const start = localToUtc(raw, tz);

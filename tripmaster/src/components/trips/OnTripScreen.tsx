@@ -1022,7 +1022,7 @@ export default function OnTripScreen({ tripId, trip }: OnTripScreenProps) {
   const totalDays   = totalNights + 1;
 
   const todayDay   = itinerary.find(d => d.date.split('T')[0] === today);
-  const todayStops = todayDay?.stops ?? [];
+  const todayStops = (todayDay?.stops ?? []).filter(s => !(s as any).skipped);
 
   const timedStops = todayStops
     .map(s => ({ stop: s, startM: stopStartMinutes(s) }))

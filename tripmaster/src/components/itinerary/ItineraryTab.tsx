@@ -11,6 +11,7 @@ import { restrictToVerticalAxis } from '@dnd-kit/modifiers';
 import {
   Box, Typography, Paper, Button,
   IconButton, Chip, CircularProgress, Tooltip, Menu, MenuItem,
+  ToggleButton, ToggleButtonGroup,
 } from '@mui/material';
 import { alpha }              from '@mui/material/styles';
 import { useTheme, useMediaQuery } from '@mui/material';
@@ -20,6 +21,12 @@ import DirectionsWalkIcon from '@mui/icons-material/DirectionsWalk';
 import LockIcon           from '@mui/icons-material/Lock';
 import HotelIcon          from '@mui/icons-material/Hotel';
 import CalendarMonthIcon  from '@mui/icons-material/CalendarMonth';
+import ViewDayIcon        from '@mui/icons-material/ViewDay';
+import ViewAgendaIcon     from '@mui/icons-material/ViewAgenda';
+import EditIcon           from '@mui/icons-material/Edit';
+import CheckIcon          from '@mui/icons-material/Check';
+import ZoomInIcon         from '@mui/icons-material/ZoomIn';
+import ZoomOutIcon        from '@mui/icons-material/ZoomOut';
 import NavigateButton     from '@/components/ui/NavigateButton';
 import ExportCalendarDialog from '@/components/calendar/ExportCalendarDialog';
 import { saveTripCache, getTripCache } from '@/lib/offline/db';
@@ -32,12 +39,23 @@ import {
 import type { Day, Stop, KnownLocation } from './Itinerary.config';
 import {
   stopStartMinutes, stopDuration, formatTime,
-  freeSlots, freeLabelText, computeStopColumns, isUntimed,
+  freeSlots, freeLabelText, computeStopColumns, isUntimed, concurrentWith,
 } from './Itinerary.helpers';
 import { HourRuler, GridLines, FreeGap, TravelConnector } from './Timelinechrome';
 import { StopBlock }            from './Stopblock';
 import { AddStopDrawer }        from './Addstopdrawer';
 import { FreeSuggestionsModal } from './FreeSuggestionsModal';
+import { StopDetailSheet }      from './StopDetailSheet';
+import { ItineraryList }        from './ItineraryList';
+import { useUrlParam }          from '@/lib/hooks/useUrlParam';
+
+const VIEW_MODES = ['timeline', 'list'] as const;
+const MIN_ZOOM   = 1;
+const MAX_ZOOM   = 3;
+const clampZoom  = (z: number) => Math.round(Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z)) * 20) / 20;
+
+// Stable identity for a stop (a few logistics mirrors may lack an _id)
+const stopKey = (s: Stop) => s._id ?? `${s.name}-${s.scheduledStart ?? s.time ?? 'notime'}`;
 
 interface Props {
   tripId:           string;
@@ -63,7 +81,7 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
   const searchParams = useSearchParams();
   const pathname     = usePathname();
 
-  const pxPerMin  = isMobile ? PX_PER_MIN_MOBILE : PX_PER_MIN_DESKTOP;
+  const basePxPerMin = isMobile ? PX_PER_MIN_MOBILE : PX_PER_MIN_DESKTOP;
 
   // ── State ────────────────────────────────────────────────────────────────────
   const [days,           setDays]           = useState<Day[]>([]);
@@ -83,6 +101,20 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
   }>({ open: false, time: '09:00', type: 'activity' });
   const [suggestionSlot, setSuggestionSlot] = useState<{ start: number; mins: number } | null>(null);
   const [exportOpen,     setExportOpen]     = useState(false);
+
+  // ── Reading a busy day ──────────────────────────────────────────────────────
+  // View mode is the default: taps open the detail sheet and nothing can be
+  // dragged. Edit mode turns on drag / resize / delete.
+  const [viewMode,    setViewMode]    = useUrlParam('view', VIEW_MODES, 'timeline');
+  const [editMode,    setEditMode]    = useState(false);
+  const [zoom,        setZoom]        = useState(1);
+  const [typeFilter,  setTypeFilter]  = useState<string[]>([]);
+  const [showSkipped, setShowSkipped] = useState(false);
+  const [sheetKey,    setSheetKey]    = useState<string | null>(null);
+  const zoomRef  = useRef(1);
+  const pinchRef = useRef<HTMLDivElement>(null);
+  zoomRef.current = zoom;
+  const pxPerMin = basePxPerMin * zoom;
 
   const nowLineRef = useRef<HTMLDivElement>(null);
 
@@ -183,6 +215,45 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
     }, 100);
   }, [activeDayIdx, days]);
 
+  // ── Pinch (touch) / ctrl+wheel (trackpad pinch) zooms the timeline ─────────
+  // Native listeners: React's touch handlers are passive and can't stop the
+  // browser zooming the whole page instead.
+  useEffect(() => {
+    const el = pinchRef.current;
+    if (!el) return;
+    let startDist = 0, startZoom = 1;
+    const dist = (t: TouchList) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+    const onStart = (e: TouchEvent) => {
+      if (e.touches.length === 2) { startDist = dist(e.touches); startZoom = zoomRef.current; }
+    };
+    const onMove = (e: TouchEvent) => {
+      if (e.touches.length !== 2 || !startDist) return;
+      e.preventDefault();
+      setZoom(clampZoom(startZoom * dist(e.touches) / startDist));
+    };
+    const onEnd = (e: TouchEvent) => { if (e.touches.length < 2) startDist = 0; };
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey) return;
+      e.preventDefault();
+      setZoom(clampZoom(zoomRef.current * Math.exp(-e.deltaY / 150)));
+    };
+    const noGesture = (e: Event) => e.preventDefault();   // iOS Safari page-zoom gesture
+    el.addEventListener('touchstart', onStart, { passive: true });
+    el.addEventListener('touchmove', onMove, { passive: false });
+    el.addEventListener('touchend', onEnd);
+    el.addEventListener('touchcancel', onEnd);
+    el.addEventListener('wheel', onWheel, { passive: false });
+    el.addEventListener('gesturestart', noGesture);
+    return () => {
+      el.removeEventListener('touchstart', onStart);
+      el.removeEventListener('touchmove', onMove);
+      el.removeEventListener('touchend', onEnd);
+      el.removeEventListener('touchcancel', onEnd);
+      el.removeEventListener('wheel', onWheel);
+      el.removeEventListener('gesturestart', noGesture);
+    };
+  }, [viewMode, loading, activeDayIdx]);
+
   // ── DnD sensors ──────────────────────────────────────────────────────────────
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -274,6 +345,8 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
     setDrawer({ open: true, time, type, editStop });
 
   const handleStopClick = (stop: Stop) => {
+    // View mode: read first — the detail sheet, with what else is on at the same time
+    if (!editMode) { setSheetKey(stopKey(stop)); return; }
     // Fact from a booking → send the user to the Logistics
     // record, the only place it can actually be changed.
     if (stop.source === 'logistics' && stop.locked) {
@@ -377,6 +450,30 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
     if (!res) return;
     const data = await res.json();
     setDays(data.days);
+  };
+
+  // "Not going" — reversible; skipped stops leave the plan, reminders and exports
+  const skipStop = async (stop: Stop, skipped: boolean) => {
+    if (!stop._id) return;
+    const updatedDays = days.map(d => ({
+      ...d,
+      stops: d.stops.map(s => (s._id === stop._id ? { ...s, skipped } : s)),
+    }));
+    setDays(updatedDays);
+    await saveTripCache(tripId, { ...(await getTripCache(tripId)), itinerary: updatedDays });
+
+    const res = await sendOrQueue(
+      { type: 'RESCHEDULE_STOP', tripId, payload: { stopId: stop._id, skipped } },
+      () => fetch(`/api/trips/${tripId}/itinerary/stops/${stop._id}`, {
+        method:  'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ skipped }),
+      }),
+      savedDays(updatedDays),
+    );
+    if (!res) return;
+    const data = await res.json();
+    if (data.days) setDays(data.days);
   };
 
   const rescheduleStop = async (stopId: string, newStartMin: number) => {
@@ -509,9 +606,30 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
   );
 
   const activeDay        = days[activeDayIdx];
-  const freeLabel        = activeDay ? freeLabelText(activeDay.stops) : '';
-  const timedStops       = activeDay?.stops.filter(s => !isUntimed(s)) ?? [];
-  const allDayStops      = activeDay?.stops.filter(isUntimed) ?? [];
+  // What you're actually doing — skipped stops don't count as busy
+  const committed        = activeDay?.stops.filter(s => !s.skipped) ?? [];
+  const skippedCount     = (activeDay?.stops.length ?? 0) - committed.length;
+  const typesToday       = Array.from(new Set(committed.map(s => s.type))).filter(t => STOP_CONFIG[t]);
+  const visibleStops     = (activeDay?.stops ?? []).filter(s =>
+    (showSkipped || !s.skipped) && (typeFilter.length === 0 || typeFilter.includes(s.type)),
+  );
+  const freeLabel        = activeDay ? freeLabelText(committed) : '';
+  const timedStops       = visibleStops.filter(s => !isUntimed(s));
+  const allDayStops      = visibleStops.filter(isUntimed);
+  // Short blocks render at a minimum height — reserve that in the layout
+  const stopCols         = computeStopColumns(timedStops, Math.ceil((isMobile ? 40 : 32) / pxPerMin));
+  const maxCols          = Math.max(1, ...stopCols.map(c => c.totalCols));
+  // Zoom widens the grid only when there's a clash to pull apart
+  const timelineWidthPct = 100 * (maxCols > 1 ? zoom : 1);
+
+  const filesFor = (stop: Stop) =>
+    (stop._id && filesByStop.get(stop._id)?.length)
+      ? filesByStop.get(stop._id)!
+      : (stop as any).logisticsRef
+      ? filesByStop.get(`${(stop as any).logisticsRef.collection}:${String((stop as any).logisticsRef.index)}`) ?? []
+      : [];
+
+  const sheetStop = sheetKey ? activeDay?.stops.find(s => stopKey(s) === sheetKey) ?? null : null;
   const ALL_DAY_COLLAPSED = 6;
   const shownAllDay      = showAllDay ? allDayStops : allDayStops.slice(0, ALL_DAY_COLLAPSED);
 
@@ -731,7 +849,7 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
           <Box sx={{ display: 'flex', gap: 0.75, flexWrap: 'wrap', flex: 1, minWidth: 0 }}>
             <Chip
               size="small"
-              label={`${activeDay.stops.filter(s => s.source !== 'logistics').length} planned`}
+              label={`${committed.filter(s => s.source !== 'logistics').length} planned`}
               sx={{
                 backgroundColor: alpha(D.green, 0.12),
                 color: D.green, fontWeight: 700,
@@ -747,6 +865,15 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
                 fontFamily: D.body, fontSize: '0.7rem',
               }}
             />
+            {skippedCount > 0 && (
+              <Chip
+                size="small"
+                label={showSkipped ? `Hide ${skippedCount} not going` : `${skippedCount} not going`}
+                onClick={() => setShowSkipped(v => !v)}
+                variant={showSkipped ? 'filled' : 'outlined'}
+                sx={{ fontWeight: 700, fontFamily: D.body, fontSize: '0.7rem', color: D.navy, borderColor: alpha(D.navy, 0.2) }}
+              />
+            )}
             {activeDay.stops.filter(s => s.source === 'logistics').length > 0 && (
               <Chip
                 size="small"
@@ -823,13 +950,87 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
         </Box>
       )}
 
-      {/* ── Timeline ── */}
+      {/* ── View controls — one slim row ── */}
+      {activeDay && (
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.25 }}>
+          <ToggleButtonGroup
+            size="small" exclusive value={viewMode}
+            onChange={(_, v) => { if (v) { setViewMode(v); if (v === 'list') setEditMode(false); } }}
+            sx={{ flexShrink: 0, '& .MuiToggleButton-root': { px: 1.25, gap: 0.5, fontFamily: D.body, fontWeight: 700, fontSize: '0.72rem', minHeight: 36 } }}
+          >
+            <ToggleButton value="timeline" aria-label="Timeline"><ViewDayIcon sx={{ fontSize: 18 }} />{!isMobile && 'Timeline'}</ToggleButton>
+            <ToggleButton value="list" aria-label="List"><ViewAgendaIcon sx={{ fontSize: 18 }} />{!isMobile && 'List'}</ToggleButton>
+          </ToggleButtonGroup>
+
+          {/* Type filter — one scrolling line */}
+          <Box sx={{
+            flex: 1, minWidth: 0, display: 'flex', gap: 0.5, overflowX: 'auto',
+            scrollbarWidth: 'none', '&::-webkit-scrollbar': { display: 'none' },
+          }}>
+            {typesToday.length > 1 && typesToday.map(t => {
+              const c  = STOP_CONFIG[t];
+              const on = typeFilter.includes(t);
+              return (
+                <Chip
+                  key={t}
+                  label={c.label.replace(/^\S+\s*/, '') || c.label}
+                  onClick={() => setTypeFilter(f => (on ? f.filter(x => x !== t) : [...f, t]))}
+                  sx={{
+                    flexShrink: 0, height: 32, fontFamily: D.body, fontWeight: 700, fontSize: '0.72rem',
+                    border: `1.5px solid ${on ? c.color : alpha(c.color, 0.3)}`,
+                    backgroundColor: on ? alpha(c.color, 0.14) : 'transparent',
+                    color: c.color,
+                  }}
+                />
+              );
+            })}
+          </Box>
+
+          {viewMode === 'timeline' && (
+            <>
+              {!isMobile && (
+                <IconButton size="small" onClick={() => setZoom(z => clampZoom(z - 0.5))} disabled={zoom <= MIN_ZOOM} aria-label="Zoom out">
+                  <ZoomOutIcon fontSize="small" />
+                </IconButton>
+              )}
+              {(zoom > 1 || !isMobile) && (
+                <Chip
+                  size="small" label={`${zoom.toFixed(zoom % 1 ? 1 : 0)}×`}
+                  onClick={zoom > 1 ? () => setZoom(1) : undefined}
+                  title={zoom > 1 ? 'Reset zoom' : 'Pinch or ctrl-scroll to zoom'}
+                  sx={{ flexShrink: 0, fontFamily: D.body, fontWeight: 700, fontVariantNumeric: 'tabular-nums', minWidth: 44 }}
+                />
+              )}
+              {!isMobile && (
+                <IconButton size="small" onClick={() => setZoom(z => clampZoom(z + 0.5))} disabled={zoom >= MAX_ZOOM} aria-label="Zoom in">
+                  <ZoomInIcon fontSize="small" />
+                </IconButton>
+              )}
+              <Button
+                size="small"
+                variant={editMode ? 'contained' : 'outlined'}
+                startIcon={editMode ? <CheckIcon /> : <EditIcon />}
+                onClick={() => setEditMode(v => !v)}
+                sx={{
+                  flexShrink: 0, fontFamily: D.body, fontWeight: 700, minHeight: 36,
+                  ...(editMode && { backgroundColor: D.terra, '&:hover': { backgroundColor: D.terra } }),
+                }}
+              >
+                {editMode ? 'Done' : 'Edit'}
+              </Button>
+            </>
+          )}
+        </Box>
+      )}
+
+      {/* ── Timeline / list ── */}
       {activeDay && (
         <Paper sx={{
           backgroundColor: '#ffffff',
           overflow: 'hidden',
           borderRadius: '2px',
-          border: `1px solid ${D.rule}`,
+          // Edit mode is unmistakable without taking any space
+          border: editMode && viewMode === 'timeline' ? `2px solid ${D.terra}` : `1px solid ${D.rule}`,
         }}>
           {/* ── All-day strip — venues/places known only by date, no time ── */}
           {allDayStops.length > 0 && (
@@ -891,12 +1092,15 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
             </Box>
           )}
 
+          {viewMode === 'list' ? (
+            <ItineraryList stops={timedStops} onOpen={s => setSheetKey(stopKey(s))} onSkip={skipStop} />
+          ) : (
           <DndContext
             sensors={sensors}
             modifiers={[restrictToVerticalAxis]}
             onDragEnd={handleDragEnd}
           >
-            <Box sx={{ display: 'flex', position: 'relative', height: effectiveTimelineH + 32 }}>
+            <Box ref={pinchRef} sx={{ display: 'flex', position: 'relative', height: effectiveTimelineH + 32, touchAction: 'pan-x pan-y' }}>
 
               {/* Hour ruler column */}
               <Box sx={{
@@ -906,12 +1110,13 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
                 <HourRuler pxPerMin={pxPerMin} startHour={effectiveStartHour} endHour={effectiveEndHour} />
               </Box>
 
-              {/* Timeline column */}
+              {/* Timeline column — scrolls sideways when zoomed into a clash */}
+              <Box sx={{ flex: 1, minWidth: 0, overflowX: timelineWidthPct > 100 ? 'auto' : 'hidden', overflowY: 'hidden' }}>
               <Box
                 sx={{
-                  flex: 1, position: 'relative', pt: 2, pb: 2,
+                  width: `${timelineWidthPct}%`, height: '100%',
+                  position: 'relative', pt: 2, pb: 2,
                   cursor: isMobile ? 'default' : 'crosshair',
-                  WebkitOverflowScrolling: 'touch',
                 }}
                 onClick={e => {
                   if (isMobile) return;
@@ -961,7 +1166,7 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
                 })()}
 
                 {(() => {
-                  const slots      = freeSlots(activeDay.stops);
+                  const slots      = freeSlots(committed);
                   const largestIdx = slots.reduce((best, s, i) => s.mins > (slots[best]?.mins ?? 0) ? i : best, 0);
                   return slots.map((slot, i) => (
                     <FreeGap
@@ -977,9 +1182,7 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
                 })()}
 
                 {(() => {
-                  // Short blocks render at a minimum height — reserve that in the layout
-                  const minMins = Math.ceil((isMobile ? 40 : 32) / pxPerMin);
-                  const cols    = computeStopColumns(timedStops, minMins);
+                  const cols = stopCols;
                   return timedStops.map((stop, i) => (
                     <Box key={stop._id ?? i}>
                       <StopBlock
@@ -993,15 +1196,10 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
                         totalCols={cols[i].totalCols}
                         colSpan={cols[i].span}
                         startHour={effectiveStartHour}
-                        linkedFiles={
-                          (stop._id && filesByStop.get(stop._id)?.length)
-                            ? filesByStop.get(stop._id)!
-                            : (stop as any).logisticsRef
-                            ? filesByStop.get(`${(stop as any).logisticsRef.collection}:${String((stop as any).logisticsRef.index)}`) ?? []
-                            : []
-                        }
+                        linkedFiles={filesFor(stop)}
                         reminder={reminderFor(stop)}
                         highlighted={!!stop._id && highlightStop === stop._id}
+                        editMode={editMode}
                       />
                       <TravelConnector stop={stop} pxPerMin={pxPerMin} startHour={effectiveStartHour} />
                     </Box>
@@ -1036,10 +1234,31 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
                   </Box>
                 )}
               </Box>
+              </Box>
             </Box>
           </DndContext>
+          )}
         </Paper>
       )}
+
+      {/* ── Tap a stop → the full picture ── */}
+      <StopDetailSheet
+        stop={sheetStop}
+        concurrent={sheetStop && activeDay ? concurrentWith(sheetStop, activeDay.stops) : []}
+        isMobile={isMobile}
+        linkedFiles={sheetStop ? filesFor(sheetStop) : []}
+        reminder={sheetStop ? reminderFor(sheetStop) : null}
+        onClose={() => setSheetKey(null)}
+        onSelect={s => setSheetKey(stopKey(s))}
+        onSkip={skipStop}
+        onEdit={s => {
+          setSheetKey(null);
+          const t = stopStartMinutes(s);
+          openDrawer(t !== null ? formatTime(t) : '09:00', s.type, s);
+        }}
+        onDelete={s => { setSheetKey(null); if (s._id) deleteStop(s._id); }}
+        onOpenLogistics={() => { setSheetKey(null); onSwitchToLogistics?.(); }}
+      />
 
       {/* ── Free-slot suggestions modal ── */}
       <FreeSuggestionsModal

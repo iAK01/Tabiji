@@ -211,6 +211,7 @@ function deriveRightNow(days: ItineraryDay[]): RightNow | null {
   const todayDay = days.find(d => d.date.split('T')[0] === today);
   if (!todayDay) return null;
   const timed = todayDay.stops
+    .filter((s: any) => !s.skipped)
     .map(s => ({ stop: s, startM: stopStartMinutes(s) }))
     .filter(x => x.startM !== null)
     .sort((a, b) => a.startM! - b.startM!);

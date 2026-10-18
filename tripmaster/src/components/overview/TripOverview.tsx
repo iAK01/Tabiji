@@ -186,6 +186,7 @@ export default function TripOverview({ trip, coverPhotoUrl, coverPhotoCredit, on
     if (todayDay?.stops?.length) {
       const nowMins  = new Date().getHours() * 60 + new Date().getMinutes();
       const upcoming = todayDay.stops
+        .filter((s: any) => !s.skipped)
         .map((s: any) => ({ ...s, _startMins: stopStartMinutes(s) }))
         .filter((s: any) => s._startMins !== null && s._startMins >= nowMins)
         .sort((a: any, b: any) => a._startMins - b._startMins);
@@ -234,8 +235,8 @@ export default function TripOverview({ trip, coverPhotoUrl, coverPhotoCredit, on
     .filter((d: any) => d.date && (d.stops?.length ?? 0) > 0)
     .map((d: any) => ({
       dateLabel: new Date(d.date.split('T')[0] + 'T12:00:00').toLocaleDateString('en-IE', { weekday: 'short', day: 'numeric', month: 'short' }),
-      freeLabel: freeLabelText(d.stops ?? []),
-      mins:      totalFreeMinutes(d.stops ?? []) as number,
+      freeLabel: freeLabelText((d.stops ?? []).filter((s: any) => !s.skipped)),
+      mins:      totalFreeMinutes((d.stops ?? []).filter((s: any) => !s.skipped)) as number,
     }))
     .sort((a: { mins: number }, b: { mins: number }) => b.mins - a.mins)
     .slice(0, 3);
@@ -583,7 +584,7 @@ export default function TripOverview({ trip, coverPhotoUrl, coverPhotoCredit, on
                         (() => {
                           const todayStr   = new Date().toISOString().split('T')[0];
                           const todayDay   = itinerary.days.find((d: any) => new Date(d.date).toISOString().split('T')[0] === todayStr);
-                          const todayStops = todayDay?.stops ?? [];
+                          const todayStops = (todayDay?.stops ?? []).filter((s: any) => !s.skipped);
                           const nowMins    = new Date().getHours() * 60 + new Date().getMinutes();
                           const remaining  = todayStops.filter((s: any) => {
                             const m = stopStartMinutes(s);
