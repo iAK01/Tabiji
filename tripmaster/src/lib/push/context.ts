@@ -12,7 +12,7 @@ import { placeTz, tripZones } from '@/lib/push/timezones';
 import { resolvePrefs } from '@/lib/push/prefs';
 import { packingCounts } from '@/lib/packing/counts';
 import { loadFlights } from '@/lib/flights/live';
-import type { DriveTimes, NavApp, Recipient, TripData } from '@/lib/push/plan';
+import type { DriveTimes, Recipient, TripData } from '@/lib/push/plan';
 
 const DEFAULT_AIRPORT_BUFFER_MIN = 120;
 // Ask Mapbox only about flights this close; further out an estimate is plenty.
@@ -41,12 +41,10 @@ export async function loadTripData(trip: any): Promise<TripData> {
 
 export function recipientOf(user: any, trip: any): Recipient {
   const buffer = user.preferences?.airportBufferMins;
-  const nav    = user.preferences?.navigationApps ?? {};
   return {
     userId:            String(user._id),
     prefs:             resolvePrefs(user.notificationPrefs),
     airportBufferMins: typeof buffer === 'number' && buffer >= 30 && buffer <= 300 ? buffer : DEFAULT_AIRPORT_BUFFER_MIN,
-    navApps:           { driving: (nav.driving ?? 'google_maps') as NavApp, transit: (nav.transit ?? 'google_maps') as NavApp },
     home: {
       zone:        placeTz(user.homeLocation) ?? placeTz(trip.origin) ?? tripZones(trip)(),
       countryCode: user.homeLocation?.countryCode ?? trip.origin?.countryCode ?? null,

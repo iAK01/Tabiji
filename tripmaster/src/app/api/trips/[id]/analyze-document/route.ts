@@ -8,9 +8,11 @@ import Trip                  from '@/lib/mongodb/models/Trip';
 import User                  from '@/lib/mongodb/models/User';
 import TripFile              from '@/lib/mongodb/models/TripFile';
 import TripLogistics         from '@/lib/mongodb/models/TripLogistics';
+import TripItinerary         from '@/lib/mongodb/models/TripItinerary';
 import { geocodeNear }       from '@/lib/geo/geocode';
 import { resolveCheckIn, checkInHint } from '@/lib/itinerary/checkInTiming';
 import { DOCUMENT_TYPE_VALUES, DOC_TYPE_EXTRACT } from '@/lib/files/documentTypes';
+import { buildExistingIndex, describeExisting, flagDuplicates } from '@/lib/extract/existingMatch';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -106,6 +108,7 @@ function buildPrompt(ctx: {
   inlineText: string | null;
   fileTypeHint: string | null;
   fileTypeGuidance: string;
+  existing: string;
 }): string {
   return `You are extracting structured trip data from material a traveller collected for their trip. It could be a conference schedule, an itinerary, a booking confirmation, a hotel email, a spreadsheet, a photo of a printed programme, or free-form notes.
 
@@ -117,7 +120,12 @@ Context:
 - Source: ${ctx.sourceLabel}
 ${ctx.userContext ? `- The traveller's own note about this: "${ctx.userContext}" — this is an instruction. Honour it: it may tell you which parts to keep or skip, whose booking this is, dates that apply, etc.` : ''}
 ${ctx.fileTypeHint ? `- The traveller has tagged this file as: "${ctx.fileTypeHint}" (${ctx.fileTypeGuidance}). Trust that unless the content clearly contradicts it.` : ''}
+${ctx.existing ? `
+Already in this trip (saved earlier, from another document or added by hand):
+${ctx.existing}
 
+Still extract everything in the material. On each item that is the same booking, place or scheduled event as a line above (even if this material words it differently) set "existingId" to that line's id. Same event means the same day at about the same time. Never set it just because two things share a venue, a day or a time slot; leave it null when unsure.
+` : ''}
 Extract everything relevant in these four groups:
 1. Accommodation — hotels, guesthouses, apartments, any place to stay. Capture the check-in/check-out DATES and, if the material states them, the earliest check-in TIME and latest check-out TIME the property allows (e.g. "Check-in: from 15:00").
 2. Venues — named places for events, concerts, conferences, meals (distinct from accommodation)
@@ -154,16 +162,16 @@ Return ONLY valid JSON, no markdown, no commentary:
   "documentType": "hotel_confirmation",
   "summary": "one plain sentence",
   "accommodation": [
-    { "type": "hotel", "name": "...", "address": "...", "searchQuery": "Hotel name, ${ctx.city}, ${ctx.country}", "checkIn": "YYYY-MM-DD or null", "checkOut": "YYYY-MM-DD or null", "checkInTime": "HH:MM or null", "checkOutTime": "HH:MM or null", "confirmationNumber": "... or null", "notes": "..." }
+    { "type": "hotel", "name": "...", "address": "...", "searchQuery": "Hotel name, ${ctx.city}, ${ctx.country}", "checkIn": "YYYY-MM-DD or null", "checkOut": "YYYY-MM-DD or null", "checkInTime": "HH:MM or null", "checkOutTime": "HH:MM or null", "confirmationNumber": "... or null", "notes": "...", "existingId": "a0 or null" }
   ],
   "venues": [
-    { "type": "concert", "name": "...", "address": "...", "searchQuery": "Venue name, ${ctx.city}, ${ctx.country}", "date": "YYYY-MM-DD or null", "time": "HH:MM or null", "notes": "..." }
+    { "type": "concert", "name": "...", "address": "...", "searchQuery": "Venue name, ${ctx.city}, ${ctx.country}", "date": "YYYY-MM-DD or null", "time": "HH:MM or null", "notes": "...", "existingId": "v0 or null" }
   ],
   "itineraryStops": [
-    { "name": "...", "type": "meeting", "date": "YYYY-MM-DD", "scheduledStart": "2026-07-22T14:30:00", "duration": 90, "address": "...", "searchQuery": "Place name, ${ctx.city}, ${ctx.country}", "notes": "..." }
+    { "name": "...", "type": "meeting", "date": "YYYY-MM-DD", "scheduledStart": "2026-07-22T14:30:00", "duration": 90, "address": "...", "searchQuery": "Place name, ${ctx.city}, ${ctx.country}", "notes": "...", "existingId": "s0 or null" }
   ],
   "transport": [
-    { "type": "flight", "departureLocation": "...", "arrivalLocation": "...", "departureTime": "2026-07-22T09:00:00 or null", "arrivalTime": "2026-07-22T11:30:00 or null", "confirmationNumber": "... or null", "flightNumber": "... or null", "operator": "... or null", "notes": "..." }
+    { "type": "flight", "departureLocation": "...", "arrivalLocation": "...", "departureTime": "2026-07-22T09:00:00 or null", "arrivalTime": "2026-07-22T11:30:00 or null", "confirmationNumber": "... or null", "flightNumber": "... or null", "operator": "... or null", "notes": "...", "existingId": "t0 or null" }
   ]
 }
 ${ctx.inlineText ? `\nMATERIAL:\n"""\n${ctx.inlineText}\n"""` : ''}`;
@@ -245,6 +253,13 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     trip.endDate   ? new Date(trip.endDate).toISOString().split('T')[0]   : null,
   ].filter(Boolean).join(' to ');
 
+  // What's already saved, so a second schedule for the same event isn't imported twice.
+  const [logistics, itinerary] = await Promise.all([
+    TripLogistics.findOne({ tripId: id }).lean() as Promise<any>,
+    TripItinerary.findOne({ tripId: id }).lean() as Promise<any>,
+  ]);
+  const existing = buildExistingIndex(logistics, itinerary);
+
   const prompt = buildPrompt({
     tripName:    trip.name,
     city:        trip.destination?.city    ?? '',
@@ -256,6 +271,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     inlineText:  claudeInput.kind === 'text' ? claudeInput.text : null,
     fileTypeHint,
     fileTypeGuidance,
+    existing:    describeExisting(existing),
   });
 
   // ── Build the message content ──────────────────────────────────────────────
@@ -324,6 +340,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       return !(dep && arr && dep === arr);
     });
 
+    flagDuplicates(extracted, existing);
+
     // ── Resolve real addresses + coordinates ─────────────────────────────────
     // A place with no verified location is useless — the traveller taps "navigate"
     // and ends up in the middle of the country. Geocode each place against the
@@ -355,7 +373,6 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
     // ── Preview the check-in time against the trip's inbound flights ──────────
     if (extracted.accommodation.length) {
-      const logistics = await TripLogistics.findOne({ tripId: id }).lean() as any;
       const arrivals: (string | null)[] = (logistics?.transportation ?? []).map((t: any) => t.arrivalTime ?? null);
       for (const a of extracted.accommodation) {
         if (!a.checkIn) continue;

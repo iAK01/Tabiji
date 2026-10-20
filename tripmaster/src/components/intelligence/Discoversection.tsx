@@ -9,10 +9,10 @@ import AutoAwesomeIcon  from '@mui/icons-material/AutoAwesome';
 import RefreshIcon      from '@mui/icons-material/Refresh';
 import EventIcon        from '@mui/icons-material/Event';
 import LocationCityIcon from '@mui/icons-material/LocationCity';
-import MapIcon          from '@mui/icons-material/Map';
 import type { CultureData, CultureHighlight } from './Intelligence.types';
 import { pickKey, type TripGuide } from '@/lib/guide/types';
-import { D, buildMapUrl, SectionHeading, SubHeading } from './Intelligence.shared';
+import { D, SectionHeading, SubHeading } from './Intelligence.shared';
+import NavigateButton from '@/components/ui/NavigateButton';
 import Addtoitinerarydialog, { type AddTarget } from './Addtoitinerarydialog';
 import { PicksRow } from './Discover.picks';
 import { GuideAbout, GuideAreas, GuideBrowse, GuideCredit, GuideHero, placeName } from './Discover.guide';
@@ -254,14 +254,11 @@ export default function Discoversection({ tripId }: Props) {
                       {briefing.neighbourhood.description}
                     </Typography>
                     {(briefing.neighbourhood.address || briefing.neighbourhood.coordinates) && (
-                      <Button
-                        href={buildMapUrl({ name: briefing.neighbourhood.name, coordinates: briefing.neighbourhood.coordinates, address: briefing.neighbourhood.address })}
-                        target="_blank" rel="noopener noreferrer"
-                        startIcon={<MapIcon sx={{ fontSize: '1rem !important' }} />}
+                      <NavigateButton
+                        destination={{ name: briefing.neighbourhood.name, coordinates: briefing.neighbourhood.coordinates, address: briefing.neighbourhood.address ?? undefined }}
+                        intent="view" variant="button" size="medium"
                         sx={{ mt: 1.25, minHeight: 44, fontWeight: 700, fontSize: '0.85rem', color: D.navy, border: `1px solid ${D.rule}` }}
-                      >
-                        Map
-                      </Button>
+                      />
                     )}
                   </Box>
                 </Paper>

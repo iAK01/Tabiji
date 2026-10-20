@@ -1,13 +1,13 @@
 'use client';
 
 import { Box, Typography, Button, IconButton, Paper, Tooltip } from '@mui/material';
-import MapIcon        from '@mui/icons-material/Map';
 import AddIcon        from '@mui/icons-material/Add';
 import CloseIcon      from '@mui/icons-material/Close';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import { pickKey } from '@/lib/guide/types';
 import type { CultureHighlight } from './Intelligence.types';
-import { D, TYPE_COLOURS, TYPE_LABELS, buildMapUrl, PhotoCredit } from './Intelligence.shared';
+import { D, TYPE_COLOURS, TYPE_LABELS, PhotoCredit } from './Intelligence.shared';
+import NavigateButton from '@/components/ui/NavigateButton';
 
 const BADGE = { px: 1, py: 0.35, backgroundColor: 'rgba(0,0,0,0.52)', backdropFilter: 'blur(8px)', borderRadius: 0.75 } as const;
 const BADGE_TEXT = { fontSize: '0.7rem', fontWeight: 700, color: '#fff', textTransform: 'uppercase', letterSpacing: '0.1em' } as const;
@@ -82,13 +82,11 @@ function PickCard({ h, onAdd, onDismiss }: {
         )}
 
         <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mt: 'auto', pt: 0.75 }}>
-          <Button
-            href={buildMapUrl(h)} target="_blank" rel="noopener noreferrer"
-            startIcon={<MapIcon sx={{ fontSize: '1rem !important' }} />}
+          <NavigateButton
+            destination={{ name: h.name, coordinates: h.coordinates, address: h.address ?? undefined }}
+            intent="view" variant="button" size="medium"
             sx={{ minHeight: 44, fontWeight: 700, fontSize: '0.85rem', color: D.navy, border: `1px solid ${D.rule}` }}
-          >
-            Map
-          </Button>
+          />
           <Button
             onClick={onAdd}
             startIcon={<AddIcon sx={{ fontSize: '1rem !important' }} />}

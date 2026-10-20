@@ -1336,6 +1336,8 @@ export default function FilesTab({ tripId, fabTrigger }: FilesTabProps) {
   const [pasteSeed,              setPasteSeed]              = useState<{ text: string; context: string } | null>(null);
   const [identifyAfterUpload,    setIdentifyAfterUpload]    = useState(true);
   const [identifyFile,           setIdentifyFile]           = useState<TripFile | null>(null);
+  const [pageDrag,               setPageDrag]               = useState(false);
+  const [droppedExtra,           setDroppedExtra]           = useState(0);
   const uploadExtract = useSmartExtract(tripId);
 
   // Notification links: ?file=<id> opens a document, ?todo=<id> points at a to-do.
@@ -1429,6 +1431,7 @@ export default function FilesTab({ tripId, fabTrigger }: FilesTabProps) {
     setEditingFile(null);
     setPendingAttachments([]);
     setRemovedAttachmentPaths([]);
+    setDroppedExtra(0);
     setError(null);
     setDialogOpen(true);
   };
@@ -1478,6 +1481,61 @@ export default function FilesTab({ tripId, fabTrigger }: FilesTabProps) {
     setError(null);
     if (!dialogOpen) setDialogOpen(true);
   };
+
+  // Every drop — anywhere on the page or on a drop zone — starts a clean upload.
+  // The dialog takes one file; the rest are named so they aren't silently lost.
+  const addDroppedFiles = (dropped: File[]) => {
+    if (!dropped.length) return;
+    openDialog('file');
+    handleFileSelected(dropped[0]);
+    setDroppedExtra(dropped.length - 1);
+  };
+
+  // ── Whole-page drop target ──────────────────────────────────────────────────
+  const addDroppedRef = useRef(addDroppedFiles);
+  useEffect(() => { addDroppedRef.current = addDroppedFiles; });
+
+  useEffect(() => {
+    let depth = 0;
+    const hasFiles = (e: DragEvent) => Array.from(e.dataTransfer?.types ?? []).includes('Files');
+    // Any open dialog (upload, extract review, viewer…) owns drops while it's up.
+    const ready = () => !document.querySelector('[role="dialog"]');
+    const reset = () => { depth = 0; setPageDrag(false); };
+
+    const onEnter = (e: DragEvent) => {
+      if (!hasFiles(e)) return;
+      depth++;
+      if (ready()) setPageDrag(true);
+    };
+    const onLeave = (e: DragEvent) => {
+      if (!hasFiles(e)) return;
+      depth = Math.max(0, depth - 1);
+      if (!depth) setPageDrag(false);
+    };
+    const onOver = (e: DragEvent) => {
+      if (!hasFiles(e) || e.defaultPrevented) return;  // an inner drop zone has it
+      e.preventDefault();                              // never let the browser open the file
+      e.dataTransfer!.dropEffect = ready() ? 'copy' : 'none';
+    };
+    const onDrop = (e: DragEvent) => {
+      if (!hasFiles(e)) return;
+      const handled = e.defaultPrevented;
+      e.preventDefault();
+      reset();
+      if (!handled && ready()) addDroppedRef.current(Array.from(e.dataTransfer?.files ?? []));
+    };
+
+    document.addEventListener('dragenter', onEnter);
+    document.addEventListener('dragleave', onLeave);
+    document.addEventListener('dragover',  onOver);
+    document.addEventListener('drop',      onDrop);
+    return () => {
+      document.removeEventListener('dragenter', onEnter);
+      document.removeEventListener('dragleave', onLeave);
+      document.removeEventListener('dragover',  onOver);
+      document.removeEventListener('drop',      onDrop);
+    };
+  }, []);
 
   const handleToggleComplete = async (file: TripFile) => {
     const newCompleted = !file.completed;
@@ -1688,6 +1746,29 @@ export default function FilesTab({ tripId, fabTrigger }: FilesTabProps) {
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, pb: 10 }}>
 
+      {/* ── Whole-page drop overlay ── */}
+      {pageDrag && (
+        <Box sx={{
+          position: 'fixed', inset: 0, zIndex: t => t.zIndex.modal,
+          display: 'flex', p: { xs: 1.5, sm: 3 },
+          backgroundColor: alpha(D.paper, 0.9), backdropFilter: 'blur(2px)',
+        }}>
+          <Box sx={{
+            flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+            border: '2px dashed', borderColor: D.green, borderRadius: 3,
+            backgroundColor: alpha(D.green, 0.04), textAlign: 'center', px: 2,
+          }}>
+            <CloudUploadIcon sx={{ fontSize: 44, color: D.green, mb: 1.5 }} />
+            <Typography sx={{ fontFamily: D.display, fontSize: { xs: '1.3rem', sm: '1.6rem' }, letterSpacing: '-0.02em', color: D.navy, mb: 0.5 }}>
+              Drop to add to your trip
+            </Typography>
+            <Typography sx={{ fontFamily: D.body, fontSize: '0.74rem', color: 'text.disabled', letterSpacing: '0.04em' }}>
+              PDF · Image · Word · Excel · CSV · Text · Max 20MB
+            </Typography>
+          </Box>
+        </Box>
+      )}
+
       {/* ── Header ── */}
       <Box sx={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', flexWrap: 'wrap', gap: 1.5 }}>
         <Box>
@@ -1776,7 +1857,7 @@ export default function FilesTab({ tripId, fabTrigger }: FilesTabProps) {
               Upload boarding passes and documents, save links, add key contacts, jot a note, or add a to-do with reminders.
             </Typography>
           </Box>
-          <DropZone onFile={f => { setMode('file'); handleFileSelected(f); }} />
+          <DropZone onFile={f => addDroppedFiles([f])} />
         </Paper>
       )}
 
@@ -1857,7 +1938,7 @@ export default function FilesTab({ tripId, fabTrigger }: FilesTabProps) {
           })}
 
           {/* ── Drop zone — below the list, not in front of it ── */}
-          <DropZone onFile={f => { setMode('file'); handleFileSelected(f); }} />
+          <DropZone onFile={f => addDroppedFiles([f])} />
         </>
       )}
 
@@ -2104,6 +2185,11 @@ export default function FilesTab({ tripId, fabTrigger }: FilesTabProps) {
                 </Box>
                 {!uploading && <IconButton size="small" onClick={() => setPendingFile(null)}><DeleteIcon fontSize="small" /></IconButton>}
               </Box>
+            )}
+            {mode === 'file' && pendingFile && droppedExtra > 0 && (
+              <Typography sx={{ fontFamily: D.body, fontSize: '0.78rem', color: D.terra, mt: -1 }}>
+                One file at a time — drop the other {droppedExtra === 1 ? 'file' : droppedExtra} after this one.
+              </Typography>
             )}
             {mode === 'file' && (pendingFile || editingFile) && (
               <>

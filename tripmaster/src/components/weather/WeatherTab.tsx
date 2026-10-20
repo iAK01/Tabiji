@@ -13,12 +13,14 @@ import AirIcon          from '@mui/icons-material/Air';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import {
-  freshCurrent, homeCompare, isWetDay, shortDay, summaryLine, todayIn, typicalFrom,
+  currentHourIn, homeCompare, isWetDay, nowAndNext, shortDay, summaryLine, todayIn, typicalFrom,
   watchOuts, wearGuide,
   type DayWeather, type HomeCompare, type WatchItem, type WearRow, type WeatherResult,
 } from '@/lib/weather-insights';
 import { D, weatherIcon, warmth, type IconComponent } from './weatherUi';
 import WeatherDaySheet from './WeatherDaySheet';
+import WeatherNow from './WeatherNow';
+import TripWeatherChart from './TripWeatherChart';
 
 interface Props {
   tripId:          string;
@@ -422,7 +424,9 @@ export default function WeatherTab({ tripId, destinationCity }: Props) {
 
   const today    = todayIn(weather.timezone);
   const onTrip   = today >= days[0].date && today <= days[days.length - 1].date;
-  const now      = onTrip ? freshCurrent(weather) : null;
+  const now      = onTrip ? nowAndNext(weather) : null;
+  const nowHour  = onTrip ? currentHourIn(weather.timezone, today) : null;
+  const nowKey   = nowHour != null ? `${today}-${nowHour}` : null;
   const typical  = typicalFrom(days);
   const summary  = summaryLine(days);
   const wear     = wearGuide(weather);
@@ -451,11 +455,6 @@ export default function WeatherTab({ tripId, destinationCity }: Props) {
           <Typography noWrap sx={{ fontSize: '0.85rem', color: D.muted, fontFamily: D.body, mt: 0.35 }}>
             Updated {ageLabel(weather.fetchedAt)}{places ? ` · ${places}` : ''}
           </Typography>
-          {now && (
-            <Typography sx={{ fontSize: '1rem', color: D.navy, fontFamily: D.body, fontWeight: 700, mt: 0.75 }}>
-              Now {now.temp}° · feels {now.feels}° · {now.condition}
-            </Typography>
-          )}
         </Box>
         <Tooltip title="Refresh weather data">
           <span>
@@ -473,7 +472,16 @@ export default function WeatherTab({ tripId, destinationCity }: Props) {
         </Tooltip>
       </Box>
 
-      {/* Day by day — main content */}
+      {/* On the trip: right now and the next few hours */}
+      {now && <WeatherNow now={now} place={placeFor(days.find(d => d.date === today) ?? days[0])} />}
+
+      {/* The whole trip as one timeline — tap through to any day */}
+      <Box>
+        <SectionLabel>Across the trip</SectionLabel>
+        <TripWeatherChart days={days} nowKey={nowKey} onOpenDay={openDay} />
+      </Box>
+
+      {/* Day by day */}
       <Box>
         <SectionLabel>{allTypical ? 'Typical days' : 'Day by day'}</SectionLabel>
         <DayStrip days={days} today={onTrip ? today : ''} onOpen={openDay} />

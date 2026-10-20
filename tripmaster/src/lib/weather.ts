@@ -107,6 +107,16 @@ function clearSkyUv(lat: number, date: string): number {
   return cosZ <= 0 ? 0 : Math.round(12.5 * cosZ ** 2.42);
 }
 
+// The same, through the day: mid-hour local time → solar time → zenith angle.
+function clearSkyUvAt(point: { lat: number; lon: number }, date: string, hour: number, utcOffsetSec: number): number {
+  const rad   = Math.PI / 180;
+  const solar = hour + 0.5 - utcOffsetSec / 3600 + point.lon / 15;
+  const phi   = point.lat * rad;
+  const dec   = declination(date) * rad;
+  const cosZ  = Math.sin(phi) * Math.sin(dec) + Math.cos(phi) * Math.cos(dec) * Math.cos((solar - 12) * 15 * rad);
+  return cosZ <= 0 ? 0 : Math.round(12.5 * cosZ ** 2.42 * 10) / 10;
+}
+
 // ─── WMO codes ────────────────────────────────────────────────────────────────
 
 const WMO_MAP: Record<number, { condition: string; icon: string }> = {
@@ -474,7 +484,11 @@ async function fetchArchiveWindow(point: Point, start: string, len: number) {
       rain: era5?.get(date)?.precipitation ?? h?.precipitation ?? null,
     };
   });
-  return { samples, timezone: (data.timezone as string) ?? null };
+  return {
+    samples,
+    timezone:  (data.timezone as string) ?? null,
+    utcOffset: isNum(data.utc_offset_seconds) ? (data.utc_offset_seconds as number) : 0,
+  };
 }
 
 // Typical days have no single weather code — describe the odds instead.
@@ -491,7 +505,9 @@ function typicalCondition(
 }
 
 // One typical day hour by hour: means across the pool, rain as how often it rained that hour.
-function typicalHours(pool: Sample[], sunrise: string | null, sunset: string | null): DayHours {
+function typicalHours(
+  pool: Sample[], sunrise: string | null, sunset: string | null, uvAt: (h: number) => number,
+): DayHours {
   const at = (key: string, h: number) => pool.map(s => s.hours?.[key]?.[h] ?? null);
   const hours: DayHours = {
     temp: [], feels: [], code: [], rain: [], mm: [], cloud: [], wind: [],
@@ -513,7 +529,7 @@ function typicalHours(pool: Sample[], sunrise: string | null, sunset: string | n
     hours.mm.push(null);
     hours.gust.push(null);
     hours.dir.push(null);
-    hours.uv.push(null);
+    hours.uv.push(uvAt(h));   // clear-sky — what an unclouded hour would bring
   }
   return hours;
 }
@@ -556,7 +572,8 @@ async function fetchTypicalDays(point: Point, start: string, end: string, city: 
     const typ   = typicalCondition(chance, kind, tMax, sun != null && light > 0 ? sun / light : null);
     // Sunrise/sunset from the most recent year's same date — they barely move year to year.
     const recent = windows[0].samples[i + POOL_DAYS];
-    const hours  = typicalHours(pool, recent?.sunrise ?? null, recent?.sunset ?? null);
+    const hours  = typicalHours(pool, recent?.sunrise ?? null, recent?.sunset ?? null,
+      h => clearSkyUvAt(point, date, h, windows[0].utcOffset));
     return {
       date, label: formatLabel(date), city,
       condition: typ.condition, icon: wmo(typ.code).icon, code: typ.code,

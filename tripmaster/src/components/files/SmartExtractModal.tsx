@@ -12,6 +12,7 @@ import CalendarTodayIcon  from '@mui/icons-material/CalendarToday';
 import DirectionsIcon     from '@mui/icons-material/Directions';
 import { DOC_TYPE_LABEL } from '@/lib/files/documentTypes';
 import { readSaved } from '@/lib/offline/saveErrors';
+import type { DuplicateOf } from '@/lib/extract/existingMatch';
 
 const D = {
   green:   '#6B7C5C',
@@ -22,7 +23,12 @@ const D = {
   body:    '"Archivo", "Inter", sans-serif',
 } as const;
 
-interface Located {
+interface Flagged {
+  /** Server-matched: this looks like something already in the trip. */
+  duplicateOf?: DuplicateOf;
+}
+
+interface Located extends Flagged {
   address?: string;
   coordinates?: { lat: number; lng: number } | null;
   addressUnverified?: boolean;
@@ -59,7 +65,7 @@ export interface ExtractedStop extends Located {
   notes?: string;
 }
 
-export interface ExtractedTransport {
+export interface ExtractedTransport extends Flagged {
   type: string;
   departureLocation?: string;
   arrivalLocation?: string;
@@ -114,6 +120,12 @@ function fmtType(t: string) {
   return t.charAt(0).toUpperCase() + t.slice(1).replace(/_/g, ' ');
 }
 
+function duplicateNote(item: Flagged) {
+  const d = item.duplicateOf;
+  if (!d) return undefined;
+  return `Already in your trip: ${[d.label, fmtDate(d.date), d.time].filter(Boolean).join(' · ')}`;
+}
+
 function transportLabel(t: ExtractedTransport) {
   const route = [t.departureLocation, t.arrivalLocation].filter(Boolean).join(' → ');
   return t.flightNumber || route || fmtType(t.type || 'transport');
@@ -139,9 +151,9 @@ function Section({ title, icon, color, children }: {
   );
 }
 
-function CheckItem({ checked, onChange, primary, secondary, note, highlight }: {
+function CheckItem({ checked, onChange, primary, secondary, note, highlight, duplicate }: {
   checked: boolean; onChange: (v: boolean) => void;
-  primary: string; secondary?: string; note?: string; highlight?: string;
+  primary: string; secondary?: string; note?: string; highlight?: string; duplicate?: string;
 }) {
   return (
     <Box
@@ -175,6 +187,11 @@ function CheckItem({ checked, onChange, primary, secondary, note, highlight }: {
             {highlight}
           </Typography>
         )}
+        {duplicate && (
+          <Typography sx={{ fontFamily: D.body, fontWeight: 700, fontSize: '0.74rem', color: D.terra, lineHeight: 1.4, mt: 0.25 }}>
+            {duplicate}
+          </Typography>
+        )}
         {note && (
           <Typography sx={{ fontFamily: D.body, fontSize: '0.72rem', color: 'text.disabled', lineHeight: 1.4 }}>
             {note}
@@ -196,10 +213,12 @@ export default function SmartExtractModal({
   const allStops  = data.itineraryStops   ?? [];
   const allTrans  = data.transport        ?? [];
 
-  const [selAccomm, setSelAccomm] = useState<boolean[]>(() => allAccomm.map(() => true));
-  const [selVenues, setSelVenues] = useState<boolean[]>(() => allVenues.map(() => true));
-  const [selStops,  setSelStops]  = useState<boolean[]>(() => allStops.map(() => true));
-  const [selTrans,  setSelTrans]  = useState<boolean[]>(() => allTrans.map(() => true));
+  // Anything already in the trip starts unticked — still addable.
+  const [selAccomm, setSelAccomm] = useState<boolean[]>(() => allAccomm.map(x => !x.duplicateOf));
+  const [selVenues, setSelVenues] = useState<boolean[]>(() => allVenues.map(x => !x.duplicateOf));
+  const [selStops,  setSelStops]  = useState<boolean[]>(() => allStops.map(x => !x.duplicateOf));
+  const [selTrans,  setSelTrans]  = useState<boolean[]>(() => allTrans.map(x => !x.duplicateOf));
+  const duplicateCount = [...allAccomm, ...allVenues, ...allStops, ...allTrans].filter(x => x.duplicateOf).length;
   const [importing, setImporting] = useState(false);
   const [progress,  setProgress]  = useState(0);
   const [done,      setDone]      = useState<{ ok: number; failed: string[]; offDates: string[]; filed?: boolean; fileFailed?: boolean } | null>(null);
@@ -454,9 +473,14 @@ export default function SmartExtractModal({
               </Alert>
             ) : (
             <>
-            <Typography sx={{ fontFamily: D.body, fontSize: '0.8rem', color: 'text.secondary', mb: 2 }}>
+            <Typography sx={{ fontFamily: D.body, fontSize: '0.8rem', color: 'text.secondary', mb: duplicateCount ? 1 : 2 }}>
               Select what to import into your trip.
             </Typography>
+            {duplicateCount > 0 && (
+              <Alert severity="info" sx={{ fontFamily: D.body, fontSize: '0.8rem', mb: 2 }}>
+                {duplicateCount === 1 ? '1 item is' : `${duplicateCount} items are`} already in your trip — left unticked.
+              </Alert>
+            )}
 
             {allAccomm.length > 0 && (
               <Section title={`Accommodation · ${allAccomm.length}`} icon={<HotelIcon sx={{ fontSize: 15 }} />} color={D.navy}>
@@ -472,6 +496,7 @@ export default function SmartExtractModal({
                       a.address,
                     ].filter(Boolean).join(' · ')}
                     highlight={a.checkInHint}
+                    duplicate={duplicateNote(a)}
                     note={[a.addressUnverified && '⚠ address not found — add it after import', a.notes].filter(Boolean).join(' · ')}
                   />
                 ))}
@@ -488,6 +513,7 @@ export default function SmartExtractModal({
                     primary={v.name}
                     secondary={[fmtType(v.type), v.address].filter(Boolean).join(' · ')}
                     note={[fmtDate(v.date), fmtTime(v.time), v.addressUnverified && '⚠ address not found', v.notes].filter(Boolean).join(' · ')}
+                    duplicate={duplicateNote(v)}
                   />
                 ))}
               </Section>
@@ -503,6 +529,7 @@ export default function SmartExtractModal({
                     primary={s.name}
                     secondary={[fmtType(s.type), fmtDate(s.date), fmtTime(s.scheduledStart)].filter(Boolean).join(' · ')}
                     note={[s.address, s.addressUnverified && '⚠ address not found', s.notes].filter(Boolean).join(' · ')}
+                    duplicate={duplicateNote(s)}
                   />
                 ))}
               </Section>
@@ -518,6 +545,7 @@ export default function SmartExtractModal({
                     primary={transportLabel(t)}
                     secondary={[fmtType(t.type), fmtDate(t.departureTime?.split('T')[0]), fmtTime(t.departureTime)].filter(Boolean).join(' · ')}
                     note={[t.confirmationNumber ? `Ref ${t.confirmationNumber}` : '', t.operator, t.notes].filter(Boolean).join(' · ')}
+                    duplicate={duplicateNote(t)}
                   />
                 ))}
               </Section>

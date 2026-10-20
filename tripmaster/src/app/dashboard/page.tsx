@@ -14,7 +14,6 @@ import BackpackIcon           from '@mui/icons-material/Backpack';
 import ViewListIcon           from '@mui/icons-material/ViewList';
 import CalendarMonthIcon      from '@mui/icons-material/CalendarMonth';
 import KeyboardArrowRightIcon from '@mui/icons-material/KeyboardArrowRight';
-import NavigationIcon         from '@mui/icons-material/Navigation';
 import FlightIcon             from '@mui/icons-material/Flight';
 import TrainIcon              from '@mui/icons-material/Train';
 import DirectionsBusIcon      from '@mui/icons-material/DirectionsBus';
@@ -41,6 +40,7 @@ import { warmTrips } from '@/lib/offline/warm';
 import TripReadinessPanel from '@/components/dashboard/TripReadinessPanel';
 import { isOnTrip } from '@/lib/trips/onTrip';
 import NotificationBell from '@/components/notifications/NotificationBell';
+import NavigateButton from '@/components/ui/NavigateButton';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -191,20 +191,6 @@ function fmtMins(totalMins: number): string {
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 }
 
-function mapsLinks(name: string, address?: string, coords?: { lat: number; lng: number }) {
-  return {
-    apple: coords
-      ? `https://maps.apple.com/?ll=${coords.lat},${coords.lng}&q=${encodeURIComponent(name)}`
-      : `https://maps.apple.com/?q=${encodeURIComponent(address || name)}`,
-    google: coords
-      ? `https://www.google.com/maps/search/?api=1&query=${coords.lat},${coords.lng}`
-      : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address || name)}`,
-    waze: coords
-      ? `https://waze.com/ul?ll=${coords.lat},${coords.lng}&navigate=yes`
-      : `https://waze.com/ul?q=${encodeURIComponent(address || name)}&navigate=yes`,
-  };
-}
-
 function deriveRightNow(days: ItineraryDay[]): RightNow | null {
   const today = new Date().toISOString().split('T')[0];
   const nowMins = new Date().getHours() * 60 + new Date().getMinutes();
@@ -225,46 +211,6 @@ function deriveRightNow(days: ItineraryDay[]): RightNow | null {
   const untimed = todayDay.stops.find(s => stopStartMinutes(s) === null);
   if (untimed) return { stop: untimed, startM: null, inProgress: false };
   return null;
-}
-
-// ─── MapButtons ───────────────────────────────────────────────────────────────
-
-function MapButtons({ name, address, coordinates, stopPropagation }: {
-  name: string;
-  address?: string;
-  coordinates?: { lat: number; lng: number };
-  stopPropagation?: boolean;
-}) {
-  const links = mapsLinks(name, address, coordinates);
-  return (
-    <Box sx={{ display: 'flex', gap: 0.75, mt: 1, flexWrap: 'wrap' }}>
-      {[
-        { label: 'Apple Maps',  href: links.apple,  color: D.navy },
-        { label: 'Google Maps', href: links.google, color: '#0369a1' },
-        { label: 'Waze',        href: links.waze,   color: '#00838f' },
-      ].map(({ label, href, color }) => (
-        <Button
-          key={label}
-          component="a"
-          href={href}
-          target="_blank"
-          rel="noopener noreferrer"
-          size="small"
-          onClick={stopPropagation ? (e: React.MouseEvent) => e.stopPropagation() : undefined}
-          startIcon={<NavigationIcon sx={{ fontSize: '0.85rem !important' }} />}
-          sx={{
-            fontFamily: D.body,
-            fontSize: '0.72rem', fontWeight: 700, py: 0.4, px: 1, minHeight: 28,
-            backgroundColor: alpha(color, 0.09), color,
-            border: `1px solid ${alpha(color, 0.2)}`, borderRadius: 1.5,
-            '&:hover': { backgroundColor: alpha(color, 0.18) },
-          }}
-        >
-          {label}
-        </Button>
-      ))}
-    </Box>
-  );
 }
 
 // ─── Active trip banner ───────────────────────────────────────────────────────
@@ -452,8 +398,11 @@ function ActiveTripBanner({
                 </Box>
               )}
               {(rightNow.stop.address || rightNow.stop.coordinates) && !isPast && (
-                <MapButtons name={rightNow.stop.name} address={rightNow.stop.address}
-                  coordinates={rightNow.stop.coordinates} stopPropagation />
+                <NavigateButton
+                  destination={{ name: rightNow.stop.name, address: rightNow.stop.address, coordinates: rightNow.stop.coordinates ?? null }}
+                  suggestedMode="walking" variant="button" label="Navigate"
+                  sx={{ mt: 1, fontFamily: D.body, fontWeight: 700 }}
+                />
               )}
             </Box>
           </Box>

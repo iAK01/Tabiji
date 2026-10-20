@@ -65,28 +65,6 @@ const UserSchema = new Schema({
     // auto-generated "Airport check-in" itinerary stop. 30–300; default 120.
     airportBufferMins: { type: Number, default: 120 },
 
-    // ── Navigation app preferences per travel mode ──────────────────────────
-    // 'apple_maps' is only meaningful on iOS — the UI filters it by platform
-    navigationApps: {
-      walking: {
-        type: String,
-        enum: ['apple_maps', 'google_maps', 'waze'],
-        default: 'google_maps',
-      },
-      driving: {
-        type: String,
-        enum: ['apple_maps', 'google_maps', 'waze'],
-        default: 'google_maps',
-      },
-      transit: {
-        type: String,
-        enum: ['apple_maps', 'google_maps', 'waze'],
-        default: 'google_maps',
-      },
-      // Set to true once user has explicitly configured their preferences
-      setupComplete: { type: Boolean, default: false },
-    },
-
     // App IDs from MY_APPS_CATALOG the user has toggled on
     myApps: { type: [String], default: [] },
   },

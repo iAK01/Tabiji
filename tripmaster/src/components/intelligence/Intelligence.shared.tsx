@@ -49,20 +49,6 @@ export const TYPE_LABELS: Record<string, string> = {
   other:         'Other',
 };
 
-// ─── Map link builder ─────────────────────────────────────────────────────────
-
-export function buildMapUrl(h: {
-  name:         string;
-  coordinates?: { lat: number; lng: number } | null;
-  address?:     string | null;
-}): string {
-  if (h.coordinates?.lat && h.coordinates?.lng) {
-    return `https://maps.apple.com/?ll=${h.coordinates.lat},${h.coordinates.lng}&q=${encodeURIComponent(h.name)}`;
-  }
-  if (h.address) return `https://maps.apple.com/?address=${encodeURIComponent(h.address)}`;
-  return `https://maps.apple.com/?q=${encodeURIComponent(h.name)}`;
-}
-
 // ─── Status pill ──────────────────────────────────────────────────────────────
 
 export function StatusPill({

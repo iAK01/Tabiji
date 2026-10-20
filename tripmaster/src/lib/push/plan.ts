@@ -17,6 +17,7 @@ import {
 } from '@/lib/push/journey';
 import { inQuietHours, QUIET_EXEMPT, type NotificationCategory, type NotificationPrefs } from '@/lib/push/prefs';
 import type { PushAction, PushPayload } from '@/lib/push/send';
+import { navigatePagePath } from '@/lib/navigation/links';
 import { passesForSure, passLabel, passSummary } from '@/lib/passes/passes';
 import {
   arrivalAt as liveArrival, closingTimes, delayMins, departureAt, flightPhase, landedMs, previousGate, DELAY_MIN,
@@ -64,13 +65,10 @@ const KIND: Record<string, string> = {
   event: 'Event', sport: 'Event', sports: 'Event', attraction: 'Sightseeing', business: 'Meeting',
 };
 
-export type NavApp = 'apple_maps' | 'google_maps' | 'waze';
-
 export interface Recipient {
   userId:            string;
   prefs:             NotificationPrefs;
   airportBufferMins: number;
-  navApps:           { driving: NavApp; transit: NavApp };
   home:              { zone: string; countryCode: string | null; coords: LatLng | null };
 }
 
@@ -185,15 +183,14 @@ function fileTarget(tripId: string, f: any): string {
 const proofUrl = (tripId: string, expense: any, slot: ProofSlot) =>
   `/trips/${tripId}?tab=expenses&expense=${expense._id}&proof=${slot.key}`;
 
-// Web URLs only: these open from notification buttons via the worker.
-function navUrl(to: Point | { name?: string; address?: string; coords: LatLng | null }, mode: 'driving' | 'transit', app: NavApp): string | null {
-  const c    = to.coords;
-  const text = ('address' in to && to.address) || to.name;
-  if (!c && !text) return null;
-  const dest = c ? `${c.lat},${c.lng}` : encodeURIComponent(text!);
-  if (app === 'apple_maps') return `https://maps.apple.com/?daddr=${dest}&dirflg=${mode === 'transit' ? 'r' : 'd'}`;
-  if (app === 'waze')       return c ? `https://waze.com/ul?ll=${dest}&navigate=yes` : `https://waze.com/ul?q=${dest}&navigate=yes`;
-  return `https://www.google.com/maps/dir/?api=1&destination=${dest}&travelmode=${mode}`;
+// A notification button can't ask which map app to use, so Directions opens the
+// in-app picker (/navigate) for the place.
+function navUrl(tripId: string, to: Point | { name?: string; address?: string; coords: LatLng | null }, mode: 'driving' | 'transit'): string | null {
+  const c       = to.coords;
+  const address = ('address' in to && to.address) || undefined;
+  if (!c && !address && !to.name) return null;
+  // No coordinates or address: the name is the best search we have.
+  return navigatePagePath({ name: to.name, address: address ?? (c ? undefined : to.name), coordinates: c }, mode, tripId);
 }
 
 // ---- Documents & proofs -----------------------------------------------------
@@ -426,7 +423,7 @@ export function planTrip(data: TripData, r: Recipient, drive: DriveTimes, nowMs:
       if (docLine) lines.push(docLine);
       if (proof) lines.push(`Keep your ${proof.slots[0].label.toLowerCase()} for expenses`);
 
-      const nav = navUrl(from, leg.type === 'flight' ? 'driving' : 'transit', leg.type === 'flight' ? r.navApps.driving : r.navApps.transit);
+      const nav = navUrl(tripId, from, leg.type === 'flight' ? 'driving' : 'transit');
       add({
         key: `transport-${i}${at$(dep)}`, type: `${leg.type}_departure`, category: 'travel',
         at, until: depMs, deferrable: false,
@@ -602,7 +599,7 @@ export function planTrip(data: TripData, r: Recipient, drive: DriveTimes, nowMs:
     lines.push('Tap for getting there, money and plugs');
 
     const stayNav = stay
-      ? navUrl({ name: stay.a.name, address: stay.a.address, coords: coords(stay.a.coordinates) }, 'driving', r.navApps.driving)
+      ? navUrl(tripId, { name: stay.a.name, address: stay.a.address, coords: coords(stay.a.coordinates) }, 'driving')
       : null;
     add({
       key: `transport-${i}${at$(leg.arr)}`, type: leg.type === 'flight' ? 'landed' : 'arrived', category: 'landed',
@@ -635,7 +632,7 @@ export function planTrip(data: TripData, r: Recipient, drive: DriveTimes, nowMs:
         name:   where,
         coords: coords(type === 'car_hire' ? (t.details?.pickupCoordinates ?? t.departureCoordinates) : t.departureCoordinates),
       };
-      const nav   = navUrl(point, 'driving', r.navApps.driving);
+      const nav   = navUrl(tripId, point, 'driving');
       const lines = [`${where ? `${where} · ` : ''}${dep.toFormat('HH:mm')}${ref}`];
       const docLine = docsLine(docs);
       if (docLine) lines.push(docLine);
@@ -679,7 +676,7 @@ export function planTrip(data: TripData, r: Recipient, drive: DriveTimes, nowMs:
     const name = a.name || 'your accommodation';
     const ref  = a.confirmationNumber ? `Ref ${a.confirmationNumber}` : null;
     const docs = linkedFiles(files, ['accommodation'], i, [a.name]);
-    const nav  = navUrl({ name: a.name, address: a.address, coords: coords(a.coordinates) }, 'driving', r.navApps.driving);
+    const nav  = navUrl(tripId, { name: a.name, address: a.address, coords: coords(a.coordinates) }, 'driving');
     const directions: PushAction[] = nav ? [{ action: 'directions', title: 'Directions', url: nav }] : [];
 
     if (a.checkIn) {
@@ -757,7 +754,7 @@ export function planTrip(data: TripData, r: Recipient, drive: DriveTimes, nowMs:
     const lead = LEAD_MIN[v.type] ?? LEAD_MIN.event;
     const docs = linkedFiles(files, ['venue'], i, [v.name]);
     const nav  = (v.address || v.coordinates)
-      ? navUrl({ name: v.name, address: v.address, coords: coords(v.coordinates) }, 'driving', r.navApps.driving)
+      ? navUrl(tripId, { name: v.name, address: v.address, coords: coords(v.coordinates) }, 'driving')
       : null;
     const extra: PushAction[] = docs[0]
       ? docAction(tripId, docs)
@@ -798,7 +795,7 @@ export function planTrip(data: TripData, r: Recipient, drive: DriveTimes, nowMs:
       const stopId = stop._id ? String(stop._id) : null;
       const docs   = linkedFiles(files, ['itinerary', 'itinerary_stop'], stopId, [stop.name]);
       const nav    = (stop.address || stop.coordinates)
-        ? navUrl({ name: stop.name, address: stop.address, coords: coords(stop.coordinates) }, 'driving', r.navApps.driving)
+        ? navUrl(tripId, { name: stop.name, address: stop.address, coords: coords(stop.coordinates) }, 'driving')
         : null;
       const when   = startsIn(event.toMillis(), nowMs);
       add({

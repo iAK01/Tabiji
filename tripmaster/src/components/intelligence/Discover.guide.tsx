@@ -2,13 +2,13 @@
 
 import { useMemo, useState } from 'react';
 import { Box, Typography, Button, Collapse, Paper } from '@mui/material';
-import MapIcon         from '@mui/icons-material/Map';
 import AddIcon         from '@mui/icons-material/Add';
 import ExpandMoreIcon  from '@mui/icons-material/ExpandMore';
 import OpenInNewIcon   from '@mui/icons-material/OpenInNew';
 import { haversineKm } from '@/lib/geo/geocode';
 import { KIND_LABELS, type Guide, type GuideListing, type LatLng, type ListingKind, type TripGuide } from '@/lib/guide/types';
-import { D, buildMapUrl, PhotoCredit, SubHeading } from './Intelligence.shared';
+import { D, PhotoCredit, SubHeading } from './Intelligence.shared';
+import NavigateButton from '@/components/ui/NavigateButton';
 import type { AddTarget } from './Addtoitinerarydialog';
 
 const KIND_ORDER: ListingKind[] = ['see', 'do', 'eat', 'drink', 'buy', 'go'];
@@ -238,14 +238,11 @@ function ListingRow({ l, km, showDistrict, open, onToggle, onAdd }: {
           )}
           <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mt: 1.25 }}>
             {canMap && (
-              <Button
-                href={buildMapUrl({ name: l.name, coordinates: l.coordinates, address: l.address })}
-                target="_blank" rel="noopener noreferrer"
-                startIcon={<MapIcon sx={{ fontSize: '1rem !important' }} />}
+              <NavigateButton
+                destination={{ name: l.name, coordinates: l.coordinates, address: l.address ?? undefined }}
+                intent="view" variant="button" size="medium"
                 sx={{ minHeight: 44, fontWeight: 700, fontSize: '0.85rem', color: D.navy, border: `1px solid ${D.rule}` }}
-              >
-                Map
-              </Button>
+              />
             )}
             {l.url && (
               <Button

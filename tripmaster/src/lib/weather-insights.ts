@@ -5,7 +5,7 @@
 // All pure functions over the stored WeatherResult, so changing a threshold or a
 // phrase applies to cached data without a refetch. Fetching lives in weather.ts.
 
-export const WEATHER_VERSION = 4;
+export const WEATHER_VERSION = 5;
 
 export type DaySource = 'forecast' | 'historical';
 
@@ -21,7 +21,7 @@ export interface DayHours {
   gust:  (number | null)[];   // forecast only
   dir:   (number | null)[];   // forecast only — degrees the wind comes from
   rh:    (number | null)[];
-  uv:    (number | null)[];   // forecast only
+  uv:    (number | null)[];   // typical: clear-sky estimate
   isDay: (number | null)[];   // 1 day · 0 night
 }
 
@@ -794,4 +794,186 @@ export function dayPlan(day: DayWeather, fromHour = 0): PlanItem[] {
   }
 
   return items;
+}
+
+// ─── The whole trip as one timeline — the trip chart ─────────────────────────
+
+export interface TimelinePoint extends HourRow {
+  dayIndex: number;
+  date:     string;
+  source:   DaySource;
+}
+
+/** Every hour of the trip in order — the chart's x-axis. */
+export function tripTimeline(days: DayWeather[]): TimelinePoint[] {
+  return days.flatMap((d, dayIndex) =>
+    hourRows(d).map(r => ({ ...r, dayIndex, date: d.date, source: d.source })));
+}
+
+export type TripMetric = 'temp' | 'rain' | 'uv' | 'wind';
+
+export interface TripStat { label: string; value: string; sub?: string }
+
+/** Three headline numbers for the metric the chart is showing. */
+export function tripStats(days: DayWeather[], metric: TripMetric): TripStat[] {
+  if (!days.length) return [];
+  const t = isTypical(days) ? '~' : '';
+  const by = <T,>(xs: T[], f: (x: T) => number, dir: 1 | -1) =>
+    xs.reduce((a, b) => (dir * (f(b) - f(a)) > 0 ? b : a));
+
+  if (metric === 'temp') {
+    const hottest = by(days, feelsDay, 1);
+    return [
+      { label: 'Avg high', value: `${t}${Math.round(avg(days.map(d => d.tempMax)))}°`, sub: `${range(days.map(d => d.tempMax))}°` },
+      { label: 'Avg low',  value: `${t}${Math.round(avg(days.map(d => d.tempMin)))}°`, sub: `${range(days.map(d => d.tempMin))}°` },
+      { label: 'Feels up to',  value: `${feelsDay(hottest)}°`, sub: shortDay(hottest.date) },
+    ];
+  }
+  if (metric === 'rain') {
+    const wet     = wetDayCount(days);
+    const wettest = by(days, d => (d.chanceOfRain ?? 0) * 100 + d.precipMm, 1);
+    const total   = Math.round(days.reduce((s, d) => s + d.precipMm, 0) * 10) / 10;
+    return [
+      { label: 'Wet days', value: `${t}${wet} of ${days.length}`, sub: '1 mm+ by day' },
+      { label: 'Rain', value: `${t}${total} mm`, sub: 'trip total by day' },
+      (wettest.chanceOfRain ?? 0) >= 30
+        ? { label: 'Wettest', value: shortDay(wettest.date), sub: `${wettest.chanceOfRain}% · ${wettest.precipMm} mm` }
+        : { label: 'Wettest', value: 'None', sub: 'all under 30%' },
+    ];
+  }
+  if (metric === 'uv') {
+    const peaks = nums(days.map(d => d.uvIndex));
+    const high  = peaks.filter(v => v >= 6).length;
+    // Typical sun-cream window: median first and last UV 3+ hour across the days.
+    const starts: number[] = [];
+    const ends:   number[] = [];
+    days.forEach(d => {
+      const hrs = hourRows(d).filter(r => (r.uv ?? 0) >= 3).map(r => r.hour);
+      if (hrs.length) { starts.push(hrs[0]); ends.push(hrs[hrs.length - 1] + 1); }
+    });
+    const peak = peaks.length ? Math.round(Math.max(...peaks)) : null;
+    return [
+      { label: 'Peak UV', value: peak != null ? `${peak}` : '—', sub: peak != null ? uvLabel(peak) : undefined },
+      { label: 'High UV', value: `${high} of ${days.length}`, sub: 'days at 6+' },
+      starts.length
+        ? { label: 'Sun cream', value: `${hourLabel(Math.round(median(starts)))}–${hourLabel(Math.round(median(ends)))}`, sub: 'most days' }
+        : { label: 'Sun cream', value: 'Rarely', sub: 'UV stays under 3' },
+    ];
+  }
+  const winds   = nums(days.map(d => d.windKph));
+  const gustDay = by(days, d => d.gustKph ?? d.windKph ?? 0, 1);
+  const calm    = by(days, d => d.windKph ?? 999, -1);
+  return [
+    { label: 'Avg wind', value: winds.length ? `${Math.round(avg(winds))}` : '—', sub: 'km/h, daily max' },
+    { label: 'Strongest', value: `${gustDay.gustKph ?? gustDay.windKph ?? '—'}`, sub: `km/h${gustDay.gustKph != null ? ' gust' : ''} · ${shortDay(gustDay.date)}` },
+    { label: 'Calmest', value: shortDay(calm.date), sub: calm.windKph != null ? `${calm.windKph} km/h` : undefined },
+  ];
+}
+
+// ─── Now and the next few hours — on the trip ─────────────────────────────────
+
+/** Words for an hour's weather code — hours carry codes, not text. */
+export function codeWords(code: number | null, isDay = true): string {
+  const c = code ?? 2;
+  if (c >= 95) return 'Thunderstorm';
+  if ((c >= 71 && c <= 77) || c === 85 || c === 86) return 'Snow';
+  if (c >= 80 && c <= 82) return 'Showers';
+  if (c >= 61 && c <= 67) return 'Rain';
+  if (c >= 51 && c <= 57) return 'Drizzle';
+  if (c === 45 || c === 48) return 'Fog';
+  if (c === 3) return 'Cloudy';
+  if (c === 2) return 'Partly cloudy';
+  if (c === 1) return isDay ? 'Mostly sunny' : 'Mostly clear';
+  return isDay ? 'Sunny' : 'Clear';
+}
+
+/** Wall-clock time where the weather is, "14:20". */
+export function clockIn(timeZone: string | null | undefined): string {
+  try {
+    return new Intl.DateTimeFormat('en-GB', {
+      timeZone: timeZone || undefined, hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+    }).format(new Date());
+  } catch {
+    return new Date().toTimeString().slice(0, 5);
+  }
+}
+
+export interface NowRead {
+  clock:     string;
+  temp:      number;
+  feels:     number | null;
+  condition: string;
+  code:      number | null;
+  isDay:     boolean;
+  windKph:   number | null;
+  dir:       number | null;
+  uv:        number | null;
+  rain:      number | null;
+  next:      TimelinePoint[];
+  notes:     { key: 'rain' | 'sun' | 'temp'; text: string }[];
+}
+
+/**
+ * Right now plus the next `count` hours, if today is a trip day. Measured
+ * conditions when they're fresh, else this hour's forecast. The notes say what
+ * changes soon: rain arriving, sun-cream hours, a real warm-up or cool-down.
+ */
+export function nowAndNext(w: WeatherResult, count = 4): NowRead | null {
+  const days  = w.days ?? [];
+  const today = todayIn(w.timezone);
+  const hour  = currentHourIn(w.timezone, today);
+  if (hour == null) return null;
+  const line = tripTimeline(days);
+  const at   = line.findIndex(p => p.date === today && p.hour === hour);
+  if (at < 0) return null;
+
+  const cur   = line[at];
+  const live  = freshCurrent(w);
+  const next  = line.slice(at + 1, at + 1 + count);
+  const ahead = [cur, ...next];
+  const drizzly = (p: TimelinePoint) =>
+    p.source === 'historical' ? days[p.dayIndex].rainKind !== 'rain' : (p.mm ?? 0) < 0.5;
+
+  const notes: NowRead['notes'] = [];
+  const likely   = ahead.find(p => (p.rain ?? 0) >= 50);
+  const possible = ahead.find(p => (p.rain ?? 0) >= 30);
+  if (likely) {
+    notes.push({ key: 'rain', text: likely === cur
+      ? `${drizzly(likely) ? 'Drizzle' : 'Rain'} now${(likely.mm ?? 0) >= 0.1 ? ` — ${likely.mm} mm this hour` : ''}`
+      : `${drizzly(likely) ? 'Drizzle' : 'Rain'} likely from ${hourLabel(likely.hour)}` });
+  } else if (possible) {
+    notes.push({ key: 'rain', text: `${drizzly(possible) ? 'Drizzle' : 'A shower'} possible around ${hourLabel(possible.hour)}` });
+  } else {
+    notes.push({ key: 'rain', text: `Dry for the next ${next.length || count} hours` });
+  }
+
+  if ((cur.uv ?? 0) >= 3) {
+    let end = at;
+    while (end + 1 < line.length && line[end + 1].date === today && (line[end + 1].uv ?? 0) >= 3) end++;
+    const peak = Math.round(Math.max(...line.slice(at, end + 1).map(p => p.uv ?? 0)));
+    notes.push({ key: 'sun', text: `UV ${peak} — sun cream until ${hourLabel(line[end].hour + 1)}` });
+  } else {
+    const rising = next.find(p => (p.uv ?? 0) >= 3);
+    if (rising) notes.push({ key: 'sun', text: `UV climbs past 3 from ${hourLabel(rising.hour)} — sun cream` });
+  }
+
+  const last = next[next.length - 1];
+  if (last && Math.abs(last.temp - cur.temp) >= 3) {
+    notes.push({ key: 'temp', text: `${last.temp > cur.temp ? 'Warming' : 'Cooling'} to ${last.temp}° by ${hourLabel(last.hour)}` });
+  }
+
+  return {
+    clock:     clockIn(w.timezone),
+    temp:      live?.temp ?? cur.temp,
+    feels:     live?.feels ?? cur.feels,
+    condition: live?.condition ?? codeWords(cur.code, cur.isDay),
+    code:      live?.code ?? cur.code,
+    isDay:     cur.isDay,
+    windKph:   live?.windKph ?? cur.wind,
+    dir:       cur.dir,
+    uv:        cur.uv,
+    rain:      cur.rain,
+    next,
+    notes,
+  };
 }

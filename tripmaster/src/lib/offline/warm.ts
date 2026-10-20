@@ -5,13 +5,12 @@ import { isOffline } from './connectivity';
 // Saves what the app needs to open offline ahead of time, so nothing depends on having
 // visited a page or tab while online. TRIP_DATA must list every GET the trip page's tabs
 // make on load — add to it when a tab gains a new data source.
-const APP_PAGES = ['/dashboard', '/trips/new', '/profile', '/packing/catalogue'];
+const APP_PAGES = ['/dashboard', '/trips/new', '/profile', '/packing/catalogue', '/navigate'];
 const APP_DATA  = [
   '/api/auth/session',
   '/api/trips',
   '/api/user/profile',
   '/api/user/my-apps',
-  '/api/user/navigation-preferences',
   '/api/user/notification-preferences',
   '/api/user/notifications',
   '/api/packing/catalogue',
