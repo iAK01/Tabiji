@@ -1,5 +1,6 @@
 import ical, { ICalCalendarMethod, type ICalEventData } from 'ical-generator';
 import { DateTime } from 'luxon';
+import { placeTz } from '@/lib/push/timezones';
 
 // ─── Types (all stored loosely as Mixed in Mongo) ─────────────────────────────
 
@@ -15,7 +16,10 @@ interface TripLike {
   name:       string;
   startDate?: Date | string | null;
   endDate?:   Date | string | null;
-  destination?: { city?: string; country?: string; timezone?: string } | null;
+  destination?: {
+    city?: string; country?: string; timezone?: string; countryCode?: string; iataCode?: string;
+    coordinates?: { lat: number; lng: number } | null;
+  } | null;
 }
 
 interface ItineraryLike { days?: any[] | null }
@@ -80,7 +84,7 @@ export function buildTripIcs(
   logistics: LogisticsLike | null,
   opts: BuildIcsOptions,
 ): string {
-  const tz      = trip.destination?.timezone || 'UTC';
+  const tz      = placeTz(trip.destination) ?? 'UTC';
   const city    = trip.destination?.city;
   const country = trip.destination?.country;
   const tripId  = String(trip._id);

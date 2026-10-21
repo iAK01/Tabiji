@@ -13,6 +13,7 @@ import { locatePlace, localityWords, sameName } from '@/lib/geo/geocode';
 import { resolveCheckIn, checkInHint } from '@/lib/itinerary/checkInTiming';
 import { DOCUMENT_TYPE_VALUES, DOC_TYPE_EXTRACT } from '@/lib/files/documentTypes';
 import { buildExistingIndex, describeExisting, flagDuplicates } from '@/lib/extract/existingMatch';
+import { placeTz } from '@/lib/push/timezones';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -266,7 +267,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     city:        trip.destination?.city    ?? '',
     country:     trip.destination?.country ?? '',
     tripDates,
-    tz:          trip.destination?.timezone ?? 'UTC',
+    tz:          placeTz(trip.destination) ?? 'UTC',
     userContext,
     sourceLabel: claudeInput.label,
     inlineText:  claudeInput.kind === 'text' ? claudeInput.text : null,

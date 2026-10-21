@@ -1,7 +1,7 @@
 'use client';
 
-import { useState }        from 'react';
-import { IconButton, Button, Tooltip, Popover, Box, alpha } from '@mui/material';
+import { useCallback, useRef, useState } from 'react';
+import { IconButton, Button, Tooltip, Popover, Box, alpha, type PopoverActions } from '@mui/material';
 import NearMeIcon          from '@mui/icons-material/NearMe';
 import NearMeDisabledIcon  from '@mui/icons-material/NearMeDisabled';
 import MapIcon             from '@mui/icons-material/Map';
@@ -48,6 +48,8 @@ export default function NavigateButton({
 }: NavigateButtonProps) {
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
   const [notice, setNotice] = useState<NavNotice | null>(null);
+  const popover = useRef<PopoverActions>(null);
+  const refit   = useCallback(() => popover.current?.updatePosition(), []);
 
   const able  = canNavigate(destination, intent);
   const place = destination.name ?? destination.address ?? 'this location';
@@ -111,6 +113,7 @@ export default function NavigateButton({
       </Tooltip>
 
       <Popover
+        action={popover}
         open={!!anchor}
         anchorEl={anchor}
         onClose={() => setAnchor(null)}
@@ -124,6 +127,7 @@ export default function NavigateButton({
           from={from}
           onPicked={() => setAnchor(null)}
           onNotice={setNotice}
+          onLayoutChange={refit}
         />
       </Popover>
 

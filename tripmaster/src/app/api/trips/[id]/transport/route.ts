@@ -6,6 +6,7 @@ import Trip                 from '@/lib/mongodb/models/Trip';
 import TripLogistics        from '@/lib/mongodb/models/TripLogistics';
 import TripItinerary        from '@/lib/mongodb/models/TripItinerary';
 import User                 from '@/lib/mongodb/models/User';
+import { placeTz }          from '@/lib/push/timezones';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -409,7 +410,7 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
     originCountry:       trip.origin?.country      ?? '',
     destinationCity:     trip.destination?.city    ?? '',
     destinationCountry:  trip.destination?.country ?? '',
-    timezone:            trip.destination?.timezone ?? 'Europe/London',
+    timezone:            placeTz(trip.destination) ?? 'Europe/London',
     outboundFlights:     outbound,
     returnFlights:       returning,
     accommodation,

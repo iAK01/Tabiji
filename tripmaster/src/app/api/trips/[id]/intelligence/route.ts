@@ -7,6 +7,7 @@ import { getCountryMeta, getCountryName, COUNTRY_LIST } from '@/lib/data/countri
 import { getPhrasesForCountry, ENGLISH_SPEAKING, ESSENTIAL_PHRASE_IDS } from '@/lib/data/phrases';
 import { countriesDatabase } from '@/lib/data/countries-database';
 import { getVisaRequirement, hasVisaDataForPassport } from '@/lib/data/visa-rules';
+import { placeTz } from '@/lib/push/timezones';
 
 // Resolve a country code from either a stored code or a country name string.
 function resolveCountryCode(code?: string, name?: string): string | null {
@@ -102,8 +103,11 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
 
   // ── TIMEZONE ────────────────────────────────────────────────────────────────
   const timezone = (() => {
-    const destOffset   = getTimezoneOffset(destMeta.timezone);
-    const originOffset = originMeta ? getTimezoneOffset(originMeta.timezone) : destOffset;
+    // The zone where the trip actually is, not the country's capital (the Canaries aren't on Madrid time).
+    const destTz       = placeTz(trip.destination) ?? destMeta.timezone;
+    const originTz     = placeTz(user.homeLocation) ?? originMeta?.timezone ?? null;
+    const destOffset   = getTimezoneOffset(destTz);
+    const originOffset = originTz ? getTimezoneOffset(originTz) : destOffset;
     const diff         = destOffset - originOffset;
     const absDiff      = Math.abs(diff);
     let jetlagRisk: 'none' | 'mild' | 'moderate' | 'significant' = 'none';
@@ -111,15 +115,15 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     else if (absDiff >= 5) jetlagRisk = 'moderate';
     else if (absDiff >= 2) jetlagRisk = 'mild';
     return {
-      destinationTimezone: destMeta.timezone,
-      originTimezone: originMeta?.timezone ?? null,
+      destinationTimezone: destTz,
+      originTimezone: originTz,
       hoursDifference: diff,
       absDifference: absDiff,
       jetlagRisk,
       direction: diff > 0 ? 'ahead' : diff < 0 ? 'behind' : 'same',
       message: absDiff === 0
         ? 'Same timezone — no adjustment needed'
-        : `${getCountryName(destCode)} is ${absDiff} hour${absDiff !== 1 ? 's' : ''} ${diff > 0 ? 'ahead of' : 'behind'} home`,
+        : `${trip.destination?.city || getCountryName(destCode)} is ${absDiff} hour${absDiff !== 1 ? 's' : ''} ${diff > 0 ? 'ahead of' : 'behind'} home`,
     };
   })();
 

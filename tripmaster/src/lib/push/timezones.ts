@@ -1,8 +1,15 @@
 // Which timezone a trip's wall-clock times are in. Times are entered as they're
 // printed on the booking ("departs 10:40"), i.e. local to wherever that thing
 // happens — so a reminder has to read them in that place's zone, not UTC.
+//
+// Zones come from the place's position on the map wherever there is one. A
+// country doesn't decide it: Spain is Madrid time except the Canaries, which
+// are Dublin/London time. Reading Gran Canaria as Madrid sent every WOMEX 2026
+// reminder an hour early. The per-country zone is only a last resort, for a
+// place with no coordinates and no airport.
 
 import { DateTime } from 'luxon';
+import tzLookup from '@photostructure/tz-lookup';
 import { airportByIata } from '@/lib/data/airports';
 import { COUNTRY_LIST, COUNTRY_META } from '@/lib/data/countries';
 
@@ -13,12 +20,25 @@ const EXTRA_COUNTRY_TZ: Record<string, string> = { TR: 'Europe/Istanbul' };
 
 const codeByName = new Map(COUNTRY_LIST.map(c => [c.name.toLowerCase(), c.code]));
 
-type Place = { timezone?: string | null; countryCode?: string | null; iataCode?: string | null } | null | undefined;
+type LatLng = { lat: number; lng: number };
+type Place = {
+  timezone?:    string | null;
+  countryCode?: string | null;
+  iataCode?:    string | null;
+  coordinates?: LatLng | null;
+} | null | undefined;
 
 function validZone(tz: string | null | undefined): string | null {
   return tz && DateTime.local().setZone(tz).isValid ? tz : null;
 }
 
+/** The zone at a point on the map — exact, offline (boundaries ship with the library). */
+export function pointTz(c: LatLng | null | undefined): string | null {
+  if (!c || !Number.isFinite(c.lat) || !Number.isFinite(c.lng)) return null;
+  try { return validZone(tzLookup(c.lat, c.lng)); } catch { return null; }
+}
+
+/** One zone per country — wrong for any country with more than one. Last resort only. */
 export function countryTz(code: string | null | undefined): string | null {
   if (!code) return null;
   return COUNTRY_META[code]?.timezone ?? EXTRA_COUNTRY_TZ[code] ?? null;
@@ -31,7 +51,8 @@ export function airportCountryCode(iata: string | null | undefined): string | nu
 }
 
 export function airportTz(iata: string | null | undefined): string | null {
-  return countryTz(airportCountryCode(iata));
+  const airport = airportByIata(iata);
+  return pointTz(airport) ?? countryTz(airportCountryCode(iata));
 }
 
 /** "DUB — Dublin" (how the airport picker stores it) → "DUB". */
@@ -40,8 +61,13 @@ export function airportCodeIn(location: string | null | undefined): string | nul
   return match ? match[1] : null;
 }
 
+// Map position first; a stored `timezone` came from the country table (profile
+// home), so it ranks below the place's own airport.
 export function placeTz(place: Place): string | null {
-  return validZone(place?.timezone) ?? countryTz(place?.countryCode) ?? airportTz(place?.iataCode);
+  return pointTz(place?.coordinates)
+    ?? airportTz(place?.iataCode)
+    ?? validZone(place?.timezone)
+    ?? countryTz(place?.countryCode);
 }
 
 export function ymd(d: string | Date): string {
@@ -108,17 +134,11 @@ export function placeCity(location: string | null | undefined): string {
   return afterCode.split(',')[0].trim();
 }
 
-// Half a time zone of longitude: closer than this to the trip's own airport, the
-// trip's (possibly city-precise) zone beats a country-level guess.
-const SAME_ZONE_LNG = 7.5;
-
 /**
  * Zone for a departure or arrival point, most specific first: a city the trip
- * stays in → that place's zone; the trip's starting point → home; an airport
- * elsewhere (home airport, a connection) → its country's zone, unless it sits
- * near the trip's own airport in the same country (one of several US zones);
- * an unrecognised place before the trip starts → home; otherwise the trip's zone
- * for that date.
+ * stays in → that place's zone; the trip's starting point → home; an airport →
+ * the zone at the airport; an unrecognised place before the trip starts → home;
+ * otherwise the trip's zone for that date.
  */
 export function placeZone(
   trip: ZonedTrip,
@@ -139,15 +159,7 @@ export function placeZone(
   }
   if (trip.origin && sameCity(trip.origin.city)) return placeTz(trip.origin) ?? homeZone ?? zoneFor(date);
 
-  if (airport) {
-    const country = airportCountryCode(airport.iata);
-    const based   = new Set([trip.destination?.countryCode, ...(trip.additionalDestinations ?? []).map(d => d.countryCode)].filter(Boolean));
-    if (country && based.has(country)) {
-      const ref = airportByIata(trip.destination?.iataCode);
-      if (!ref || Math.abs(ref.lng - airport.lng) < SAME_ZONE_LNG) return zoneFor(date);
-    }
-    return countryTz(country) ?? zoneFor(date);
-  }
+  if (airport) return airportTz(airport.iata) ?? zoneFor(date);
 
   if (homeZone && trip.startDate && ymd(date) < ymd(trip.startDate)) return homeZone;
   return zoneFor(date);

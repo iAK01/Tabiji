@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Box, Typography, ToggleButton, ToggleButtonGroup, List, ListItemButton,
   ListItemIcon, ListItemText, Divider, Snackbar, Button, alpha,
@@ -17,6 +17,7 @@ import {
   type NavApp, type NavIntent, type NavMode, type NavigationDestination,
 } from '@/lib/navigation/links';
 import { useTravelTimes, formatTravelMins, type TravelOrigin } from '@/lib/navigation/useTravelTimes';
+import TransitSummary from './TransitSummary';
 
 const MODES = [
   { key: 'walking' as const, label: 'Walk',    Icon: DirectionsWalkIcon },
@@ -49,6 +50,7 @@ export default function NavigateOptions({
   from,
   onPicked,
   onNotice,
+  onLayoutChange,
 }: {
   destination:  NavigationDestination;
   intent?:      NavIntent;
@@ -57,12 +59,17 @@ export default function NavigateOptions({
   from?:        TravelOrigin | null;
   onPicked?:    () => void;
   onNotice:     (n: NavNotice) => void;
+  /** Height changed (transit summary, "Times from…") — lets a dropdown re-fit the screen */
+  onLayoutChange?: () => void;
 }) {
   const [mode, setMode] = useState<NavMode>(initialMode);
   const platform = detectPlatform();
   const copy     = copyableLocation(destination);
   const title    = destination.name || destination.address || '';
-  const { times, fromLabel } = useTravelTimes(destination, from, intent === 'directions');
+  const { status, times, fromLabel } = useTravelTimes(destination, from, intent === 'directions');
+  const showTransit = intent === 'directions' && mode === 'transit';
+
+  useEffect(() => { onLayoutChange?.(); }, [showTransit, fromLabel, onLayoutChange]);
 
   const open = (app: NavApp) => {
     onPicked?.();
@@ -138,6 +145,8 @@ export default function NavigateOptions({
           </ToggleButtonGroup>
         </Box>
       )}
+
+      {showTransit && <TransitSummary status={status} times={times} />}
 
       <List disablePadding>
         {navAppsFor(platform).map(app => {

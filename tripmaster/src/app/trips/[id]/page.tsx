@@ -61,6 +61,7 @@ import AirportSearch       from '@/components/ui/AirportSearch';
 import { isOnTrip, displayStatus } from '@/lib/trips/onTrip';
 import NotificationBell    from '@/components/notifications/NotificationBell';
 import TravelSheet         from '@/components/notifications/TravelSheet';
+import { placeTz }         from '@/lib/push/timezones';
 
 const MapTab = dynamic(() => import('@/components/map/MapTab'), { ssr: false });
 
@@ -330,8 +331,9 @@ function TripPageInner() {
   }, [id]);
 
   // ── Local time clock for hero dashboard ───────────────────────────────────
+  const destZone = placeTz(trip?.destination);
   useEffect(() => {
-    const tz = trip?.destination?.timezone;
+    const tz = destZone;
     if (!tz) return;
     const tick = () => setLocalTime(
       new Intl.DateTimeFormat('en-GB', { timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date())
@@ -339,7 +341,7 @@ function TripPageInner() {
     tick();
     const timerId = setInterval(tick, 30_000);
     return () => clearInterval(timerId);
-  }, [trip?.destination?.timezone]);
+  }, [destZone]);
 
   const openEdit = () => {
     if (!trip) return;
@@ -517,8 +519,8 @@ function TripPageInner() {
   // Now if fresh, else today's (or day one's) high — never a stale "now".
   const heroWeather = weatherHeadline(trip.weather);
 
-  const destTz   = trip.destination?.timezone ?? '';
-  const originTz = trip.origin?.timezone ?? '';
+  const destTz   = destZone ?? '';
+  const originTz = placeTz(trip.origin) ?? '';
   const heroTimeDiffLabel = (() => {
     if (!destTz) return 'Local time';
     if (!originTz || originTz === destTz) return 'Local time';
