@@ -16,6 +16,7 @@ import {
   NAV_APP_LABEL, copyableLocation, detectPlatform, isAppScheme, navAppsFor, navLink,
   type NavApp, type NavIntent, type NavMode, type NavigationDestination,
 } from '@/lib/navigation/links';
+import { useTravelTimes, formatTravelMins, type TravelOrigin } from '@/lib/navigation/useTravelTimes';
 
 const MODES = [
   { key: 'walking' as const, label: 'Walk',    Icon: DirectionsWalkIcon },
@@ -45,12 +46,15 @@ export default function NavigateOptions({
   destination,
   intent      = 'directions',
   initialMode = 'driving',
+  from,
   onPicked,
   onNotice,
 }: {
   destination:  NavigationDestination;
   intent?:      NavIntent;
   initialMode?: NavMode;
+  /** Where times start when you're not near the place yet */
+  from?:        TravelOrigin | null;
   onPicked?:    () => void;
   onNotice:     (n: NavNotice) => void;
 }) {
@@ -58,6 +62,7 @@ export default function NavigateOptions({
   const platform = detectPlatform();
   const copy     = copyableLocation(destination);
   const title    = destination.name || destination.address || '';
+  const { times, fromLabel } = useTravelTimes(destination, from, intent === 'directions');
 
   const open = (app: NavApp) => {
     onPicked?.();
@@ -116,10 +121,18 @@ export default function NavigateOptions({
             exclusive fullWidth size="small" value={mode}
             onChange={(_, m: NavMode | null) => m && setMode(m)}
           >
+            {/* Fixed height, so the list below doesn't jump when the times arrive mid-tap */}
             {MODES.map(({ key, label, Icon }) => (
-              <ToggleButton key={key} value={key} sx={{ minHeight: 44, gap: 0.5, textTransform: 'none', fontWeight: 700 }}>
-                <Icon sx={{ fontSize: 18 }} />
-                {label}
+              <ToggleButton key={key} value={key} sx={{ height: 56, flexDirection: 'column', textTransform: 'none', fontWeight: 700, lineHeight: 1.2 }}>
+                <Box component="span" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                  <Icon sx={{ fontSize: 18 }} />
+                  {label}
+                </Box>
+                {times?.[key] != null && (
+                  <Box component="span" sx={{ fontSize: '0.75rem', fontWeight: 600, mt: 0.25 }}>
+                    {formatTravelMins(times[key]!)}
+                  </Box>
+                )}
               </ToggleButton>
             ))}
           </ToggleButtonGroup>
@@ -165,6 +178,13 @@ export default function NavigateOptions({
           </>
         )}
       </List>
+
+      {/* Under everything, so it can't push the options down as it appears */}
+      {fromLabel && (
+        <Typography sx={{ px: 2, pt: 0.5, pb: 1.25, fontSize: '0.72rem', color: 'text.secondary' }}>
+          {fromLabel}
+        </Typography>
+      )}
     </Box>
   );
 }

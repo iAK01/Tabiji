@@ -16,6 +16,7 @@ import AttachFileIcon       from '@mui/icons-material/AttachFile';
 import PlaceIcon            from '@mui/icons-material/Place';
 import FilterListIcon       from '@mui/icons-material/FilterList';
 import NavigateButton       from '@/components/ui/NavigateButton';
+import type { TravelOrigin } from '@/lib/navigation/useTravelTimes';
 import DocumentViewer, { type ViewableFile } from '@/components/files/DocumentViewer';
 import { STOP_CONFIG, D }   from './Itinerary.config';
 import type { Stop }        from './Itinerary.config';
@@ -40,13 +41,15 @@ interface Props {
   onDelete:    (stop: Stop) => void;
   onOpenLogistics: () => void;
   onFilterType:    (type: string) => void;   // "show me all the gigs"
+  /** Where Navigate's times start when you're not near this stop yet */
+  navFrom?:        TravelOrigin | null;
 }
 
 // Tap a stop → everything about it, plus what else is on at the same time.
 // The read-first view: nothing here moves a stop by accident.
 export function StopDetailSheet({
   stop, concurrent, isMobile, linkedFiles, reminder, flight,
-  onClose, onSelect, onSkip, onEdit, onDelete, onOpenLogistics, onFilterType,
+  onClose, onSelect, onSkip, onEdit, onDelete, onOpenLogistics, onFilterType, navFrom = null,
 }: Props) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [viewerFile,    setViewerFile]    = useState<ViewableFile | null>(null);
@@ -137,6 +140,7 @@ export function StopDetailSheet({
                 <NavigateButton
                   destination={{ name: stop.name, address: stop.address, coordinates: stop.coordinates ?? null }}
                   suggestedMode="walking"
+                  from={navFrom}
                   size="small"
                   sx={{ flexShrink: 0, minWidth: 44, minHeight: 44 }}
                 />

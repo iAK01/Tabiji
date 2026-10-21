@@ -52,6 +52,8 @@ import { ItineraryList }        from './ItineraryList';
 import { useUrlParam }          from '@/lib/hooks/useUrlParam';
 import { useFlights }           from '@/lib/flights/useFlights';
 import { stopNote }             from '@/lib/flights/status';
+import { haversineKm }          from '@/lib/geo/geocode';
+import type { TravelOrigin }    from '@/lib/navigation/useTravelTimes';
 
 const VIEW_MODES = ['timeline', 'list'] as const;
 const MIN_ZOOM   = 1;
@@ -69,6 +71,9 @@ interface Props {
   onSwitchToDiscover?:  () => void;
   onSwitchToLogistics?: () => void;
 }
+
+// Stops whose pin is a departure point, not somewhere you'll be afterwards.
+const NOT_A_PLACE = new Set(['flight', 'transport', 'transfer', 'checkin']);
 
 interface Accom {
   name:         string;
@@ -707,6 +712,24 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
     ? accoms.find(a => a.checkIn <= activeDayYmd && activeDayYmd <= a.checkOut) ?? null
     : null;
 
+  // Where a stop's Navigate times start when you're not near it yet: the stop
+  // before it that day, else where you're based. Travel stops are skipped — their
+  // pin is where you set off from, not where you'll be.
+  const navFromFor = (stop: Stop): TravelOrigin | null => {
+    const at    = stop.coordinates;
+    const start = stopStartMinutes(stop);
+    const elsewhere = (c?: { lat: number; lng: number } | null): c is { lat: number; lng: number } =>
+      !!c && (!at || haversineKm(c.lat, c.lng, at.lat, at.lng) > 0.05);
+    const prev = start === null ? undefined : (activeDay?.stops ?? [])
+      .filter(s => s !== stop && !s.skipped && !NOT_A_PLACE.has(s.type) && elsewhere(s.coordinates))
+      .map(s => ({ s, m: stopStartMinutes(s) }))
+      .filter((x): x is { s: Stop; m: number } => x.m !== null && x.m < start)
+      .sort((a, b) => a.m - b.m)
+      .pop()?.s;
+    if (prev?.coordinates) return { name: prev.name, coordinates: prev.coordinates };
+    return elsewhere(basedAt?.coordinates) ? { name: basedAt!.name, coordinates: basedAt!.coordinates! } : null;
+  };
+
   // Per-day effective timeline bounds — expands upward for early flights, downward for late-night events
   const stopMins = activeDay?.stops
     .map(s => stopStartMinutes(s))
@@ -1281,6 +1304,7 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
                         live={liveFor(stop)}
                         highlighted={!!stop._id && highlightStop === stop._id}
                         editMode={editMode}
+                        navFrom={navFromFor(stop)}
                       />
                       <TravelConnector stop={stop} pxPerMin={pxPerMin} startHour={effectiveStartHour} />
                     </Box>
@@ -1330,6 +1354,7 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
         linkedFiles={sheetStop ? filesFor(sheetStop) : []}
         reminder={sheetStop ? reminderFor(sheetStop) : null}
         flight={sheetStop ? flightFor(sheetStop) : null}
+        navFrom={sheetStop ? navFromFor(sheetStop) : null}
         onClose={() => setSheetKey(null)}
         onSelect={s => setSheetKey(stopKey(s))}
         onSkip={skipStop}

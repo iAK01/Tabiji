@@ -6,6 +6,7 @@ import AttachFileIcon from '@mui/icons-material/AttachFile';
 import LaunchIcon     from '@mui/icons-material/Launch';
 import MoreVertIcon   from '@mui/icons-material/MoreVert';
 import NavigateButton from '@/components/ui/NavigateButton';
+import type { TravelOrigin } from '@/lib/navigation/useTravelTimes';
 import DestinationMap from '@/components/ui/DestinationMap';
 import { D, DOT_COLOUR, VENUE_TYPES, venueIcon, type MenuKind } from './logistics.helpers';
 
@@ -16,6 +17,8 @@ interface VenueCardProps {
   fmtDate:      (d: string) => string;
   linkedFiles?: any[];
   onOpenFile?:  (f: any) => void;
+  /** Where Navigate's times start when you're not near the venue yet */
+  navFrom?:     TravelOrigin | null;
 }
 
 // ── Formatters ────────────────────────────────────────────────────────────────
@@ -62,7 +65,7 @@ const DashedRule = () => (
 
 // ── Main export ───────────────────────────────────────────────────────────────
 
-export default function VenueCard({ v, i, onMenu, linkedFiles, onOpenFile }: VenueCardProps) {
+export default function VenueCard({ v, i, onMenu, linkedFiles, onOpenFile, navFrom = null }: VenueCardProps) {
   const venueTypeLabel = VENUE_TYPES.find(vt => vt.value === v.type)?.label ?? 'Venue';
 
   return (
@@ -161,6 +164,7 @@ export default function VenueCard({ v, i, onMenu, linkedFiles, onOpenFile }: Ven
           <NavigateButton
             destination={{ name: v.name, address: v.address, coordinates: v.coordinates ?? null }}
             suggestedMode="walking"
+            from={navFrom}
             size="medium"
           />
           <StatusPill status={v.status} />

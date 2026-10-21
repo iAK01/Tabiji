@@ -8,6 +8,7 @@ import MapIcon             from '@mui/icons-material/Map';
 import { canNavigate }     from '@/lib/navigation/links';
 import type { NavIntent, NavMode, NavigationDestination } from '@/lib/navigation/links';
 import NavigateOptions, { NavigateNotice, type NavNotice } from '@/components/navigation/NavigateOptions';
+import type { TravelOrigin } from '@/lib/navigation/useTravelTimes';
 
 // ─── Props ────────────────────────────────────────────────────────────────────
 interface NavigateButtonProps {
@@ -16,6 +17,8 @@ interface NavigateButtonProps {
   suggestedMode?: NavMode;
   /** 'directions' (default) routes there; 'view' just shows the place */
   intent?:   NavIntent;
+  /** Where the dropdown's times start when you're not near the place (stop before, hotel) */
+  from?:     TravelOrigin | null;
   /** 'icon'   = icon-only button (default, used inside cards)
    *  'button' = full text button (used in larger contexts)  */
   variant?:  'icon' | 'button';
@@ -37,6 +40,7 @@ export default function NavigateButton({
   destination,
   suggestedMode = 'driving',
   intent        = 'directions',
+  from,
   variant       = 'icon',
   label         = intent === 'view' ? 'Map' : 'Navigate',
   size          = 'small',
@@ -117,6 +121,7 @@ export default function NavigateButton({
           destination={destination}
           intent={intent}
           initialMode={suggestedMode}
+          from={from}
           onPicked={() => setAnchor(null)}
           onNotice={setNotice}
         />

@@ -8,6 +8,7 @@ import DeleteIcon         from '@mui/icons-material/Delete';
 import LockIcon           from '@mui/icons-material/Lock';
 import NotificationsIcon  from '@mui/icons-material/Notifications';
 import NavigateButton     from '@/components/ui/NavigateButton';
+import type { TravelOrigin } from '@/lib/navigation/useTravelTimes';
 import DocumentViewer, { type ViewableFile } from '@/components/files/DocumentViewer';
 import {
   DAY_START_HOUR, DAY_END_HOUR, SNAP_MINS, STOP_CONFIG, D,
@@ -47,6 +48,8 @@ interface Props {
   editMode?:    boolean;
   /** Live flight status for a stop mirroring a flight: "Gate 102", "Landed 10:21 · belt 7". */
   live?:        { text: string; tone: Tone } | null;
+  /** Where Navigate's times start when you're not near this stop yet */
+  navFrom?:     TravelOrigin | null;
 }
 
 // Bell + the time the notification goes out, beside the stop's name.
@@ -68,7 +71,7 @@ function ReminderMark({ reminder, size }: { reminder: { local: string; sent: boo
   );
 }
 
-export function StopBlock({ stop, onDelete, onClick, onResize, pxPerMin, isMobile, colIndex = 0, totalCols = 1, colSpan = 1, linkedFiles = [], startHour = DAY_START_HOUR, reminder = null, highlighted = false, editMode = false, live = null }: Props) {
+export function StopBlock({ stop, onDelete, onClick, onResize, pxPerMin, isMobile, colIndex = 0, totalCols = 1, colSpan = 1, linkedFiles = [], startHour = DAY_START_HOUR, reminder = null, highlighted = false, editMode = false, live = null, navFrom = null }: Props) {
   const startMin = stopStartMinutes(stop);
   if (startMin === null) return null;
 
@@ -461,6 +464,7 @@ export function StopBlock({ stop, onDelete, onClick, onResize, pxPerMin, isMobil
               <NavigateButton
                 destination={{ name: displayName, address: stop.address, coordinates: stop.coordinates ?? null }}
                 suggestedMode="walking"
+                from={navFrom}
                 size="small"
                 sx={{ p: isMobile ? 0.75 : 0.25, minWidth: isMobile ? 32 : 22, minHeight: isMobile ? 32 : 22 }}
               />

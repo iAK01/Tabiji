@@ -9,7 +9,7 @@ import User                  from '@/lib/mongodb/models/User';
 import TripFile              from '@/lib/mongodb/models/TripFile';
 import TripLogistics         from '@/lib/mongodb/models/TripLogistics';
 import TripItinerary         from '@/lib/mongodb/models/TripItinerary';
-import { geocodeNear }       from '@/lib/geo/geocode';
+import { locatePlace, localityWords, sameName } from '@/lib/geo/geocode';
 import { resolveCheckIn, checkInHint } from '@/lib/itinerary/checkInTiming';
 import { DOCUMENT_TYPE_VALUES, DOC_TYPE_EXTRACT } from '@/lib/files/documentTypes';
 import { buildExistingIndex, describeExisting, flagDuplicates } from '@/lib/extract/existingMatch';
@@ -140,7 +140,8 @@ Rules:
 - If a venue also hosts a scheduled item, list it once under venues AND include the scheduled item under itineraryStops
 - Only include what is actually present in the material. Do not invent times or reference numbers. Omit a field rather than guess.
 - "address": only a real street address if the material states one, else "". Never put just a city.
-- "searchQuery": ALWAYS provide one for accommodation, venues and itinerary stops — the place name followed by the city and country, e.g. "Sartory Hall, Cologne, Germany". This is used to look up the real location. Use "${ctx.city}, ${ctx.country}" as the city/country unless the material clearly places it elsewhere.
+- "building": for a room, hall, stage, stand, booth or area INSIDE a larger venue, that venue's name — e.g. "Sala Sinfónica" → "Auditorio Alfredo Kraus", "Hall 9" → "NEC Birmingham". Use the event's main venue for its own rooms/stages/stands when the material or your knowledge of the event places them there. "" for a standalone place, or when you don't know.
+- "searchQuery": ALWAYS provide one for accommodation, venues and itinerary stops — the real place's name (the building's, when "building" is set) followed by the actual town or city it is in and the country, e.g. "Sartory Hall, Cologne, Germany". Name the town, never just an island or region: "Las Palmas de Gran Canaria", not "Gran Canaria". The destination is ${ctx.city}, ${ctx.country} unless the material places it elsewhere.
 - If the material contains none of a given group, return an empty array for it
 
 DO NOT create:
@@ -162,13 +163,13 @@ Return ONLY valid JSON, no markdown, no commentary:
   "documentType": "hotel_confirmation",
   "summary": "one plain sentence",
   "accommodation": [
-    { "type": "hotel", "name": "...", "address": "...", "searchQuery": "Hotel name, ${ctx.city}, ${ctx.country}", "checkIn": "YYYY-MM-DD or null", "checkOut": "YYYY-MM-DD or null", "checkInTime": "HH:MM or null", "checkOutTime": "HH:MM or null", "confirmationNumber": "... or null", "notes": "...", "existingId": "a0 or null" }
+    { "type": "hotel", "name": "...", "address": "...", "searchQuery": "Hotel name, Town, Country", "checkIn": "YYYY-MM-DD or null", "checkOut": "YYYY-MM-DD or null", "checkInTime": "HH:MM or null", "checkOutTime": "HH:MM or null", "confirmationNumber": "... or null", "notes": "...", "existingId": "a0 or null" }
   ],
   "venues": [
-    { "type": "concert", "name": "...", "address": "...", "searchQuery": "Venue name, ${ctx.city}, ${ctx.country}", "date": "YYYY-MM-DD or null", "time": "HH:MM or null", "notes": "...", "existingId": "v0 or null" }
+    { "type": "concert", "name": "...", "address": "...", "building": "... or empty", "searchQuery": "Venue name, Town, Country", "date": "YYYY-MM-DD or null", "time": "HH:MM or null", "notes": "...", "existingId": "v0 or null" }
   ],
   "itineraryStops": [
-    { "name": "...", "type": "meeting", "date": "YYYY-MM-DD", "scheduledStart": "2026-07-22T14:30:00", "duration": 90, "address": "...", "searchQuery": "Place name, ${ctx.city}, ${ctx.country}", "notes": "...", "existingId": "s0 or null" }
+    { "name": "...", "type": "meeting", "date": "YYYY-MM-DD", "scheduledStart": "2026-07-22T14:30:00", "duration": 90, "address": "...", "building": "... or empty", "searchQuery": "Place name, Town, Country", "notes": "...", "existingId": "s0 or null" }
   ],
   "transport": [
     { "type": "flight", "departureLocation": "...", "arrivalLocation": "...", "departureTime": "2026-07-22T09:00:00 or null", "arrivalTime": "2026-07-22T11:30:00 or null", "confirmationNumber": "... or null", "flightNumber": "... or null", "operator": "... or null", "notes": "...", "existingId": "t0 or null" }
@@ -343,17 +344,32 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     flagDuplicates(extracted, existing);
 
     // ── Resolve real addresses + coordinates ─────────────────────────────────
-    // A place with no verified location is useless — the traveller taps "navigate"
-    // and ends up in the middle of the country. Geocode each place against the
-    // trip's destination and reject anything that lands too far away.
+    // People walk to these pins. A place gets coordinates only when the lookup
+    // finds that exact place (see locatePlace); otherwise it's flagged, never guessed.
+    // A room/stage/stand is located by its building, and reuses a pin the trip
+    // already has for that building rather than looking it up again.
     const dest = trip.destination?.coordinates;
     if (dest?.lat && dest?.lng) {
-      const proximity = { lat: dest.lat, lng: dest.lng };
-      const fallbackCity = [trip.destination?.city, trip.destination?.country].filter(Boolean).join(', ');
+      const locality = [trip.destination?.city, trip.destination?.country].filter(Boolean).join(', ');
+      const area     = { center: { lat: dest.lat, lng: dest.lng }, locality, maxKm: 40 };
+      const words    = localityWords(locality);
+      const norm     = (s: string) => s.trim().toLowerCase();
+      const pinned   = [...(logistics?.venues ?? []), ...(logistics?.accommodation ?? [])]
+        .filter((k: any) => k?.name && k.coordinates?.lat);
+      // Dozens of sessions share a handful of rooms — one lookup per distinct place.
+      const lookups = new Map<string, ReturnType<typeof locatePlace>>();
 
       const locate = async (item: any) => {
-        const query = (item.searchQuery || `${item.name}, ${fallbackCity}`).trim();
-        const hit = await geocodeNear(query, proximity, 40);
+        const building = String(item.building ?? '').trim();
+        const name     = building || String(item.name ?? '').trim();
+        const known    = pinned.find((k: any) => norm(k.name) === norm(name) || sameName(name, k.name, words));
+        const hit      = known
+          ? { address: known.address || item.address, lat: known.coordinates.lat, lng: known.coordinates.lng }
+          : await (() => {
+              const key = [name, item.searchQuery, item.address].map(v => norm(String(v ?? ''))).join('|');
+              if (!lookups.has(key)) lookups.set(key, locatePlace({ name, query: item.searchQuery, address: item.address }, area));
+              return lookups.get(key)!;
+            })();
         if (hit) {
           item.address     = hit.address;
           item.coordinates = { lat: hit.lat, lng: hit.lng };
@@ -361,6 +377,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
           item.addressUnverified = true;
         }
         delete item.searchQuery;
+        delete item.building;
         return item;
       };
 

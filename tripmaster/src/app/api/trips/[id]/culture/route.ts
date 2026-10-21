@@ -9,7 +9,7 @@ import User                  from '@/lib/mongodb/models/User';
 import { getFreeCultureAccess } from '@/lib/data/free-cultural-access';
 import { uploadFile }        from '@/lib/utils/storage';
 import { summaryLine, wetDayCount } from '@/lib/weather-insights';
-import { haversineKm }       from '@/lib/geo/geocode';
+import { haversineKm, locatePlace, locateArea } from '@/lib/geo/geocode';
 import { guideForTrip, stayForTrip } from '@/lib/guide/load';
 import { commonsPhotos }     from '@/lib/guide/wikivoyage';
 import { slug }              from '@/lib/guide/wikitext';
@@ -56,35 +56,6 @@ export interface CultureBriefing {
 }
 
 interface Dismissed { id: string; name: string }
-
-// ─── Mapbox geocoding with proximity + distance validation ───────────────────
-// proximity: biases results toward destination
-// maxKm: rejects results further than this from destination (prevents Bavaria situations)
-
-async function geocode(
-  query:        string,
-  proximity:    { lat: number; lng: number },
-  maxKm:        number = 60,
-): Promise<{ address: string; lat: number; lng: number } | null> {
-  const token = process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN;
-  if (!token) return null;
-  try {
-    const prox = `${proximity.lng},${proximity.lat}`;
-    const url  = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?limit=3&proximity=${prox}&access_token=${token}`;
-    const res  = await fetch(url);
-    const data = await res.json();
-
-    for (const f of (data?.features ?? [])) {
-      const [lng, lat] = f.center;
-      if (haversineKm(proximity.lat, proximity.lng, lat, lng) <= maxKm) {
-        return { address: f.place_name, lat, lng };
-      }
-    }
-    return null; // all results too far from destination — don't show wrong address
-  } catch {
-    return null;
-  }
-}
 
 // ─── Prompt ───────────────────────────────────────────────────────────────────
 
@@ -173,7 +144,7 @@ function buildPrompt(ctx: PromptContext): string {
     ? `The traveller has ruled these out — don't suggest them again: ${ctx.dismissed.map(d => d.name).join('; ')}`
     : null;
 
-  const searchRule = `give a searchQuery ending "${place}" (e.g. "St Muredach's Cathedral, Ballina, County Mayo, Ireland") so it geocodes to the right town`;
+  const searchRule = `give a searchQuery of the place's name, the actual town it is in and the country (e.g. "St Muredach's Cathedral, Ballina, County Mayo, Ireland") — the town, never just an island or region, when the destination "${place}" is one`;
   const source = ctx.candidates.length
     ? `Recommend the places you'd genuinely pick for this trip — real places in ${ctx.city} itself, not other towns.
 
@@ -327,6 +298,7 @@ async function generateBriefing(ctx: PromptContext & {
     .map(x => ({ ...x, id: x.listing?.id ?? `ai:${slug(x.p.name)}` }))
     .filter(x => !ruledOut.has(x.id) && !seen.has(x.id) && seen.add(x.id));
 
+  const area   = { center: ctx.destCoords, locality: `${ctx.city}, ${ctx.country}`, maxKm: 60 };
   const photos = await commonsPhotos(chosen.flatMap(x => x.listing?.image ? [x.listing.image] : [])).catch(() => new Map());
 
   const highlights: CultureHighlight[] = await Promise.all(chosen.map(async ({ p, listing, id }) => {
@@ -336,10 +308,7 @@ async function generateBriefing(ctx: PromptContext & {
     let coordinates = listing?.coordinates;
     let address     = listing?.address;
     if (!coordinates) {
-      const query = listing
-        ? `${name}${listing.address ? `, ${listing.address}` : ''}, ${ctx.city}, ${ctx.country}`
-        : p.searchQuery ?? `${name}, ${ctx.city}, ${ctx.country}`;
-      const geo = await geocode(query, ctx.destCoords, 60);
+      const geo = await locatePlace({ name, query: p.searchQuery ?? undefined, address: listing?.address }, area);
       if (geo) { coordinates = { lat: geo.lat, lng: geo.lng }; address ??= geo.address; }
     }
 
@@ -371,7 +340,7 @@ async function generateBriefing(ctx: PromptContext & {
 
   let neighbourhood: CultureBriefing['neighbourhood'] = null;
   if (parsed.neighbourhood) {
-    const geo = await geocode(parsed.neighbourhood.searchQuery, ctx.destCoords, 60);
+    const geo = await locateArea(parsed.neighbourhood.name, parsed.neighbourhood.searchQuery, area);
     neighbourhood = {
       name:        parsed.neighbourhood.name,
       description: parsed.neighbourhood.description,

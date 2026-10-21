@@ -47,6 +47,7 @@ import VenueCard          from './VenueCard';
 import TripDateTimePicker from '@/components/ui/TripDateTimePicker';
 import GettingThereStrip  from './GettingThereStrip';
 import { useUrlParam } from '@/lib/hooks/useUrlParam';
+import type { TravelOrigin } from '@/lib/navigation/useTravelTimes';
 
 const LOGISTICS_SECTIONS = ['transport', 'accommodation', 'venues', 'documents'] as const;
 
@@ -120,6 +121,17 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
   const [filesById,  setFilesById]  = useState<Map<string, any[]>>(new Map());
   const [viewerFile, setViewerFile] = useState<ViewableFile | null>(null);
   const [passIndex,  setPassIndex]  = useState<number | null>(null);
+
+  // Where a venue's Navigate times start when you're not near it yet: your hotel that night.
+  const hotelOn = (date?: string): TravelOrigin | null => {
+    const day = date ? String(date).split('T')[0] : '';
+    const a = day ? (logistics?.accommodation ?? []).find((a: any) => {
+      const inDay  = a.checkIn ? String(a.checkIn).split('T')[0] : '';
+      const outDay = a.checkOut ? String(a.checkOut).split('T')[0] : inDay;
+      return a.coordinates && inDay && inDay <= day && day <= outDay;
+    }) : null;
+    return a ? { name: a.name, coordinates: a.coordinates } : null;
+  };
 
   // Passes added from a card show straight away; the refresh after it agrees.
   const addFiles = (added: any[]) => setFilesById(prev => {
@@ -1199,6 +1211,7 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
           {(logistics?.venues ?? []).map((v: any, i: number) => (
             <VenueCard
               key={i} v={v} i={i} onMenu={openMenu} fmtDate={fmtDate}
+              navFrom={hotelOn(v.date)}
               linkedFiles={filesById.get(`venue:${i}`) ?? []}
               onOpenFile={f => setViewerFile({ _id: f._id, name: f.name, mimeType: f.mimeType, gcsUrl: f.gcsUrl })}
             />

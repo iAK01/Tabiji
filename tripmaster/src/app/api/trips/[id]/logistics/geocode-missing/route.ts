@@ -5,7 +5,7 @@ import Trip                  from '@/lib/mongodb/models/Trip';
 import User                  from '@/lib/mongodb/models/User';
 import TripLogistics         from '@/lib/mongodb/models/TripLogistics';
 import { syncLogisticsToItinerary } from '@/lib/itinerary/syncLogistics';
-import { geocodeNear }       from '@/lib/geo/geocode';
+import { locatePlace }       from '@/lib/geo/geocode';
 
 // POST /api/trips/[id]/logistics/geocode-missing
 // Backfills real address + coordinates for venues / accommodation that were
@@ -28,8 +28,8 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
   const logistics = await TripLogistics.findOne({ tripId: id });
   if (!logistics) return NextResponse.json({ fixed: 0, stillMissing: 0, checked: 0 });
 
-  const proximity    = { lat: dest.lat, lng: dest.lng };
   const fallbackCity = [trip.destination?.city, trip.destination?.country].filter(Boolean).join(', ');
+  const area         = { center: { lat: dest.lat, lng: dest.lng }, locality: fallbackCity, maxKm: 40 };
 
   let fixed = 0, stillMissing = 0, checked = 0, changed = false;
 
@@ -37,8 +37,7 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
   const repair = async (item: any) => {
     if (!item?.name || item.coordinates?.lat) return;   // named + not already located
     checked++;
-    const query = (item.searchQuery || `${item.name}, ${fallbackCity}`).trim();
-    const hit = await geocodeNear(query, proximity, 40);
+    const hit = await locatePlace({ name: item.name, address: item.address }, area);
     if (hit) {
       item.address     = hit.address;
       item.coordinates = { lat: hit.lat, lng: hit.lng };
