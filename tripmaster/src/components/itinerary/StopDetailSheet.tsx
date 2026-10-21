@@ -35,7 +35,7 @@ interface Props {
   linkedFiles: LinkedFile[];
   reminder:    { local: string; sent: boolean } | null;
   /** What can be changed here: a lead time for your own stops, on/off for a booking's reminders. */
-  reminderSetting?: { mode: 'lead'; value: number | null } | { mode: 'booking'; on: boolean } | null;
+  reminderSetting?: { mode: 'lead'; value: number | null; own?: boolean } | { mode: 'booking'; on: boolean } | null;
   /** Set, but won't be sent: everything off, the trip muted, or this kind switched off. */
   reminderNotice?:  string | null;
   onReminderChange?: (stop: Stop, value: number | null | boolean) => void;
@@ -175,8 +175,8 @@ export function StopDetailSheet({
             const when  = reminder ? ` · ${reminder.sent ? 'sent' : 'at'} ${reminder.local}` : '';
             const label = reminderSetting.mode === 'lead'
               ? (reminderSetting.value === null
-                  ? 'No reminder'
-                  : `${REMINDER_OPTIONS.find(o => o.value === reminderSetting.value)?.label ?? `${reminderSetting.value}m`} before${when}`)
+                  ? (reminderSetting.own === false ? 'No reminder (trip setting)' : 'No reminder')
+                  : `${REMINDER_OPTIONS.find(o => o.value === reminderSetting.value)?.label ?? `${reminderSetting.value}m`} before${reminderSetting.own === false ? ' (default)' : ''}${when}`)
               : (on ? `Reminders on${when}` : 'Reminders off for this booking');
             const choices: Array<{ label: string; value: number | null | boolean; selected: boolean }> =
               reminderSetting.mode === 'lead'

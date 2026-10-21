@@ -39,11 +39,17 @@ function loadPrefs(): Promise<void> {
   return prefsLoading;
 }
 
+/** Re-read the settings from the server (after a change made elsewhere, e.g. a trip reset). */
+export function reloadNotificationPrefs(): Promise<void> {
+  return loadPrefs();
+}
+
 export type PrefsPatch = {
   enabled?:       boolean;
   categories?:    Partial<NotificationPrefs['categories']>;
   quietHours?:    Partial<NotificationPrefs['quietHours']>;
   briefingTimes?: Partial<NotificationPrefs['briefingTimes']>;
+  stopLeadMins?:  number | null;
   mute?:          { tripId: string; muted: boolean };
 };
 
@@ -53,6 +59,7 @@ function applyPatch(prefs: NotificationPrefs, patch: PrefsPatch): NotificationPr
     categories:    { ...prefs.categories,    ...patch.categories },
     quietHours:    { ...prefs.quietHours,    ...patch.quietHours },
     briefingTimes: { ...prefs.briefingTimes, ...patch.briefingTimes },
+    stopLeadMins:  patch.stopLeadMins !== undefined ? patch.stopLeadMins : prefs.stopLeadMins,
     mutedTrips:    prefs.mutedTrips,
   });
   if (patch.mute) {
@@ -143,8 +150,57 @@ export function useNotificationInbox() {
     if (res?.ok) await patchSavedData(saved);
   }, []);
 
-  return { ...inbox, refresh: loadInbox, markRead };
+  // Clearing from the inbox, with undo. The server keeps the rows (they stop
+  // repeat sends) and just marks them cleared, with a stamp an undo can name.
+  const change = useCallback(async (
+    payload: { action: 'dismiss' | 'clear' | 'restore'; ids?: string[]; stamp: string },
+    next: InboxItem[],
+    what: string,
+  ): Promise<boolean> => {
+    const before = inboxStore.get();
+    const unread = next.filter(i => !i.read).length;
+    inboxStore.set({ items: next, unread, loaded: true });
+    setAppBadge(unread);
+    const saved: SavedDataUpdates = { [INBOX_URL]: copy => copy && { ...copy, unread, notifications: next } };
+    try {
+      const res = await sendOrQueue(
+        { type: 'UPDATE_INBOX', payload },
+        () => fetch(INBOX_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }),
+        saved,
+      );
+      if (!res) return true;
+      assertSaved(res);
+      await patchSavedData(saved);
+      return true;
+    } catch (err) {
+      inboxStore.set(before);
+      setAppBadge(before.unread);
+      reportSaveFailure(what, err);
+      return false;
+    }
+  }, []);
+
+  /** Clear some notifications (or all, with no ids). Resolves to what an undo needs, or null if it failed. */
+  const dismiss = useCallback(async (ids?: string[]): Promise<InboxUndo | null> => {
+    const stamp    = new Date().toISOString();
+    const previous = inboxStore.get().items;
+    const next     = ids ? previous.filter(i => !ids.includes(i.id)) : [];
+    const ok = await change(
+      ids ? { action: 'dismiss', ids, stamp } : { action: 'clear', stamp },
+      next,
+      ids ? 'clearing that notification' : 'clearing your notifications',
+    );
+    return ok ? { stamp, previous, count: previous.length - next.length } : null;
+  }, [change]);
+
+  const undo = useCallback(async (u: InboxUndo) => {
+    if (await change({ action: 'restore', stamp: u.stamp }, u.previous, 'bringing those notifications back')) loadInbox();
+  }, [change]);
+
+  return { ...inbox, refresh: loadInbox, markRead, dismiss, undo };
 }
+
+export interface InboxUndo { stamp: string; previous: InboxItem[]; count: number }
 
 /** Go to an in-app link: same page → pushState (instant, offline-safe), else a normal navigation. */
 export function openAppUrl(href: string): void {

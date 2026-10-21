@@ -6,7 +6,10 @@ import mongoose, { Schema } from 'mongoose';
 // key is the stop _id, transport index, or accommodation index.
 //
 // Also the notification inbox: title/body/url are what was shown, readAt is
-// set when the traveller opens the inbox (unread entries drive the app badge).
+// set when the traveller opens the inbox (unread entries drive the app badge),
+// dismissedAt when they clear it from the inbox. Rows are never deleted for
+// that — they're also what stops a notification being sent twice. `tag` groups
+// updates to the same thing (a newer one replaces the older in the inbox).
 
 const PushNotificationLogSchema = new Schema({
   userId:           { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
@@ -17,7 +20,9 @@ const PushNotificationLogSchema = new Schema({
   title:            String,
   body:             String,
   url:              String,
+  tag:              String,
   readAt:           Date,
+  dismissedAt:      Date,
   sentAt:           { type: Date, default: Date.now },
 }, { timestamps: false });
 

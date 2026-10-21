@@ -37,7 +37,8 @@ import { sendOrQueue } from '@/lib/offline/writes';
 import { readSaved, reportSaveFailure, reportCantSave } from '@/lib/offline/saveErrors';
 import { useNotificationPrefs } from '@/lib/push/useNotifications';
 import { CATEGORY_OPTIONS, type NotificationCategory } from '@/lib/push/prefs';
-import { reminderGroup, stopLeadMins, type BookingCollection } from '@/lib/push/leads';
+import { hasOwnLead, inheritedLead, reminderGroup, stopLeadMins, type BookingCollection, type TripLead } from '@/lib/push/leads';
+import { REMINDERS_CHANGED, type RemindersChangedDetail } from '@/lib/push/tripReminders';
 import {
   DAY_START_HOUR, DAY_END_HOUR,
   PX_PER_MIN_MOBILE, PX_PER_MIN_DESKTOP,
@@ -171,7 +172,8 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
   const [reminderState, setReminderState] = useState<{
     enabled: boolean; muted: boolean;
     bookingsOff: Array<{ collection: string; index: number; group: string }>;
-  }>({ enabled: true, muted: false, bookingsOff: [] });
+    tripLead: TripLead | null;      // this trip's reminder before each stop (null = your default)
+  }>({ enabled: true, muted: false, bookingsOff: [], tripLead: null });
   const { prefs: notifPrefs } = useNotificationPrefs();
   // A notification link (?stop=) landing on a stop: ring it for a moment.
   const [highlightStop, setHighlightStop] = useState<string | null>(null);
@@ -248,7 +250,10 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
       .then(data => {
         if (!data) return;
         setReminders(data.reminders ?? []);
-        setReminderState({ enabled: data.enabled !== false, muted: !!data.muted, bookingsOff: data.bookingsOff ?? [] });
+        setReminderState({
+          enabled: data.enabled !== false, muted: !!data.muted, bookingsOff: data.bookingsOff ?? [],
+          tripLead: data.leads?.trip ?? null,
+        });
       })
       .catch(() => {});
   }, [tripId]);
@@ -258,6 +263,30 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
     const t = setTimeout(loadReminders, 1500);
     return () => clearTimeout(t);
   }, [days, loadReminders, notifPrefs]);
+
+  // Trip-wide reminder times changed from the notification centre
+  useEffect(() => {
+    const onChange = (e: Event) => {
+      const { tripId: changed, days: fresh, clearOwnLeads } = (e as CustomEvent<RemindersChangedDetail>).detail;
+      if (changed !== tripId) return;
+      if (fresh) {
+        setDays(fresh);
+        getTripCache(tripId).then(c => saveTripCache(tripId, { ...(c ?? {}), itinerary: fresh })).catch(() => {});
+      } else if (clearOwnLeads) {
+        setDays(ds => ds.map(d => ({
+          ...d,
+          stops: d.stops.map(st => (st.source === 'logistics' ? st : { ...st, notificationLeadMins: undefined })),
+        })));
+      }
+      loadReminders();
+    };
+    window.addEventListener(REMINDERS_CHANGED, onChange);
+    return () => window.removeEventListener(REMINDERS_CHANGED, onChange);
+  }, [tripId, loadReminders]);
+
+  // What a stop without a time of its own gets: this trip's setting, then yours
+  const userLead     = notifPrefs?.stopLeadMins ?? null;
+  const inheritedFor = (type: string) => inheritedLead(type, reminderState.tripLead, userLead);
 
   // Live gate / delay / landing for stops that mirror a flight
   const flightFor = (stop: Stop) => {
@@ -293,7 +322,9 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
 
   const reminderSettingFor = (stop: Stop) => {
     if (!stop._id || !(stop.scheduledStart || (stop as any).time)) return null;
-    if (stop.source !== 'logistics') return { mode: 'lead' as const, value: stopLeadMins(stop) };
+    if (stop.source !== 'logistics') {
+      return { mode: 'lead' as const, value: stopLeadMins(stop, reminderState.tripLead, userLead), own: hasOwnLead(stop) };
+    }
     const b = bookingOf(stop);
     if (!b) return null;
     const off = reminderState.bookingsOff.some(o => o.collection === b.collection && o.index === b.index && o.group === b.group);
@@ -1654,6 +1685,7 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
         }
         defaultTime={drawer.time}
         defaultType={drawer.type}
+        inheritedLeadFor={inheritedFor}
         editStop={drawer.editStop}
         isMobile={isMobile}
         knownLocations={knownLocations}

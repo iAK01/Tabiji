@@ -65,6 +65,20 @@ export interface Delivery {
   payload:          PushPayload;
 }
 
+// How far back the inbox (and the app badge) looks
+export const INBOX_DAYS = 14;
+
+/** Inbox rows for a user: titled (sent since the inbox existed), not cleared, recent. */
+export function inboxFilter(userId: any, extra: Record<string, unknown> = {}) {
+  return {
+    userId,
+    title:       { $exists: true },
+    dismissedAt: null,
+    sentAt:      { $gte: new Date(Date.now() - INBOX_DAYS * 24 * 60 * 60 * 1000) },
+    ...extra,
+  };
+}
+
 /**
  * Sends one notification unless it has already gone out. Claims the log entry
  * first: the unique index lets exactly one run own a notification, so
@@ -79,13 +93,22 @@ export async function deliver(d: Delivery, invalidEndpoints: string[]): Promise<
       title:    d.payload.title,
       body:     d.payload.body,
       url:      d.payload.url,
+      tag:      d.payload.tag,
     });
   } catch (err: any) {
     if (err?.code === 11000) return false;
     throw err;
   }
 
-  const badgeCount = await PushNotificationLog.countDocuments({ userId: d.userId, readAt: null, title: { $exists: true } });
+  // An update to the same thing (same tag) replaces the older one in the inbox,
+  // so the older one stops counting as unread.
+  if (d.payload.tag) {
+    await PushNotificationLog.updateMany(
+      { userId: d.userId, tripId: d.tripId, tag: d.payload.tag, readAt: null, $nor: [id] },
+      { $set: { readAt: new Date() } },
+    );
+  }
+  const badgeCount = await PushNotificationLog.countDocuments(inboxFilter(d.userId, { readAt: null }));
   const sent = await sendPush(d.subscriptions, { ...d.payload, badgeCount }, invalidEndpoints);
   // Nothing delivered (stale subscriptions, push service down) — release the
   // claim so the next run retries while the notification is still due.

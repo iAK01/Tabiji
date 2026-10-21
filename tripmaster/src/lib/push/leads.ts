@@ -11,18 +11,51 @@ export const LEAD_MIN: Record<string, number> = {
 };
 export const DEFAULT_LEAD_MIN = 30;
 
-/** A stop's reminder lead when it hasn't been set (imported or AI-made stops). */
+/** The built-in lead for a kind of stop. */
 export function defaultLeadMins(type: string | undefined): number {
   return (type && LEAD_MIN[type]) || DEFAULT_LEAD_MIN;
 }
 
+/** The lead times on offer (minutes). */
+export const LEAD_CHOICES = [5, 15, 30, 45, 60, 120];
+
+/** A trip's setting for every stop on it: a lead, or 'off'. Unset → your overall default. */
+export type TripLead = number | 'off';
+
+export function parseTripLead(v: unknown): TripLead | null {
+  if (v === 'off') return 'off';
+  return typeof v === 'number' && LEAD_CHOICES.includes(v) ? v : null;
+}
+
 /**
- * A manual stop's effective lead: `null` is "Off", missing is the default for
- * its type, a number is what the traveller picked.
+ * What a stop (or an event booking) gets when it has no reminder of its own:
+ * the trip's setting, then your overall default, then the built-in one for
+ * its kind. null = no reminder.
  */
-export function stopLeadMins(stop: { type?: string; notificationLeadMins?: number | null }): number | null {
+export function inheritedLead(type: string | undefined, trip?: TripLead | null, user?: number | null): number | null {
+  if (trip === 'off') return null;
+  if (typeof trip === 'number') return trip;
+  if (typeof user === 'number') return user;
+  return defaultLeadMins(type);
+}
+
+/**
+ * A manual stop's effective lead: its own setting (`null` is "Off", a number is
+ * what was picked), else what it inherits.
+ */
+export function stopLeadMins(
+  stop: { type?: string; notificationLeadMins?: number | null },
+  trip?: TripLead | null,
+  user?: number | null,
+): number | null {
   if (stop.notificationLeadMins === null) return null;
-  return typeof stop.notificationLeadMins === 'number' ? stop.notificationLeadMins : defaultLeadMins(stop.type);
+  if (typeof stop.notificationLeadMins === 'number') return stop.notificationLeadMins;
+  return inheritedLead(stop.type, trip, user);
+}
+
+/** Whether a stop has a reminder setting of its own (rather than following the trip / your default). */
+export function hasOwnLead(stop: { notificationLeadMins?: number | null }): boolean {
+  return stop.notificationLeadMins !== undefined;
 }
 
 export type BookingCollection = 'transport' | 'accommodation' | 'venue';

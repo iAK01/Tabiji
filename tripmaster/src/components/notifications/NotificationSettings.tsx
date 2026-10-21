@@ -7,6 +7,7 @@ import {
 import TuneIcon from '@mui/icons-material/Tune';
 import { CATEGORY_OPTIONS, type NotificationCategory } from '@/lib/push/prefs';
 import { useNotificationPrefs } from '@/lib/push/useNotifications';
+import { DefaultStopReminder } from '@/components/notifications/ReminderTimes';
 
 const GREEN = '#55702C';
 const MUTED = 'rgba(29,38,66,0.45)';
@@ -116,6 +117,9 @@ export default function NotificationSettings() {
         {CATEGORY_OPTIONS.map(({ key, label }) => (
           <Row key={key} label={label} checked={prefs.categories[key]} onChange={on => setCategory(key, on)} />
         ))}
+
+        <Label>Reminder before each stop</Label>
+        <DefaultStopReminder />
 
         <Label>Quiet hours</Label>
         <Row

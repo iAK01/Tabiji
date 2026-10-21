@@ -3,13 +3,15 @@
 import { useState } from 'react';
 import { DateTime } from 'luxon';
 import {
-  Badge, Box, Button, Divider, Drawer, IconButton, Switch, Typography, alpha,
+  Badge, Box, Button, Divider, Drawer, IconButton, Switch, Typography, alpha, Collapse, Snackbar,
 } from '@mui/material';
 import NotificationsIcon      from '@mui/icons-material/Notifications';
 import NotificationsOffIcon   from '@mui/icons-material/NotificationsOff';
 import CloseIcon              from '@mui/icons-material/Close';
 import SettingsOutlinedIcon   from '@mui/icons-material/SettingsOutlined';
-import { openAppUrl, useNotificationInbox, useNotificationPrefs, type InboxItem } from '@/lib/push/useNotifications';
+import ExpandMoreIcon         from '@mui/icons-material/ExpandMore';
+import { openAppUrl, useNotificationInbox, useNotificationPrefs, type InboxItem, type InboxUndo } from '@/lib/push/useNotifications';
+import { DefaultStopReminder, TripReminderTimes } from '@/components/notifications/ReminderTimes';
 
 const NAVY  = '#2C3E50';
 const GREEN = '#55702C';
@@ -38,6 +40,27 @@ function grouped(items: InboxItem[]): Array<[string, InboxItem[]]> {
   return [...groups.entries()];
 }
 
+// Away from a trip: your default reminder before each stop, on every trip
+function DefaultRemindersRow() {
+  const [open, setOpen] = useState(false);
+  return (
+    <Box>
+      <Box
+        onClick={() => setOpen(o => !o)}
+        role="button"
+        aria-expanded={open}
+        sx={{ display: 'flex', alignItems: 'center', gap: 1, px: 2, py: 1.25, minHeight: 56, cursor: 'pointer' }}
+      >
+        <Typography sx={{ fontSize: '0.88rem', fontWeight: 700, flexGrow: 1 }}>Reminder before each stop</Typography>
+        <ExpandMoreIcon sx={{ color: 'text.secondary', transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }} />
+      </Box>
+      <Collapse in={open}>
+        <Box sx={{ px: 2, pb: 2 }}><DefaultStopReminder /></Box>
+      </Collapse>
+    </Box>
+  );
+}
+
 interface Props {
   /** On a trip page: adds the switch to mute this trip. */
   tripId?:   string;
@@ -46,7 +69,13 @@ interface Props {
 
 export default function NotificationBell({ tripId, tripName }: Props) {
   const [open, setOpen] = useState(false);
-  const { items, unread, loaded, refresh, markRead } = useNotificationInbox();
+  const { items, unread, loaded, refresh, markRead, dismiss, undo } = useNotificationInbox();
+  const [cleared, setCleared] = useState<InboxUndo | null>(null);
+
+  const clear = async (ids?: string[]) => {
+    const result = await dismiss(ids);
+    if (result) setCleared(result);
+  };
   const { prefs, update } = useNotificationPrefs();
   const allOff = prefs?.enabled === false;
   const muted  = !!tripId && !!prefs?.mutedTrips.includes(tripId);
@@ -128,11 +157,25 @@ export default function NotificationBell({ tripId, tripName }: Props) {
           </>
         )}
 
+        {/* Reminder times: one slim row, opened when wanted — the inbox stays the main thing here */}
+        <Box sx={{ opacity: allOff ? 0.5 : 1, pointerEvents: allOff ? 'none' : 'auto' }}>
+          {tripId ? <TripReminderTimes tripId={tripId} /> : <DefaultRemindersRow />}
+        </Box>
+        <Divider />
+
         <Box sx={{ flexGrow: 1, overflowY: 'auto', pb: 2 }}>
           {loaded && items.length === 0 && (
             <Typography sx={{ px: 2, py: 4, color: 'text.secondary', fontSize: '0.88rem', textAlign: 'center' }}>
-              Nothing yet. Notifications you receive will show up here.
+              Nothing here. Notifications from the last two weeks show up here.
             </Typography>
+          )}
+
+          {items.length > 0 && (
+            <Box sx={{ display: 'flex', justifyContent: 'flex-end', px: 1, pt: 0.5 }}>
+              <Button onClick={() => clear()} sx={{ textTransform: 'none', fontWeight: 700, color: NAVY, minHeight: 44 }}>
+                Clear all
+              </Button>
+            </Box>
           )}
 
           {grouped(items).map(([label, group]) => (
@@ -174,6 +217,13 @@ export default function NotificationBell({ tripId, tripName }: Props) {
                       {[item.tripName, DateTime.fromISO(item.sentAt).toFormat('HH:mm')].filter(Boolean).join(' · ')}
                     </Typography>
                   </Box>
+                  <IconButton
+                    aria-label="Clear this notification"
+                    onClick={e => { e.stopPropagation(); clear([item.id]); }}
+                    sx={{ width: 44, height: 44, mt: -0.75, mr: -1, flexShrink: 0, color: 'text.disabled' }}
+                  >
+                    <CloseIcon fontSize="small" />
+                  </IconButton>
                 </Box>
               ))}
             </Box>
@@ -191,6 +241,22 @@ export default function NotificationBell({ tripId, tripName }: Props) {
           </Button>
         </Box>
       </Drawer>
+
+      <Snackbar
+        open={!!cleared}
+        autoHideDuration={6000}
+        onClose={(_, reason) => { if (reason !== 'clickaway') setCleared(null); }}
+        message={cleared?.count === 1 ? 'Notification cleared' : `${cleared?.count ?? 0} notifications cleared`}
+        action={
+          <Button
+            onClick={() => { const u = cleared; setCleared(null); if (u) undo(u); }}
+            sx={{ color: '#fff', fontWeight: 800, textTransform: 'none', minHeight: 44 }}
+          >
+            Undo
+          </Button>
+        }
+        sx={{ mb: 'env(safe-area-inset-bottom)' }}
+      />
     </>
   );
 }

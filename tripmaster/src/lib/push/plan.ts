@@ -16,7 +16,7 @@ import {
   type LatLng, type Leg, type Point,
 } from '@/lib/push/journey';
 import { inQuietHours, QUIET_EXEMPT, type NotificationCategory, type NotificationPrefs } from '@/lib/push/prefs';
-import { DEFAULT_LEAD_MIN, LEAD_MIN, LOGISTICS_FIELD, reminderGroup, stopLeadMins, type BookingCollection } from '@/lib/push/leads';
+import { DEFAULT_LEAD_MIN, LEAD_MIN, LOGISTICS_FIELD, inheritedLead, parseTripLead, reminderGroup, stopLeadMins, type BookingCollection } from '@/lib/push/leads';
 import type { PushAction, PushPayload } from '@/lib/push/send';
 import { navigatePagePath } from '@/lib/navigation/links';
 import { passesForSure, passLabel, passSummary } from '@/lib/passes/passes';
@@ -343,6 +343,9 @@ export function planTrip(data: TripData, r: Recipient, drive: DriveTimes, nowMs:
     const zone = zoneAt(guess.toMillis());
     return zone === guess.zoneName ? guess : stopTime(dayDate, stop, zone);
   };
+
+  // Reminder before each stop on this trip, when it has its own (else your default)
+  const tripLead = parseTripLead(trip.reminderLeadMins);
 
   // Reminders switched off for one booking from its itinerary stop
   const bookingOff = (ref: PlannedRef | undefined) => {
@@ -748,13 +751,18 @@ export function planTrip(data: TripData, r: Recipient, drive: DriveTimes, nowMs:
   });
 
   // ── Venues ─────────────────────────────────────────────────────────────────
+  // "Not going" on the event's itinerary stop silences the event too
+  const skippedVenue = (i: number) => days.some((d: any) => (d.stops ?? []).some((st: any) =>
+    st.source === 'logistics' && st.skipped && st.logisticsRef?.collection === 'venue' && st.logisticsRef?.index === i));
+
   venues.forEach((v: any, i: number) => {
     const time = normaliseTime(v.time);
-    if (!v.date || !time) return;
+    if (!v.date || !time || skippedVenue(i)) return;
     const date  = ymd(v.date);
     const event = atTime(date, time, zoneFor(date));
     if (!event) return;
-    const lead = LEAD_MIN[v.type] ?? LEAD_MIN.event;
+    const lead = inheritedLead(LEAD_MIN[v.type] ? v.type : 'event', tripLead, r.prefs.stopLeadMins);
+    if (!lead) return;
     const docs = linkedFiles(files, ['venue'], i, [v.name]);
     const nav  = (v.address || v.coordinates)
       ? navUrl(tripId, { name: v.name, address: v.address, coords: coords(v.coordinates) }, 'driving')
@@ -786,8 +794,8 @@ export function planTrip(data: TripData, r: Recipient, drive: DriveTimes, nowMs:
       if (stop.source === 'logistics') continue;
       // "Not going" on the itinerary.
       if (stop.skipped) continue;
-      // null is "Off"; missing (stops from imports/AI) means the default for its type
-      const lead = stopLeadMins(stop);
+      // Its own setting (null is "Off"), else the trip's, else yours, else the default for its kind
+      const lead = stopLeadMins(stop, tripLead, r.prefs.stopLeadMins);
       if (!lead || lead <= 0) continue;
       const event = localStopTime(day.date, stop);
       if (!event) continue;

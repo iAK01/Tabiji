@@ -52,6 +52,9 @@ const TripSchema = new Schema({
   },
   collaborators: [{ userId: Schema.Types.ObjectId, role: { type: String, enum: ['viewer', 'editor'] }, addedAt: Date }],
   dismissedChecks: { type: [String], default: [] },
+  // Reminder before each itinerary stop on this trip (minutes, or 'off') for
+  // stops without their own — see lib/push/leads.ts. Unset: the traveller's default.
+  reminderLeadMins: { type: Schema.Types.Mixed },
   deleted: { type: Boolean, default: false },
 }, { timestamps: true });
 

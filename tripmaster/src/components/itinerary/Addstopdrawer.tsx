@@ -31,6 +31,8 @@ interface Props {
   onDelete?:      () => Promise<boolean>;
   defaultTime:    string;
   defaultType:    string;
+  /** The reminder a stop of this type gets without its own (trip setting, then yours, then by type). */
+  inheritedLeadFor?: (type: string) => number | null;
   editStop?:      Stop;
   isMobile:       boolean;
   knownLocations: KnownLocation[];
@@ -71,7 +73,7 @@ function referencePlaceholder(name: string): string {
 
 export function AddStopDrawer({
   open, onClose, onAdd, onUpdate, onDelete,
-  defaultTime, defaultType, editStop,
+  defaultTime, defaultType, inheritedLeadFor, editStop,
   isMobile, knownLocations, nightDates = null, nightDefault,
 }: Props) {
   const isEditing   = !!editStop;
@@ -89,7 +91,8 @@ export function AddStopDrawer({
     address:               '',
     locationName:          '',
     coordinates:           undefined as { lat: number; lng: number } | undefined,
-    notificationLeadMins:  30 as number | null,
+    // undefined = follow the trip / your default; only sent once picked
+    notificationLeadMins:  undefined as number | null | undefined,
     lateNight:             undefined as boolean | undefined,   // picked here; else nightDefault
   });
   const [saving,       setSaving]       = useState(false);
@@ -113,8 +116,8 @@ export function AddStopDrawer({
         address:              editStop.address ?? '',
         locationName:         resolveLocationName(editStop, knownLocations),
         coordinates:          editStop.coordinates,
-        // Off stays off; unset shows the default it actually gets
-        notificationLeadMins: stopLeadMins(editStop),
+        // Its own setting if it has one (Off stays off), else it follows the default
+        notificationLeadMins: editStop.notificationLeadMins,
         lateNight:            undefined,
       });
       setShowExtras(!!(editStop.notes || editStop.address));
@@ -129,7 +132,7 @@ export function AddStopDrawer({
         address:              '',
         locationName:         '',
         coordinates:          undefined,
-        notificationLeadMins: 30,
+        notificationLeadMins: undefined,
         lateNight:            undefined,
       });
       setShowExtras(false);
@@ -442,11 +445,14 @@ export function AddStopDrawer({
             letterSpacing: '0.08em', textTransform: 'uppercase',
             color: D.muted, mb: 0.75,
           }}>
-            Notify me before
+            Notify me before{form.notificationLeadMins === undefined ? ' · default' : ''}
           </Typography>
           <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
             {NOTIFY_OPTIONS.map(opt => {
-              const isActive = form.notificationLeadMins === opt.value;
+              const effective = form.notificationLeadMins === undefined
+                ? (inheritedLeadFor?.(form.type) ?? stopLeadMins({ type: form.type }))
+                : form.notificationLeadMins;
+              const isActive = effective === opt.value;
               return (
                 <Box
                   key={String(opt.value)}

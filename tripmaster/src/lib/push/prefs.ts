@@ -1,6 +1,8 @@
 // Notification settings — shared by the sender (api/push/notify) and the
-// settings UI. Stored on User.preferences.notifications; anything missing or
+// settings UI. Stored on User.notificationPrefs; anything missing or
 // malformed falls back to the defaults here.
+
+import { LEAD_CHOICES } from '@/lib/push/leads';
 
 export type NotificationCategory =
   | 'travel'      // departures, gates, delays, hotel check-in/out
@@ -18,6 +20,9 @@ export interface NotificationPrefs {
   // anything time-critical ignores it (QUIET_EXEMPT).
   quietHours:    { enabled: boolean; start: string; end: string };
   briefingTimes: { morning: string; evening: string };
+  // Minutes before each itinerary stop that has no reminder of its own (and
+  // isn't on a trip with its own setting). null = the built-in time for its kind.
+  stopLeadMins:  number | null;
   mutedTrips:    string[];
 }
 
@@ -39,6 +44,7 @@ export const DEFAULT_NOTIFICATION_PREFS: NotificationPrefs = {
   },
   quietHours:    { enabled: true, start: '22:00', end: '07:00' },
   briefingTimes: { morning: '07:30', evening: '19:00' },
+  stopLeadMins:  null,
   mutedTrips:    [],
 };
 
@@ -71,6 +77,7 @@ export function resolvePrefs(raw: any): NotificationPrefs {
       morning: time(raw?.briefingTimes?.morning, d.briefingTimes.morning),
       evening: time(raw?.briefingTimes?.evening, d.briefingTimes.evening),
     },
+    stopLeadMins: typeof raw?.stopLeadMins === 'number' && LEAD_CHOICES.includes(raw.stopLeadMins) ? raw.stopLeadMins : null,
     mutedTrips:  Array.isArray(raw?.mutedTrips) ? raw.mutedTrips.map(String) : [],
   };
 }

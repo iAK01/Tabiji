@@ -247,6 +247,20 @@ async function dispatchQueuedAction(action: any): Promise<boolean> {
         });
         break;
 
+      case 'SET_TRIP_REMINDERS':
+        res = await fetch(`/api/trips/${action.tripId}/reminders`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(action.payload),
+        });
+        break;
+
+      case 'UPDATE_INBOX':
+        res = await fetch('/api/user/notifications', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(action.payload),
+        });
+        break;
+
       case 'MARK_NOTIFICATIONS_READ':
         res = await fetch('/api/user/notifications', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -294,7 +308,9 @@ function describeAction(action: any): string {
     case 'COMPLETE_TODO':           return 'a completed to-do';
     case 'SET_NOTIFICATION_PREFS':  return 'your notification settings';
     case 'SET_BOOKING_REMINDERS':   return 'a booking’s reminder setting';
+    case 'SET_TRIP_REMINDERS':      return 'this trip’s reminder times';
     case 'MARK_NOTIFICATIONS_READ': return 'marking notifications read';
+    case 'UPDATE_INBOX':            return 'clearing notifications';
     case 'DISMISS_PICK':            return `hiding${p.name ? ` “${p.name}”` : ' a pick'} in Discover`;
     default:                        return 'a change';
   }

@@ -18,8 +18,8 @@ export async function GET() {
 }
 
 // ─── PATCH /api/user/notification-preferences ─────────────────────────────────
-// Body: any of { enabled, categories, quietHours, briefingTimes } (partial is
-// fine), and/or { mute: { tripId, muted } } to mute or unmute one trip.
+// Body: any of { enabled, categories, quietHours, briefingTimes, stopLeadMins }
+// (partial is fine), and/or { mute: { tripId, muted } } to mute or unmute one trip.
 // Merged onto the stored settings, then validated as a whole.
 export async function PATCH(req: Request) {
   const session = await getServerSession();
@@ -38,6 +38,7 @@ export async function PATCH(req: Request) {
     categories:    { ...current.categories,    ...(body.categories    ?? {}) },
     quietHours:    { ...current.quietHours,    ...(body.quietHours    ?? {}) },
     briefingTimes: { ...current.briefingTimes, ...(body.briefingTimes ?? {}) },
+    stopLeadMins:  'stopLeadMins' in body ? body.stopLeadMins : current.stopLeadMins,
     mutedTrips:    current.mutedTrips,
   });
 
