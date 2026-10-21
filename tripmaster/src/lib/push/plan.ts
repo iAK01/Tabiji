@@ -16,6 +16,7 @@ import {
   type LatLng, type Leg, type Point,
 } from '@/lib/push/journey';
 import { inQuietHours, QUIET_EXEMPT, type NotificationCategory, type NotificationPrefs } from '@/lib/push/prefs';
+import { DEFAULT_LEAD_MIN, LEAD_MIN, LOGISTICS_FIELD, reminderGroup, stopLeadMins, type BookingCollection } from '@/lib/push/leads';
 import type { PushAction, PushPayload } from '@/lib/push/send';
 import { navigatePagePath } from '@/lib/navigation/links';
 import { passesForSure, passLabel, passSummary } from '@/lib/passes/passes';
@@ -27,15 +28,6 @@ import {
 const MIN  = 60 * 1000;
 const HOUR = 60 * MIN;
 
-// Minutes before something its reminder arrives.
-const LEAD_MIN: Record<string, number> = {
-  train: 60, ferry: 120, bus: 45,
-  car_hire: 30, taxi: 20, private_transfer: 20,
-  hotel: 60, activity: 45, sightseeing: 45, meal: 30, breakfast: 30,
-  meeting: 45, work: 45, other: 30, concert: 60, conference: 60,
-  restaurant: 30, event: 45, sport: 60, sports: 60, attraction: 45, business: 45,
-};
-const DEFAULT_LEAD_MIN = 30;
 
 // Flights: arrive this long before "leave by", so there's time to get going.
 const LEAVE_HEADS_UP_MS = 30 * MIN;
@@ -352,8 +344,19 @@ export function planTrip(data: TripData, r: Recipient, drive: DriveTimes, nowMs:
     return zone === guess.zoneName ? guess : stopTime(dayDate, stop, zone);
   };
 
+  // Reminders switched off for one booking from its itinerary stop
+  const bookingOff = (ref: PlannedRef | undefined) => {
+    if (!ref?.collection || ref.index === undefined) return false;
+    const entry = logistics?.[LOGISTICS_FIELD[ref.collection as BookingCollection]]?.[ref.index];
+    const group = reminderGroup(ref.collection as BookingCollection, ref.phase);
+    return !!group && Array.isArray(entry?.remindersOff) && entry.remindersOff.includes(group);
+  };
+
   const out: Planned[] = [];
-  const add = (p: Omit<Planned, 'zone'> & { zone?: string }) => out.push({ ...p, zone: p.zone ?? zoneAt(p.at) });
+  const add = (p: Omit<Planned, 'zone'> & { zone?: string }) => {
+    if (bookingOff(p.ref)) return;
+    out.push({ ...p, zone: p.zone ?? zoneAt(p.at) });
+  };
 
   const leaveBy      = new Map<number, DateTime>();  // leg index → leave time, for the evening briefing
   const arrivalAt    = new Map<number, number>();    // stay index → when the arrival notification fires
@@ -590,7 +593,7 @@ export function planTrip(data: TripData, r: Recipient, drive: DriveTimes, nowMs:
     const city  = leg.arrCity || cityOn(trip, date) || 'your destination';
     const hint  = gettingThereHint(trip, leg, mainArrival);
     mainArrival = false;
-    if (stay && r.prefs.categories.landed) arrivalAt.set(stay.index, at);
+    if (stay && r.prefs.categories.landed && !bookingOff({ collection: 'transport', index: i, phase: 'arrival' })) arrivalAt.set(stay.index, at);
 
     const lines = [`It's ${DateTime.fromMillis(at, { zone }).toFormat('HH:mm')} here${offsetNote(DateTime.fromMillis(at, { zone }), r.home.zone)}`];
     if (fs?.arr.belt) lines.push(`Bags: belt ${fs.arr.belt}`);
@@ -783,14 +786,11 @@ export function planTrip(data: TripData, r: Recipient, drive: DriveTimes, nowMs:
       if (stop.source === 'logistics') continue;
       // "Not going" on the itinerary.
       if (stop.skipped) continue;
-      // "Off" in the stop editor. Missing (stops from imports/AI) means the default.
-      if (stop.notificationLeadMins === null) continue;
+      // null is "Off"; missing (stops from imports/AI) means the default for its type
+      const lead = stopLeadMins(stop);
+      if (!lead || lead <= 0) continue;
       const event = localStopTime(day.date, stop);
       if (!event) continue;
-      const lead = typeof stop.notificationLeadMins === 'number'
-        ? stop.notificationLeadMins
-        : LEAD_MIN[stop.type] ?? DEFAULT_LEAD_MIN;
-      if (lead <= 0) continue;
 
       const stopId = stop._id ? String(stop._id) : null;
       const docs   = linkedFiles(files, ['itinerary', 'itinerary_stop'], stopId, [stop.name]);
@@ -927,7 +927,7 @@ function nextAt(ms: number, zone: string, hhmm: string): number {
 
 /** Whether a planned notification should go out now under the traveller's settings. */
 export function isDueNow(p: Pick<Planned, 'at' | 'until' | 'deferrable' | 'zone' | 'category' | 'latest'>, prefs: NotificationPrefs, nowMs: number): boolean {
-  if (!prefs.categories[p.category] || nowMs < p.at) return false;
+  if (!prefs.enabled || !prefs.categories[p.category] || nowMs < p.at) return false;
   let until = p.until;
   if (!QUIET_EXEMPT.has(p.category) && prefs.quietHours.enabled && prefs.quietHours.start !== prefs.quietHours.end) {
     if (inQuietHours(prefs, localMinutes(nowMs, p.zone))) return false;

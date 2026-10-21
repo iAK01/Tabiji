@@ -14,6 +14,11 @@ import { openAppUrl, useNotificationInbox, useNotificationPrefs, type InboxItem 
 const NAVY  = '#2C3E50';
 const GREEN = '#55702C';
 
+const switchSx = {
+  '& .MuiSwitch-switchBase.Mui-checked': { color: GREEN },
+  '& .MuiSwitch-switchBase.Mui-checked + .MuiSwitch-track': { backgroundColor: GREEN },
+};
+
 function dayLabel(iso: string): string {
   const d     = DateTime.fromISO(iso);
   const today = DateTime.now().startOf('day');
@@ -43,7 +48,8 @@ export default function NotificationBell({ tripId, tripName }: Props) {
   const [open, setOpen] = useState(false);
   const { items, unread, loaded, refresh, markRead } = useNotificationInbox();
   const { prefs, update } = useNotificationPrefs();
-  const muted = !!tripId && !!prefs?.mutedTrips.includes(tripId);
+  const allOff = prefs?.enabled === false;
+  const muted  = !!tripId && !!prefs?.mutedTrips.includes(tripId);
 
   const show = async () => {
     setOpen(true);
@@ -60,7 +66,7 @@ export default function NotificationBell({ tripId, tripName }: Props) {
     <>
       <IconButton color="inherit" size="small" onClick={show} aria-label="Notifications" sx={{ ml: 0.5 }}>
         <Badge badgeContent={unread} max={9} color="error" overlap="circular">
-          {muted ? <NotificationsOffIcon fontSize="small" /> : <NotificationsIcon fontSize="small" />}
+          {allOff || muted ? <NotificationsOffIcon fontSize="small" /> : <NotificationsIcon fontSize="small" />}
         </Badge>
       </IconButton>
 
@@ -82,9 +88,26 @@ export default function NotificationBell({ tripId, tripName }: Props) {
           </IconButton>
         </Box>
 
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, px: 2, py: 1.25, minHeight: 56 }}>
+          <Box sx={{ flexGrow: 1, minWidth: 0 }}>
+            <Typography sx={{ fontSize: '0.88rem', fontWeight: 700 }}>All notifications</Typography>
+            <Typography sx={{ fontSize: '0.75rem', color: allOff ? 'error.main' : 'text.secondary' }}>
+              {allOff ? 'Off — nothing will be sent' : 'On'}
+            </Typography>
+          </Box>
+          <Switch
+            checked={!allOff}
+            disabled={!prefs}
+            onChange={e => update({ enabled: e.target.checked })}
+            inputProps={{ 'aria-label': 'All notifications' }}
+            sx={switchSx}
+          />
+        </Box>
+        <Divider />
+
         {tripId && (
           <>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, px: 2, py: 1.25 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, px: 2, py: 1.25, minHeight: 56, opacity: allOff ? 0.5 : 1 }}>
               <Box sx={{ flexGrow: 1, minWidth: 0 }}>
                 <Typography sx={{ fontSize: '0.88rem', fontWeight: 700 }} noWrap>
                   {tripName ? `Notifications for ${tripName}` : 'Notifications for this trip'}
@@ -95,9 +118,10 @@ export default function NotificationBell({ tripId, tripName }: Props) {
               </Box>
               <Switch
                 checked={!muted}
-                disabled={!prefs}
+                disabled={!prefs || allOff}
                 onChange={e => update({ mute: { tripId, muted: !e.target.checked } })}
-                sx={{ '& .MuiSwitch-switchBase.Mui-checked': { color: GREEN }, '& .MuiSwitch-switchBase.Mui-checked + .MuiSwitch-track': { backgroundColor: GREEN } }}
+                inputProps={{ 'aria-label': 'Notifications for this trip' }}
+                sx={switchSx}
               />
             </Box>
             <Divider />

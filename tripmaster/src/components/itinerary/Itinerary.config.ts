@@ -92,6 +92,12 @@ export interface Stop {
     notes?:          string;
   };
   logisticsRef?: { collection: string; index: number };
+  // An early-hours stop: true = part of the night before (shown after that day's
+  // evening), false = its own date's morning, unset = whichever it carries on.
+  lateNight?: boolean | null;
+  // View-only, never saved: shown after midnight on the previous date's page, so
+  // its minutes on that page run past 24:00.
+  afterMidnight?: boolean;
   metadata?: Record<string, any>;
   travelToNext?: {
     duration:    number;

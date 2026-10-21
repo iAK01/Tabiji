@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useSearchParams, usePathname } from 'next/navigation';
 import {
   DndContext, DragEndEvent,
@@ -28,11 +28,16 @@ import CheckIcon          from '@mui/icons-material/Check';
 import ZoomInIcon         from '@mui/icons-material/ZoomIn';
 import ZoomOutIcon        from '@mui/icons-material/ZoomOut';
 import CloseIcon          from '@mui/icons-material/Close';
+import NightsStayIcon     from '@mui/icons-material/NightsStay';
+import ChevronRightIcon   from '@mui/icons-material/ChevronRight';
 import NavigateButton     from '@/components/ui/NavigateButton';
 import ExportCalendarDialog from '@/components/calendar/ExportCalendarDialog';
 import { saveTripCache, getTripCache } from '@/lib/offline/db';
 import { sendOrQueue } from '@/lib/offline/writes';
 import { readSaved, reportSaveFailure, reportCantSave } from '@/lib/offline/saveErrors';
+import { useNotificationPrefs } from '@/lib/push/useNotifications';
+import { CATEGORY_OPTIONS, type NotificationCategory } from '@/lib/push/prefs';
+import { reminderGroup, stopLeadMins, type BookingCollection } from '@/lib/push/leads';
 import {
   DAY_START_HOUR, DAY_END_HOUR,
   PX_PER_MIN_MOBILE, PX_PER_MIN_DESKTOP,
@@ -42,7 +47,10 @@ import type { Day, Stop, KnownLocation } from './Itinerary.config';
 import {
   stopStartMinutes, stopDuration, formatTime,
   freeSlots, freeLabelText, computeStopColumns, isUntimed, concurrentWith,
+  dayPages, carriesOnPage,
 } from './Itinerary.helpers';
+import { clockMinutes, daysBetween, insertByTime, DAY_MINS, NIGHT_ENDS_MIN } from '@/lib/itinerary/nights';
+import { localYmd }             from '@/lib/trips/onTrip';
 import { HourRuler, GridLines, FreeGap, TravelConnector } from './Timelinechrome';
 import { StopBlock }            from './Stopblock';
 import { AddStopDrawer }        from './Addstopdrawer';
@@ -62,6 +70,25 @@ const clampZoom  = (z: number) => Math.round(Math.min(MAX_ZOOM, Math.max(MIN_ZOO
 
 // Stable identity for a stop (a few logistics mirrors may lack an _id)
 const stopKey = (s: Stop) => s._id ?? `${s.name}-${s.scheduledStart ?? s.time ?? 'notime'}`;
+
+const ymdOf    = (v: string) => String(v).split('T')[0];
+const dayLabel = (date: string, opts: Intl.DateTimeFormatOptions) =>
+  new Date(`${ymdOf(date)}T12:00:00`).toLocaleDateString('en-IE', opts);
+
+// Minutes from a day's midnight to now — past 24:00 in the small hours after it
+const minutesSince = (date: string, now = new Date()) =>
+  daysBetween(ymdOf(date), localYmd(now)) * DAY_MINS + now.getHours() * 60 + now.getMinutes();
+
+// When a page's last stop finishes, in its minutes
+const pageEnd = (stops: Stop[]) =>
+  Math.max(-Infinity, ...stops.map(s => {
+    const m = stopStartMinutes(s);
+    return m === null ? -Infinity : m + stopDuration(s);
+  }));
+
+// Which night a time picked on the timeline is part of: after midnight past 24:00,
+// the date's own early hours above 06:00, else no question
+const lateAt = (mins: number) => (mins >= DAY_MINS ? true : mins < NIGHT_ENDS_MIN ? false : undefined);
 
 interface Props {
   tripId:           string;
@@ -103,10 +130,11 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
   const [knownLocations, setKnownLocations] = useState<KnownLocation[]>([]);
   const [accoms,         setAccoms]         = useState<Accom[]>([]);
   const [drawer, setDrawer] = useState<{
-    open:      boolean;
-    time:      string;
-    type:      string;
-    editStop?: Stop;
+    open:       boolean;
+    time:       string;
+    type:       string;
+    editStop?:  Stop;
+    lateNight?: boolean;   // early hours: after midnight (true) or the date's own morning
   }>({ open: false, time: '09:00', type: 'activity' });
   const [suggestionSlot, setSuggestionSlot] = useState<{ start: number; mins: number } | null>(null);
   const [exportOpen,     setExportOpen]     = useState(false);
@@ -127,15 +155,29 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
 
   const nowLineRef = useRef<HTMLDivElement>(null);
 
+  // What each day's page shows: a night that runs past midnight keeps its
+  // early-hours stops (stored on the next date) at the end of its own page.
+  const pages       = useMemo(() => dayPages(days), [days]);
+  const activeStops = pages[activeDayIdx]?.stops ?? [];
+  // The calendar day after the viewed one, where its after-midnight stops are stored
+  const nextIdx = days[activeDayIdx] && days[activeDayIdx + 1] &&
+    daysBetween(days[activeDayIdx].date, days[activeDayIdx + 1].date) === 1 ? activeDayIdx + 1 : -1;
+
   // When each stop's notification goes out — same planner the sender uses.
   const [transport,     setTransport]     = useState<any[]>([]);
   const flights = useFlights(tripId);
   const [reminders,     setReminders]     = useState<Array<{ local: string; sent: boolean; ref?: { stopId?: string; collection?: string; index?: number; phase?: string } }>>([]);
+  // Whether anything will be sent at all, and which bookings had theirs switched off
+  const [reminderState, setReminderState] = useState<{
+    enabled: boolean; muted: boolean;
+    bookingsOff: Array<{ collection: string; index: number; group: string }>;
+  }>({ enabled: true, muted: false, bookingsOff: [] });
+  const { prefs: notifPrefs } = useNotificationPrefs();
   // A notification link (?stop=) landing on a stop: ring it for a moment.
   const [highlightStop, setHighlightStop] = useState<string | null>(null);
   const deepLinkedRef = useRef(false);
 
-  // ── Pick the initial day: ?day=<dayNumber> if present, else today ────────────
+  // ── Pick the initial day: ?day=<dayNumber> if present, else today (or last night) ──
   // Only on the initial load — must not re-fire every time `days` changes (e.g. after
   // adding a stop), or the active day tab snaps back mid-edit.
   const hasAutoSelectedRef = useRef(false);
@@ -147,11 +189,16 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
       const byNum = days.findIndex(d => String(d.dayNumber) === dayParam);
       if (byNum !== -1) { setActiveDayIdx(byNum); return; }
     }
-    const todayStr = new Date().toDateString();
-    const idx = days.findIndex(d => new Date(d.date).toDateString() === todayStr);
+    // In the small hours while last night's programme is still on, that's the day
+    const now       = new Date();
+    const today     = localYmd(now);
+    const lastNight = days.findIndex(d => daysBetween(ymdOf(d.date), today) === 1);
+    const idx = lastNight !== -1 && minutesSince(days[lastNight].date, now) < pageEnd(pages[lastNight]?.stops ?? [])
+      ? lastNight
+      : days.findIndex(d => ymdOf(d.date) === today);
     // Write it to the URL too, so the address bar always names the day on screen
     selectDay(idx !== -1 ? idx : 0);
-  }, [days, searchParams]);
+  }, [days, pages, searchParams]);
 
   // ── Keep the active day in the URL so refresh / back / deep-links land right ──
   const selectDay = (i: number) => {
@@ -177,7 +224,8 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
   useEffect(() => {
     const stopId = searchParams.get('stop');
     if (!stopId || days.length === 0) return;
-    const idx = days.findIndex(d => d.stops.some(s => s._id === stopId));
+    // The page it's shown on — an after-midnight stop is on the night before's
+    const idx = pages.findIndex(p => p.stops.some(s => s._id === stopId));
     // Drop the param either way so it doesn't fire again; keep tab and day.
     const params = new URLSearchParams(window.location.search);
     params.delete('stop');
@@ -191,19 +239,25 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
       document.querySelector(`[data-stop-id="${stopId}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }, 250);
     setTimeout(() => setHighlightStop(cur => (cur === stopId ? null : cur)), 4000);
-  }, [days, searchParams, pathname]);
+  }, [days, pages, searchParams, pathname]);
 
   // ── Reminder times for the bells — refreshed shortly after any change ────────
+  const loadReminders = useCallback(() => {
+    fetch(`/api/trips/${tripId}/reminders`)
+      .then(r => (r.ok ? r.json() : null))
+      .then(data => {
+        if (!data) return;
+        setReminders(data.reminders ?? []);
+        setReminderState({ enabled: data.enabled !== false, muted: !!data.muted, bookingsOff: data.bookingsOff ?? [] });
+      })
+      .catch(() => {});
+  }, [tripId]);
+
   useEffect(() => {
     if (days.length === 0) return;
-    const t = setTimeout(() => {
-      fetch(`/api/trips/${tripId}/reminders`)
-        .then(r => (r.ok ? r.json() : null))
-        .then(data => { if (data) setReminders(data.reminders ?? []); })
-        .catch(() => {});
-    }, 1500);
+    const t = setTimeout(loadReminders, 1500);
     return () => clearTimeout(t);
-  }, [days, tripId]);
+  }, [days, loadReminders, notifPrefs]);
 
   // Live gate / delay / landing for stops that mirror a flight
   const flightFor = (stop: Stop) => {
@@ -227,13 +281,93 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
     ) ?? null;
   };
 
-  // ── Scroll to current time when viewing today ─────────────────────────────────
+  // ── Per-stop reminder control (from the stop's sheet) ────────────────────────
+  // Your own stops: a lead time, or off. A booking's stop: its reminders on/off
+  // (the timing comes from the booking — leave-by, check-in time…).
+  const bookingOf = (stop: Stop) => {
+    const lr = (stop as any).logisticsRef as { collection: BookingCollection; index: number } | undefined;
+    if (stop.source !== 'logistics' || !lr) return null;
+    const group = reminderGroup(lr.collection, (stop as any).metadata?.phase);
+    return group ? { collection: lr.collection, index: lr.index, group } : null;
+  };
+
+  const reminderSettingFor = (stop: Stop) => {
+    if (!stop._id || !(stop.scheduledStart || (stop as any).time)) return null;
+    if (stop.source !== 'logistics') return { mode: 'lead' as const, value: stopLeadMins(stop) };
+    const b = bookingOf(stop);
+    if (!b) return null;
+    const off = reminderState.bookingsOff.some(o => o.collection === b.collection && o.index === b.index && o.group === b.group);
+    // Only where there's something to switch: a reminder planned, or one switched off
+    return off || reminderFor(stop) ? { mode: 'booking' as const, on: !off } : null;
+  };
+
+  const reminderNoticeFor = (stop: Stop): string | null => {
+    if ((notifPrefs ? !notifPrefs.enabled : !reminderState.enabled)) return 'All notifications are off';
+    if (notifPrefs ? notifPrefs.mutedTrips.includes(tripId) : reminderState.muted) return 'Notifications for this trip are muted';
+    const b = bookingOf(stop);
+    const category: NotificationCategory = !b || b.collection === 'venue' ? 'itinerary' : b.group === 'arrival' ? 'landed' : 'travel';
+    if (notifPrefs && !notifPrefs.categories[category]) {
+      return `${CATEGORY_OPTIONS.find(c => c.key === category)?.label ?? 'These'} are switched off in notification settings`;
+    }
+    return null;
+  };
+
+  const setStopReminder = async (stop: Stop, lead: number | null) => {
+    if (!stop._id) return;
+    const prevDays    = days;
+    const updatedDays = changeStop(days, stop._id, s => ({ ...s, notificationLeadMins: lead }));
+    setDays(updatedDays);
+    setReminders(rs => rs.filter(r => r.ref?.stopId !== stop._id));   // the old time no longer applies
+    try {
+      await saveTripCache(tripId, { ...(await getTripCache(tripId)), itinerary: updatedDays });
+      const res = await sendOrQueue(
+        { type: 'RESCHEDULE_STOP', tripId, payload: { stopId: stop._id, notificationLeadMins: lead } },
+        () => fetch(`/api/trips/${tripId}/itinerary/stops/${stop._id}`, {
+          method:  'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ notificationLeadMins: lead }),
+        }),
+        savedDays(updatedDays),
+      );
+      if (res) setDays(await daysFrom(res));
+    } catch (err) {
+      await undoDays(prevDays);
+      reportSaveFailure(`the reminder for ${quoted(stop)}`, err);
+    }
+  };
+
+  const setBookingReminder = async (stop: Stop, on: boolean) => {
+    const b = bookingOf(stop);
+    if (!b) return;
+    const prev = reminderState;
+    const same = (o: { collection: string; index: number; group: string }) =>
+      o.collection === b.collection && o.index === b.index && o.group === b.group;
+    const bookingsOff = on ? prev.bookingsOff.filter(o => !same(o)) : [...prev.bookingsOff.filter(o => !same(o)), b];
+    setReminderState({ ...prev, bookingsOff });
+    if (!on) setReminders(rs => rs.filter(r => !(r.ref?.collection === b.collection && r.ref?.index === b.index)));
+    try {
+      const res = await sendOrQueue(
+        { type: 'SET_BOOKING_REMINDERS', tripId, payload: { ...b, off: !on } },
+        () => fetch(`/api/trips/${tripId}/logistics/reminders`, {
+          method:  'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ ...b, off: !on }),
+        }),
+        { [`/api/trips/${tripId}/reminders`]: (saved: any) => saved && { ...saved, bookingsOff } },
+      );
+      if (res) { await readSaved(res); loadReminders(); }
+    } catch (err) {
+      setReminderState(prev);
+      loadReminders();
+      reportSaveFailure(`the reminder for ${quoted(stop)}`, err);
+    }
+  };
+
+  // ── Scroll to current time when the page on screen has it ─────────────────────
+  // The line only renders on the page now falls in (today, or last night's page
+  // in the small hours), so its presence is the test.
   useEffect(() => {
     if (!nowLineRef.current || deepLinkedRef.current) return;
-    const activeDay = days[activeDayIdx];
-    if (!activeDay) return;
-    const todayStr = new Date().toDateString();
-    if (new Date(activeDay.date).toDateString() !== todayStr) return;
     setTimeout(() => {
       nowLineRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }, 100);
@@ -366,8 +500,8 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
   }, [tripId]);
 
   // ── FAB trigger ──────────────────────────────────────────────────────────────
-  const openDrawer = (time: string, type = 'activity', editStop?: Stop) =>
-    setDrawer({ open: true, time, type, editStop });
+  const openDrawer = (time: string, type = 'activity', editStop?: Stop, lateNight?: boolean) =>
+    setDrawer({ open: true, time, type, editStop, lateNight: lateNight ?? (editStop?.afterMidnight || undefined) });
 
   const handleStopClick = (stop: Stop) => {
     // View mode: read first — the detail sheet, with what else is on at the same time
@@ -389,6 +523,47 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
     if (!fabTrigger) return;
     if (fabTrigger.action === 'stop') openDrawer('09:00', 'activity');
   }, [fabTrigger]);
+
+  // ── Where a time on this page is stored ──────────────────────────────────────
+  // A start on the viewed page — minutes from its midnight, past 24:00 after it —
+  // as it's saved: on the date it really falls, and for early hours which night.
+  const placeMinutes = (mins: number) => {
+    const late   = mins >= DAY_MINS && nextIdx !== -1;
+    const dayIdx = late ? nextIdx : activeDayIdx;
+    const clock  = mins % DAY_MINS;
+    return {
+      dayIdx,
+      scheduledStart: `${ymdOf(days[dayIdx].date)}T${formatTime(clock)}:00`,
+      lateNight:      clock < NIGHT_ENDS_MIN ? late : null,
+    };
+  };
+
+  // A drawer time ("HH:MM") on the viewed page. Early hours are after midnight when
+  // picked so — or, unpicked, when they'd carry on this page's evening.
+  const placeTime = (time: string, lateNight?: boolean | null) => {
+    const m = clockMinutes({ scheduledStart: time });
+    if (m === null) {
+      return { dayIdx: activeDayIdx, scheduledStart: `${ymdOf(days[activeDayIdx].date)}T${time}:00`, lateNight: null };
+    }
+    const late = m < NIGHT_ENDS_MIN && nextIdx !== -1 && (lateNight ?? carriesOnPage(activeStops, m));
+    return placeMinutes(late ? m + DAY_MINS : m);
+  };
+
+  // One stop changed, and moved to the day its new time falls on — as the server does
+  const changeStop = (src: Day[], stopId: string, change: (s: Stop) => Stop): Day[] => {
+    const from = src.findIndex(d => d.stops.some(s => s._id === stopId));
+    if (from === -1) return src;
+    const updated = change(src[from].stops.find(s => s._id === stopId)!);
+    const to      = src.findIndex(d => ymdOf(d.date) === updated.scheduledStart?.slice(0, 10));
+    return src.map((d, i) => {
+      if (to === -1 || to === from) {
+        return i === from ? { ...d, stops: d.stops.map(s => (s._id === stopId ? updated : s)) } : d;
+      }
+      if (i === from) return { ...d, stops: d.stops.filter(s => s._id !== stopId) };
+      if (i === to)   return { ...d, stops: insertByTime(d.stops, updated) };
+      return d;
+    });
+  };
 
   // ── CRUD ─────────────────────────────────────────────────────────────────────
   // Optimistic days written into the saved itinerary when a change is queued offline.
@@ -416,17 +591,21 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
     }
   };
 
-  const addStop = async (stop: Partial<Stop>): Promise<boolean> => {
-    const day         = days[activeDayIdx];
+  const addStop = async (input: Partial<Stop>): Promise<boolean> => {
+    const { afterMidnight: _view, ...form } = input;
+    // After midnight → stored on the next date (still shown on this page)
+    const placed      = placeTime(form.scheduledStart ?? '', form.lateNight);
+    const stop        = { ...form, lateNight: placed.lateNight };   // time stays HH:MM: queue replay joins it to dayDate
+    const day         = days[placed.dayIdx];
     const prevDays    = days;
     const updatedDays = [...days];
-    updatedDays[activeDayIdx] = {
+    updatedDays[placed.dayIdx] = {
       ...day,
       stops: [
         ...day.stops,
         {
           ...stop,
-          scheduledStart: `${day.date.split('T')[0]}T${stop.scheduledStart}:00`,
+          scheduledStart: placed.scheduledStart,
           duration: stop.duration ?? 60,
         } as Stop,
       ],
@@ -442,7 +621,7 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
           headers: { 'Content-Type': 'application/json' },
           body:    JSON.stringify({
             dayDate: day.date,
-            stop: { ...stop, scheduledStart: `${day.date.split('T')[0]}T${stop.scheduledStart}:00` },
+            stop: { ...stop, scheduledStart: placed.scheduledStart },
           }),
         }),
         savedDays(updatedDays),
@@ -456,29 +635,25 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
     }
   };
 
-  const updateStop = async (stop: Partial<Stop>): Promise<boolean> => {
-    if (!stop._id) { reportSaveFailure(`your changes to ${quoted(stop)}`); return false; }
+  const updateStop = async (input: Partial<Stop>): Promise<boolean> => {
+    const { afterMidnight: _view, ...stop } = input;   // view-only, never stored
+    const stopId = stop._id;
+    if (!stopId) { reportSaveFailure(`your changes to ${quoted(stop)}`); return false; }
     const prevDays = days;
-    const day     = days[activeDayIdx];
-    const dateStr = day.date.split('T')[0];
-    const newScheduledStart = `${dateStr}T${stop.scheduledStart}:00`;
+    const { scheduledStart, lateNight } = placeTime(stop.scheduledStart ?? '', stop.lateNight);
+    const change   = { ...stop, scheduledStart, lateNight };
 
-    const updatedDays = days.map(d => ({
-      ...d,
-      stops: d.stops.map(s =>
-        s._id === stop._id ? { ...s, ...stop, scheduledStart: newScheduledStart } : s,
-      ),
-    }));
+    const updatedDays = changeStop(days, stopId, s => ({ ...s, ...change }));
     setDays(updatedDays);
     try {
       await saveTripCache(tripId, { ...(await getTripCache(tripId)), itinerary: updatedDays });
 
       const res = await sendOrQueue(
-        { type: 'RESCHEDULE_STOP', tripId, payload: { stopId: stop._id, ...stop, scheduledStart: newScheduledStart } },
-        () => fetch(`/api/trips/${tripId}/itinerary/stops/${stop._id}`, {
+        { type: 'RESCHEDULE_STOP', tripId, payload: { stopId, ...change } },
+        () => fetch(`/api/trips/${tripId}/itinerary/stops/${stopId}`, {
           method:  'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body:    JSON.stringify({ ...stop, scheduledStart: newScheduledStart }),
+          body:    JSON.stringify(change),
         }),
         savedDays(updatedDays),
       );
@@ -545,27 +720,21 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
   };
 
   const rescheduleStop = async (stopId: string, newStartMin: number) => {
-    const prevDays          = days;
-    const day               = days[activeDayIdx];
-    const dateStr           = day.date.split('T')[0];
-    const newScheduledStart = `${dateStr}T${formatTime(newStartMin)}:00`;
+    const prevDays = days;
+    const target   = activeStops.find(s => s._id === stopId);
+    const { scheduledStart, lateNight } = placeMinutes(newStartMin);
 
-    const updatedDays = days.map(d => ({
-      ...d,
-      stops: d.stops.map(s =>
-        s._id === stopId ? { ...s, scheduledStart: newScheduledStart } : s,
-      ),
-    }));
+    const updatedDays = changeStop(days, stopId, s => ({ ...s, scheduledStart, lateNight }));
     setDays(updatedDays);
     try {
       await saveTripCache(tripId, { ...(await getTripCache(tripId)), itinerary: updatedDays });
 
       const res = await sendOrQueue(
-        { type: 'RESCHEDULE_STOP', tripId, payload: { stopId, scheduledStart: newScheduledStart } },
+        { type: 'RESCHEDULE_STOP', tripId, payload: { stopId, scheduledStart, lateNight } },
         () => fetch(`/api/trips/${tripId}/itinerary/stops/${stopId}`, {
           method:  'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body:    JSON.stringify({ scheduledStart: newScheduledStart }),
+          body:    JSON.stringify({ scheduledStart, lateNight }),
         }),
         savedDays(updatedDays),
       );
@@ -573,7 +742,7 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
     } catch (err) {
       // Snap it back to where it was
       await undoDays(prevDays);
-      reportSaveFailure(`the new time for ${quoted(day.stops.find(s => s._id === stopId))}`, err);
+      reportSaveFailure(`the new time for ${quoted(target)}`, err);
     }
   };
 
@@ -583,32 +752,23 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
     reportCantSave(`${quoted(stop)} can’t be moved yet — it hasn’t been saved to the server. Reload and try again.`);
 
   const resizeStop = async (stop: Stop, newStartMin: number, newDuration: number) => {
-    if (!stop._id) { cantMove(stop); return; }
-    const prevDays          = days;
-    const day               = days[activeDayIdx];
-    const dateStr           = day.date.split('T')[0];
-    const newScheduledStart = `${dateStr}T${formatTime(newStartMin)}:00`;
+    const stopId = stop._id;
+    if (!stopId) { cantMove(stop); return; }
+    const prevDays = days;
+    const { scheduledStart, lateNight } = placeMinutes(newStartMin);
+    const change   = { scheduledStart, lateNight, duration: newDuration };
 
-    const updatedDays = days.map(d => ({
-      ...d,
-      stops: d.stops.map(s => {
-        const isTarget = stop._id
-          ? s._id === stop._id
-          : `${s.name}-${s.scheduledStart ?? s.time ?? 'notime'}` ===
-            `${stop.name}-${stop.scheduledStart ?? stop.time ?? 'notime'}`;
-        return isTarget ? { ...s, scheduledStart: newScheduledStart, duration: newDuration } : s;
-      }),
-    }));
+    const updatedDays = changeStop(days, stopId, s => ({ ...s, ...change }));
     setDays(updatedDays);
     try {
       await saveTripCache(tripId, { ...(await getTripCache(tripId)), itinerary: updatedDays });
 
       const res = await sendOrQueue(
-        { type: 'RESCHEDULE_STOP', tripId, payload: { stopId: stop._id, scheduledStart: newScheduledStart, duration: newDuration } },
-        () => fetch(`/api/trips/${tripId}/itinerary/stops/${stop._id}`, {
+        { type: 'RESCHEDULE_STOP', tripId, payload: { stopId, ...change } },
+        () => fetch(`/api/trips/${tripId}/itinerary/stops/${stopId}`, {
           method:  'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body:    JSON.stringify({ scheduledStart: newScheduledStart, duration: newDuration }),
+          body:    JSON.stringify(change),
         }),
         savedDays(updatedDays),
       );
@@ -623,7 +783,7 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, delta } = event;
     const stopId = active.id as string;
-    const stop   = activeDay?.stops.find(s =>
+    const stop   = activeStops.find(s =>
       s._id === stopId ||
       `${s.name}-${s.scheduledStart ?? s.time ?? 'notime'}` === stopId,
     );
@@ -635,10 +795,8 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
     const deltaMin = Math.round((delta.y / pxPerMin) / SNAP_MINS) * SNAP_MINS;
     if (deltaMin === 0) return;
 
-    const newStartMin = Math.max(
-      DAY_START_HOUR * 60,
-      Math.min(DAY_END_HOUR * 60 - (stop.duration ?? 60), startMin + deltaMin),
-    );
+    const { min, max } = dragBounds(stop);
+    const newStartMin  = Math.max(min, Math.min(max, startMin + deltaMin));
 
     if (newStartMin !== startMin) {
       if (stop._id) rescheduleStop(stop._id, newStartMin);
@@ -678,11 +836,15 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
   );
 
   const activeDay        = days[activeDayIdx];
+  const prevDay          = activeDayIdx > 0 ? days[activeDayIdx - 1] : undefined;
+  const nextDay          = nextIdx !== -1 ? days[nextIdx] : undefined;
+  // This date's early-hours stops, shown at the end of the night before
+  const movedBack        = pages[activeDayIdx]?.movedBack ?? [];
   // What you're actually doing — skipped stops don't count as busy
-  const committed        = activeDay?.stops.filter(s => !s.skipped) ?? [];
-  const skippedCount     = (activeDay?.stops.length ?? 0) - committed.length;
+  const committed        = activeStops.filter(s => !s.skipped);
+  const skippedCount     = activeStops.length - committed.length;
   const typesToday       = Array.from(new Set(committed.map(s => s.type))).filter(t => STOP_CONFIG[t]);
-  const visibleStops     = (activeDay?.stops ?? []).filter(s =>
+  const visibleStops     = activeStops.filter(s =>
     (showSkipped || !s.skipped) && (typeFilter.length === 0 || typeFilter.includes(s.type)),
   );
   const freeLabel        = activeDay ? freeLabelText(committed) : '';
@@ -701,7 +863,7 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
       ? filesByStop.get(`${(stop as any).logisticsRef.collection}:${String((stop as any).logisticsRef.index)}`) ?? []
       : [];
 
-  const sheetStop = sheetKey ? activeDay?.stops.find(s => stopKey(s) === sheetKey) ?? null : null;
+  const sheetStop = sheetKey ? activeStops.find(s => stopKey(s) === sheetKey) ?? null : null;
   const ALL_DAY_COLLAPSED = 6;
   const shownAllDay      = showAllDay ? allDayStops : allDayStops.slice(0, ALL_DAY_COLLAPSED);
 
@@ -720,7 +882,7 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
     const start = stopStartMinutes(stop);
     const elsewhere = (c?: { lat: number; lng: number } | null): c is { lat: number; lng: number } =>
       !!c && (!at || haversineKm(c.lat, c.lng, at.lat, at.lng) > 0.05);
-    const prev = start === null ? undefined : (activeDay?.stops ?? [])
+    const prev = start === null ? undefined : activeStops
       .filter(s => s !== stop && !s.skipped && !NOT_A_PLACE.has(s.type) && elsewhere(s.coordinates))
       .map(s => ({ s, m: stopStartMinutes(s) }))
       .filter((x): x is { s: Stop; m: number } => x.m !== null && x.m < start)
@@ -731,19 +893,59 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
   };
 
   // Per-day effective timeline bounds — expands upward for early flights, downward for late-night events
-  const stopMins = activeDay?.stops
+  const stopMins = activeStops
     .map(s => stopStartMinutes(s))
-    .filter((m): m is number => m !== null) ?? [];
+    .filter((m): m is number => m !== null);
   const effectiveStartHour = stopMins.length
     ? Math.min(DAY_START_HOUR, Math.floor(Math.min(...stopMins) / 60))
     : DAY_START_HOUR;
-  const effectiveEndHour = activeDay?.stops.length
-    ? Math.max(DAY_END_HOUR, ...activeDay.stops.map(s => {
+  const effectiveEndHour = activeStops.length
+    ? Math.max(DAY_END_HOUR, ...activeStops.map(s => {
         const m = stopStartMinutes(s);
         return m !== null ? Math.ceil((m + stopDuration(s)) / 60) : 0;
       }))
     : DAY_END_HOUR;
   const effectiveTimelineH = (effectiveEndHour - effectiveStartHour) * 60 * pxPerMin;
+
+  // Where a dragged stop may start. Past midnight only into a next day the trip
+  // has, and not for booking stops — their logistics sync keys on the date.
+  const dragBounds = (stop: Stop) => {
+    const endHour = nextIdx !== -1 && stop.source !== 'logistics'
+      ? effectiveEndHour
+      : Math.min(effectiveEndHour, DAY_END_HOUR);
+    return { min: effectiveStartHour * 60, max: endHour * 60 - stopDuration(stop) };
+  };
+
+  // Now, on this page's clock — today, or past 24:00 on last night's page
+  const nowMins = activeDay ? minutesSince(activeDay.date) : null;
+
+  // The early-hours choice in the drawer: what's pre-selected for a time
+  const nightDates = activeDay && nextDay
+    ? {
+        morning:       dayLabel(activeDay.date, { weekday: 'short', day: 'numeric' }),
+        afterMidnight: dayLabel(nextDay.date,   { weekday: 'short', day: 'numeric' }),
+      }
+    : null;
+  const nightDefault = (mins: number) =>
+    drawer.lateNight ??
+    // Moving a morning stop earlier means earlier that morning, not tonight
+    (drawer.editStop && !drawer.editStop.afterMidnight && (stopStartMinutes(drawer.editStop) ?? 0) < 12 * 60
+      ? false
+      : carriesOnPage(activeStops, mins));
+
+  // From this date's page to the night before, where its early hours are shown
+  const showLastNight = () => {
+    const first = [...movedBack]
+      .sort((a, b) => (stopStartMinutes(a) ?? 0) - (stopStartMinutes(b) ?? 0))
+      .find(s => s._id)?._id;
+    selectDay(activeDayIdx - 1);
+    if (!first) return;
+    setHighlightStop(first);
+    setTimeout(() => {
+      document.querySelector(`[data-stop-id="${first}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 250);
+    setTimeout(() => setHighlightStop(cur => (cur === first ? null : cur)), 4000);
+  };
 
   // ── Render ────────────────────────────────────────────────────────────────────
   return (
@@ -847,7 +1049,7 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
           const dow      = d.toLocaleDateString('en-IE', { weekday: 'short' });
           const dayNum   = d.toLocaleDateString('en-IE', { day: 'numeric' });
           const mon      = d.toLocaleDateString('en-IE', { month: 'short' });
-          const hasStops = day.stops.length > 0;
+          const hasStops = (pages[i]?.stops.length ?? 0) > 0;
           const active   = i === activeDayIdx;
 
           return (
@@ -964,11 +1166,11 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
                 sx={{ fontWeight: 700, fontFamily: D.body, fontSize: '0.7rem', color: D.navy, borderColor: alpha(D.navy, 0.2) }}
               />
             )}
-            {activeDay.stops.filter(s => s.source === 'logistics').length > 0 && (
+            {activeStops.filter(s => s.source === 'logistics').length > 0 && (
               <Chip
                 size="small"
                 icon={<LockIcon sx={{ fontSize: '11px !important' }} />}
-                label={`${activeDay.stops.filter(s => s.source === 'logistics').length} from logistics`}
+                label={`${activeStops.filter(s => s.source === 'logistics').length} from logistics`}
                 sx={{
                   backgroundColor: alpha(D.terra, 0.10),
                   color: D.terra, fontWeight: 700,
@@ -1135,6 +1337,33 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
           // Edit mode is unmistakable without taking any space
           border: editMode && viewMode === 'timeline' ? `2px solid ${D.terra}` : `1px solid ${D.rule}`,
         }}>
+          {/* ── This date's early hours are on the night before's page ── */}
+          {movedBack.length > 0 && prevDay && (
+            <Box
+              role="button"
+              onClick={showLastNight}
+              sx={{
+                display: 'flex', alignItems: 'center', gap: 1,
+                minHeight: 44, px: 1.5,
+                borderBottom: `1px solid ${D.rule}`,
+                backgroundColor: alpha(D.navy, 0.04),
+                cursor: 'pointer',
+                '&:active': { backgroundColor: alpha(D.navy, 0.08) },
+                '@media (hover: hover)': { '&:hover': { backgroundColor: alpha(D.navy, 0.06) } },
+              }}
+            >
+              <NightsStayIcon sx={{ fontSize: 18, color: D.navy, flexShrink: 0 }} />
+              <Typography sx={{
+                flex: 1, minWidth: 0,
+                fontFamily: D.body, fontSize: '0.8rem', fontWeight: 700, color: D.navy,
+                whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+              }}>
+                {movedBack.length} {movedBack.length === 1 ? 'stop' : 'stops'} after midnight · on {dayLabel(prevDay.date, { weekday: 'long' })} night
+              </Typography>
+              <ChevronRightIcon sx={{ fontSize: 20, color: D.muted, flexShrink: 0 }} />
+            </Box>
+          )}
+
           {/* ── All-day strip — venues/places known only by date, no time ── */}
           {allDayStops.length > 0 && (
             <Box sx={{ display: 'flex', borderBottom: `1px solid ${D.rule}`, backgroundColor: alpha(D.navy, 0.02) }}>
@@ -1196,7 +1425,13 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
           )}
 
           {viewMode === 'list' ? (
-            <ItineraryList stops={timedStops} onOpen={s => setSheetKey(stopKey(s))} onSkip={skipStop} live={liveFor} />
+            <ItineraryList
+              stops={timedStops}
+              onOpen={s => setSheetKey(stopKey(s))}
+              onSkip={skipStop}
+              live={liveFor}
+              afterMidnightLabel={nextDay ? dayLabel(nextDay.date, { weekday: 'short', day: 'numeric' }) : undefined}
+            />
           ) : (
           <DndContext
             sensors={sensors}
@@ -1210,7 +1445,10 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
                 flexShrink: 0, width: 58, position: 'relative',
                 borderRight: `1px solid ${D.rule}`, pt: 2,
               }}>
-                <HourRuler pxPerMin={pxPerMin} startHour={effectiveStartHour} endHour={effectiveEndHour} />
+                <HourRuler
+                  pxPerMin={pxPerMin} startHour={effectiveStartHour} endHour={effectiveEndHour}
+                  nextDayLabel={nextDay ? dayLabel(nextDay.date, { weekday: 'short' }) : undefined}
+                />
               </Box>
 
               {/* Timeline column — scrolls sideways when zoomed into a clash */}
@@ -1227,20 +1465,17 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
                   const relY    = e.clientY - rect.top - 16;
                   const mins    = Math.round(relY / pxPerMin / 15) * 15 + effectiveStartHour * 60;
                   const clamped = Math.max(effectiveStartHour * 60, Math.min(effectiveEndHour * 60 - 30, mins));
-                  openDrawer(formatTime(clamped));
+                  openDrawer(formatTime(clamped), 'activity', undefined, lateAt(clamped));
                 }}
               >
                 <GridLines pxPerMin={pxPerMin} startHour={effectiveStartHour} endHour={effectiveEndHour} />
 
-                {/* Current time indicator — only shown when viewing today */}
+                {/* Current time indicator — only on the page now falls in */}
                 {(() => {
-                  const todayStr = new Date().toDateString();
-                  const isToday  = activeDay && new Date(activeDay.date).toDateString() === todayStr;
-                  if (!isToday) return null;
-                  const now     = new Date();
-                  const nowMins = now.getHours() * 60 + now.getMinutes() - effectiveStartHour * 60;
-                  if (nowMins < 0 || nowMins > effectiveTimelineH / pxPerMin) return null;
-                  const top = nowMins * pxPerMin + 16;
+                  if (nowMins === null) return null;
+                  const sinceTop = nowMins - effectiveStartHour * 60;
+                  if (sinceTop < 0 || sinceTop > effectiveTimelineH / pxPerMin) return null;
+                  const top = sinceTop * pxPerMin + 16;
                   return (
                     <Box
                       ref={nowLineRef}
@@ -1275,7 +1510,7 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
                     <FreeGap
                       key={i}
                       slot={slot}
-                      onQuickAdd={time => openDrawer(time)}
+                      onQuickAdd={time => openDrawer(time, 'activity', undefined, lateAt(slot.start))}
                       onDiscover={i === largestIdx && slot.mins >= 120 ? () => setSuggestionSlot(slot) : undefined}
                       pxPerMin={pxPerMin}
                       isMobile={isMobile}
@@ -1305,6 +1540,7 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
                         highlighted={!!stop._id && highlightStop === stop._id}
                         editMode={editMode}
                         navFrom={navFromFor(stop)}
+                        bounds={dragBounds(stop)}
                       />
                       <TravelConnector stop={stop} pxPerMin={pxPerMin} startHour={effectiveStartHour} />
                     </Box>
@@ -1349,10 +1585,13 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
       {/* ── Tap a stop → the full picture ── */}
       <StopDetailSheet
         stop={sheetStop}
-        concurrent={sheetStop && activeDay ? concurrentWith(sheetStop, activeDay.stops) : []}
+        concurrent={sheetStop ? concurrentWith(sheetStop, activeStops) : []}
         isMobile={isMobile}
         linkedFiles={sheetStop ? filesFor(sheetStop) : []}
         reminder={sheetStop ? reminderFor(sheetStop) : null}
+        reminderSetting={sheetStop ? reminderSettingFor(sheetStop) : null}
+        reminderNotice={sheetStop ? reminderNoticeFor(sheetStop) : null}
+        onReminderChange={(s, v) => (typeof v === 'boolean' ? setBookingReminder(s, v) : setStopReminder(s, v))}
         flight={sheetStop ? flightFor(sheetStop) : null}
         navFrom={sheetStop ? navFromFor(sheetStop) : null}
         onClose={() => setSheetKey(null)}
@@ -1398,7 +1637,7 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
         onClose={() => setSuggestionSlot(null)}
         tripId={tripId}
         slot={suggestionSlot}
-        onAdd={addStop}
+        onAdd={s => addStop({ ...s, lateNight: suggestionSlot ? lateAt(suggestionSlot.start) : undefined })}
         onSwitchToDiscover={onSwitchToDiscover}
       />
 
@@ -1418,6 +1657,8 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
         editStop={drawer.editStop}
         isMobile={isMobile}
         knownLocations={knownLocations}
+        nightDates={nightDates}
+        nightDefault={nightDefault}
       />
     </Box>
   );

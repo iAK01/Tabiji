@@ -50,6 +50,8 @@ interface Props {
   live?:        { text: string; tone: Tone } | null;
   /** Where Navigate's times start when you're not near this stop yet */
   navFrom?:     TravelOrigin | null;
+  /** Earliest and latest start a drag or top-edge resize may give it, in page minutes */
+  bounds?:      { min: number; max: number };
 }
 
 // Bell + the time the notification goes out, beside the stop's name.
@@ -71,7 +73,7 @@ function ReminderMark({ reminder, size }: { reminder: { local: string; sent: boo
   );
 }
 
-export function StopBlock({ stop, onDelete, onClick, onResize, pxPerMin, isMobile, colIndex = 0, totalCols = 1, colSpan = 1, linkedFiles = [], startHour = DAY_START_HOUR, reminder = null, highlighted = false, editMode = false, live = null, navFrom = null }: Props) {
+export function StopBlock({ stop, onDelete, onClick, onResize, pxPerMin, isMobile, colIndex = 0, totalCols = 1, colSpan = 1, linkedFiles = [], startHour = DAY_START_HOUR, reminder = null, highlighted = false, editMode = false, live = null, navFrom = null, bounds }: Props) {
   const startMin = stopStartMinutes(stop);
   if (startMin === null) return null;
 
@@ -90,6 +92,7 @@ export function StopBlock({ stop, onDelete, onClick, onResize, pxPerMin, isMobil
   const displayName = stop.name?.trim() || 'Unnamed stop';
   const hasFiles    = linkedFiles.length > 0;
   const canMove     = editMode && !isFact;
+  const limits      = bounds ?? { min: DAY_START_HOUR * 60, max: DAY_END_HOUR * 60 - duration };
 
   const [viewerFile, setViewerFile] = useState<ViewableFile | null>(null);
 
@@ -98,7 +101,7 @@ export function StopBlock({ stop, onDelete, onClick, onResize, pxPerMin, isMobil
 
   const rawDeltaMin  = resize ? Math.round((resize.deltaY / pxPerMin) / SNAP_MINS) * SNAP_MINS : 0;
   const liveStartMin = resize?.edge === 'top'
-    ? Math.max(DAY_START_HOUR * 60, Math.min(startMin + duration - SNAP_MINS, startMin + rawDeltaMin))
+    ? Math.max(limits.min, Math.min(startMin + duration - SNAP_MINS, startMin + rawDeltaMin))
     : startMin;
   const liveDuration = resize?.edge === 'top'
     ? Math.max(SNAP_MINS, duration - (liveStartMin - startMin))
@@ -133,7 +136,7 @@ export function StopBlock({ stop, onDelete, onClick, onResize, pxPerMin, isMobil
       document.removeEventListener('pointerup', onUp);
       const finalDeltaMin = Math.round(((ue.clientY - startY) / pxPerMin) / SNAP_MINS) * SNAP_MINS;
       const finalStartMin = edge === 'top'
-        ? Math.max(DAY_START_HOUR * 60, Math.min(startMin + duration - SNAP_MINS, startMin + finalDeltaMin))
+        ? Math.max(limits.min, Math.min(startMin + duration - SNAP_MINS, startMin + finalDeltaMin))
         : startMin;
       const finalDuration = edge === 'top'
         ? Math.max(SNAP_MINS, duration - (finalStartMin - startMin))
@@ -153,7 +156,7 @@ export function StopBlock({ stop, onDelete, onClick, onResize, pxPerMin, isMobil
   });
 
   const previewMin = transform
-    ? snappedPreviewMinutes(startMin, duration, transform.y, pxPerMin)
+    ? snappedPreviewMinutes(startMin, transform.y, pxPerMin, limits)
     : startMin;
   const translateY = transform ? transform.y : 0;
 

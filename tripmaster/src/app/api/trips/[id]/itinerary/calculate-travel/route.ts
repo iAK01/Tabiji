@@ -3,6 +3,7 @@ import { getServerSession } from 'next-auth';
 import connectDB from '@/lib/mongodb/connection';
 import TripItinerary from '@/lib/mongodb/models/TripItinerary';
 import TripLogistics from '@/lib/mongodb/models/TripLogistics';
+import { nightPages } from '@/lib/itinerary/nights';
 
 type LatLng = { lat: number; lng: number };
 type Leg = { duration: number; distance: number } | null;
@@ -63,18 +64,26 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
       checkOut: ymd(a.checkOut || a.checkIn),
     }));
 
+  // Recomputed from scratch — drop any stale legs first (a stop that lost its
+  // coordinates, or is no longer the last of the day).
   for (const day of itinerary.days) {
+    for (const s of day.stops ?? []) s.travelToNext = undefined;
+  }
+
+  // Legs follow each day's page as it's read: a night's after-midnight stops
+  // (stored on the next date) carry on its evening, and the way back to the
+  // hotel comes after them, not at midnight.
+  const pages = nightPages(itinerary.days);
+  for (let d = 0; d < itinerary.days.length; d++) {
+    const day   = itinerary.days[d];
+    const stops = pages[d].stops as any[];
     const dayYmd = ymd(day.date);
     const hotel = accoms.find((a: any) => a.checkIn <= dayYmd && dayYmd <= a.checkOut) ?? null;
 
-    // Recomputed from scratch — drop any stale legs first (a stop that lost its
-    // coordinates, or is no longer the last of the day).
-    for (const s of day.stops) s.travelToNext = undefined;
-
     // Stop → stop legs
-    for (let i = 0; i < day.stops.length - 1; i++) {
-      const current = day.stops[i];
-      const next = day.stops[i + 1];
+    for (let i = 0; i < stops.length - 1; i++) {
+      const current = stops[i];
+      const next = stops[i + 1];
       if (!current.coordinates || !next.coordinates) continue;
       if (!current.scheduledStart || !next.scheduledStart) continue;
       if (current.skipped || next.skipped) continue;
@@ -101,7 +110,7 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
 
     // End-of-day leg back to the hotel — the "how do I get back" a business
     // traveller wants. Only when the last stop has coords and isn't the hotel itself.
-    const last = day.stops[day.stops.length - 1];
+    const last = stops[stops.length - 1];
     if (hotel && last?.coordinates && last.source !== 'logistics') {
       const metres = crowFlies(last.coordinates, hotel.coordinates);
       if (metres > 120) {

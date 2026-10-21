@@ -7,11 +7,14 @@ import User from '@/lib/mongodb/models/User';
 import PushNotificationLog from '@/lib/mongodb/models/PushNotificationLog';
 import { planTrip } from '@/lib/push/plan';
 import { driveTimes, loadTripData, recipientOf } from '@/lib/push/context';
+import { LOGISTICS_FIELD, type BookingCollection } from '@/lib/push/leads';
 
 // ─── GET /api/trips/[id]/reminders ────────────────────────────────────────────
 // When each itinerary stop and booking will notify, from the same planner the
 // sender uses — so the bell on a stop shows the real time. Respects the
-// traveller's settings (switched-off kinds and a muted trip show nothing).
+// traveller's settings: all notifications off or the trip muted → no
+// reminders. `bookingsOff` lists the bookings whose reminders were switched
+// off from their stop, so the stop can offer to switch them back on.
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const session = await getServerSession();
@@ -24,10 +27,22 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   if (!trip) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
   const recipient = recipientOf(user, trip);
-  if (recipient.prefs.mutedTrips.includes(id)) return NextResponse.json({ muted: true, reminders: [] });
+  const data      = await loadTripData(trip);
+
+  const bookingsOff: Array<{ collection: BookingCollection; index: number; group: string }> = [];
+  for (const collection of Object.keys(LOGISTICS_FIELD) as BookingCollection[]) {
+    ((data.logistics as any)?.[LOGISTICS_FIELD[collection]] ?? []).forEach((entry: any, index: number) => {
+      for (const group of Array.isArray(entry?.remindersOff) ? entry.remindersOff : []) {
+        bookingsOff.push({ collection, index, group: String(group) });
+      }
+    });
+  }
+
+  const enabled = recipient.prefs.enabled;
+  const muted   = recipient.prefs.mutedTrips.includes(id);
+  if (!enabled || muted) return NextResponse.json({ enabled, muted, reminders: [], bookingsOff });
 
   const nowMs   = Date.now();
-  const data    = await loadTripData(trip);
   const planned = planTrip(data, recipient, await driveTimes(data, recipient, nowMs), nowMs)
     .filter(p => recipient.prefs.categories[p.category] && (p.ref?.stopId || p.ref?.collection));
 
@@ -35,7 +50,9 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   const sent     = new Set(sentLogs.map(l => `${l.key}|${l.notificationType}`));
 
   return NextResponse.json({
-    muted: false,
+    enabled,
+    muted,
+    bookingsOff,
     reminders: planned.map(p => ({
       at:       new Date(p.at).toISOString(),
       local:    DateTime.fromMillis(p.at, { zone: p.zone }).toFormat('HH:mm'),

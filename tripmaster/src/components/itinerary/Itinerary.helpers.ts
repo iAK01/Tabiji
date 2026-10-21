@@ -1,36 +1,29 @@
 import { DAY_START_HOUR, DAY_END_HOUR, SNAP_MINS } from './Itinerary.config';
-import type { Stop } from './Itinerary.config';
+import type { Day, Stop } from './Itinerary.config';
+import { clockMinutes, stopDuration, eveningEnd, carriesOn, nightPages, DAY_MINS } from '@/lib/itinerary/nights';
 
-// Handles both ISO timestamp (with T) and bare HH:MM, plus fallback stop.time.
-// Malformed values (e.g. "2026-10-22T:00" from an empty venue time) → null, not midnight.
+export { stopDuration };
+
+// Minutes after the viewed day's midnight — a stop shown after midnight on the
+// day before's page runs on past 24:00 (00:30 → 24:30).
 export function stopStartMinutes(stop: Stop): number | null {
-  const timeStr = stop.scheduledStart
-    ? stop.scheduledStart.includes('T')
-      ? stop.scheduledStart.split('T')[1]
-      : stop.scheduledStart
-    : stop.time;
-  const m = timeStr?.match(/^(\d{1,2}):(\d{2})/);
-  if (!m) return null;
-  return Number(m[1]) * 60 + Number(m[2]);
+  const m = clockMinutes(stop);
+  return m !== null && stop.afterMidnight ? m + DAY_MINS : m;
 }
 
-// Prefer explicit duration, then derive from scheduledEnd - scheduledStart, fallback 60
-export function stopDuration(stop: Stop): number {
-  if (typeof stop.duration === 'number' && stop.duration > 0) return stop.duration;
-  if (stop.scheduledEnd && stop.scheduledStart) {
-    const parse = (s: string) => {
-      const t = s.includes('T') ? s.split('T')[1]?.slice(0, 5) : s;
-      if (!t) return null;
-      const [h, m] = t.split(':').map(Number);
-      return h * 60 + m;
-    };
-    const start = parse(stop.scheduledStart);
-    const end   = parse(stop.scheduledEnd);
-    if (start !== null && end !== null && end > start) return end - start;
-  }
-  // Explicit 0 = instant marker (arrival stop), not a missing value
-  if (stop.duration === 0) return 0;
-  return 60;
+// What each day's page shows: its own stops, then the night's after-midnight
+// ones (as afterMidnight copies); movedBack = its stops shown the night before.
+export function dayPages(days: Day[]): Array<{ stops: Stop[]; movedBack: Stop[] }> {
+  return nightPages(days).map(p => ({
+    stops:     p.stops.map(s => (p.late.has(s) ? { ...s, afterMidnight: true } : s)),
+    movedBack: p.movedBack,
+  }));
+}
+
+// Default for an early-hours time on a page: after midnight when it would carry
+// on the evening those stops make up
+export function carriesOnPage(pageStops: Stop[], startMin: number): boolean {
+  return carriesOn(eveningEnd(pageStops, s => stopStartMinutes(s as Stop)), startMin);
 }
 
 // Offset from startHour in pixels (defaults to DAY_START_HOUR)
@@ -38,9 +31,9 @@ export function minutesToPx(minutes: number, pxPerMin: number, startHour = DAY_S
   return (minutes - startHour * 60) * pxPerMin;
 }
 
-// Zero-padded HH:MM
+// Zero-padded HH:MM on the clock — 24:30 on a page reads 00:30
 export function formatTime(totalMinutes: number): string {
-  const h = Math.floor(totalMinutes / 60);
+  const h = Math.floor(totalMinutes / 60) % 24;
   const m = totalMinutes % 60;
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 }
@@ -141,17 +134,17 @@ export function isUntimed(stop: Stop): boolean {
   return stopStartMinutes(stop) === null;
 }
 
-// Snapped drag preview position
+// Snapped drag preview position, kept within where the stop may start
 export function snappedPreviewMinutes(
   startMin: number,
-  duration: number,
   transformY: number,
   pxPerMin: number,
+  bounds: { min: number; max: number },
 ): number {
   return Math.max(
-    DAY_START_HOUR * 60,
+    bounds.min,
     Math.min(
-      DAY_END_HOUR * 60 - duration,
+      bounds.max,
       startMin + Math.round((transformY / pxPerMin) / SNAP_MINS) * SNAP_MINS,
     ),
   );

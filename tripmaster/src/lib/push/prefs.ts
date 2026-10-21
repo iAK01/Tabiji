@@ -12,6 +12,7 @@ export type NotificationCategory =
   | 'expenses';   // proof reminders, end-of-trip nudge
 
 export interface NotificationPrefs {
+  enabled:       boolean;   // the master switch: off means nothing is sent, on any device
   categories:    Record<NotificationCategory, boolean>;
   // Local to wherever the traveller is at the time. Holds back what can wait;
   // anything time-critical ignores it (QUIET_EXEMPT).
@@ -31,6 +32,7 @@ export const CATEGORY_OPTIONS: Array<{ key: NotificationCategory; label: string 
 ];
 
 export const DEFAULT_NOTIFICATION_PREFS: NotificationPrefs = {
+  enabled: true,
   categories: {
     travel: true, checkin: true, landed: true, briefings: true,
     itinerary: true, todos: true, expenses: true,
@@ -58,6 +60,7 @@ export function resolvePrefs(raw: any): NotificationPrefs {
     if (typeof raw?.categories?.[key] === 'boolean') categories[key] = raw.categories[key];
   }
   return {
+    enabled: typeof raw?.enabled === 'boolean' ? raw.enabled : d.enabled,
     categories,
     quietHours: {
       enabled: typeof raw?.quietHours?.enabled === 'boolean' ? raw.quietHours.enabled : d.quietHours.enabled,

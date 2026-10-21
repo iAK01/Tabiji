@@ -12,7 +12,11 @@ import type { Stop } from './Itinerary.config';
 import { minutesToPx, stopStartMinutes, formatTime } from './Itinerary.helpers';
 
 // ─── Hour ruler ────────────────────────────────────────────────────────────────
-export function HourRuler({ pxPerMin, startHour = DAY_START_HOUR, endHour = DAY_END_HOUR }: { pxPerMin: number; startHour?: number; endHour?: number }) {
+export function HourRuler({ pxPerMin, startHour = DAY_START_HOUR, endHour = DAY_END_HOUR, nextDayLabel }: {
+  pxPerMin: number; startHour?: number; endHour?: number;
+  /** Under the midnight mark when the night runs on past it: "Fri" */
+  nextDayLabel?: string;
+}) {
   const hourH = 60 * pxPerMin;
   const hours = Array.from(
     { length: endHour - startHour + 1 },
@@ -36,6 +40,15 @@ export function HourRuler({ pxPerMin, startHour = DAY_START_HOUR, endHour = DAY_
           }}>
             {`${String(h % 24).padStart(2, '0')}:00`}
           </Typography>
+          {h === 24 && h < endHour && nextDayLabel && (
+            <Typography sx={{
+              fontFamily: D.body, fontSize: '0.56rem', fontWeight: 800, lineHeight: 1, mt: 0.4,
+              letterSpacing: '0.08em', textTransform: 'uppercase', textAlign: 'right',
+              color: alpha(D.navy, 0.55),
+            }}>
+              {nextDayLabel}
+            </Typography>
+          )}
         </Box>
       ))}
     </Box>
@@ -51,7 +64,9 @@ export function GridLines({ pxPerMin, startHour = DAY_START_HOUR, endHour = DAY_
       {hours.map(i => (
         <Box key={i} sx={{
           position: 'absolute', top: i * hourH, left: 0, right: 0,
-          borderTop: `1px solid ${D.rule}`, pointerEvents: 'none',
+          // Midnight inside the page: the night runs on into the next date
+          borderTop: startHour + i === 24 ? `1.5px solid ${alpha(D.navy, 0.22)}` : `1px solid ${D.rule}`,
+          pointerEvents: 'none',
         }} />
       ))}
       {hours.map(i => (

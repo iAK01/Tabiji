@@ -96,50 +96,67 @@ export default function NotificationSettings() {
         <Typography variant="body1" fontWeight={800}>Notification settings</Typography>
       </Box>
 
-      <Label>Send me</Label>
-      {CATEGORY_OPTIONS.map(({ key, label }) => (
-        <Row key={key} label={label} checked={prefs.categories[key]} onChange={on => setCategory(key, on)} />
-      ))}
-
-      <Label>Quiet hours</Label>
-      <Row
-        label="Hold notifications overnight"
-        checked={prefs.quietHours.enabled}
-        onChange={on => update({ quietHours: { enabled: on } })}
-      />
-      <Typography sx={{ fontSize: '0.75rem', color: MUTED, mb: 1.25 }}>
-        Local time wherever you are. Check-in, to-do and expense reminders wait until it ends; everything else still comes through.
-      </Typography>
-      <Box sx={{ display: 'flex', gap: 1.5, flexWrap: 'wrap' }}>
-        <TimeField label="From" value={prefs.quietHours.start} disabled={!prefs.quietHours.enabled}
-          onSave={v => update({ quietHours: { start: v } })} />
-        <TimeField label="Until" value={prefs.quietHours.end} disabled={!prefs.quietHours.enabled}
-          onSave={v => update({ quietHours: { end: v } })} />
+      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mt: 1.5, minHeight: 48 }}>
+        <Box>
+          <Typography sx={{ fontSize: '0.95rem', fontWeight: 800 }}>All notifications</Typography>
+          {!prefs.enabled && (
+            <Typography sx={{ fontSize: '0.75rem', color: 'error.main' }}>Off — nothing will be sent</Typography>
+          )}
+        </Box>
+        <Switch
+          checked={prefs.enabled}
+          onChange={e => update({ enabled: e.target.checked })}
+          inputProps={{ 'aria-label': 'All notifications' }}
+          sx={switchSx}
+        />
       </Box>
 
-      <Label>Briefings</Label>
-      <Box sx={{ display: 'flex', gap: 1.5, flexWrap: 'wrap' }}>
-        <TimeField label="Morning" value={prefs.briefingTimes.morning} disabled={!prefs.categories.briefings}
-          onSave={v => update({ briefingTimes: { morning: v } })} />
-        <TimeField label="Evening before" value={prefs.briefingTimes.evening} disabled={!prefs.categories.briefings}
-          onSave={v => update({ briefingTimes: { evening: v } })} />
-      </Box>
+      <Box aria-disabled={!prefs.enabled} sx={{ opacity: prefs.enabled ? 1 : 0.45, pointerEvents: prefs.enabled ? 'auto' : 'none' }}>
+        <Label>Send me</Label>
+        {CATEGORY_OPTIONS.map(({ key, label }) => (
+          <Row key={key} label={label} checked={prefs.categories[key]} onChange={on => setCategory(key, on)} />
+        ))}
 
-      {muted.length > 0 && (
-        <>
-          <Label>Muted trips</Label>
-          <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-            {muted.map(id => (
-              <Chip
-                key={id}
-                label={tripNames.get(id) ?? 'Trip'}
-                onDelete={() => update({ mute: { tripId: id, muted: false } })}
-                sx={{ fontWeight: 600, backgroundColor: alpha(GREEN, 0.08) }}
-              />
-            ))}
-          </Box>
-        </>
-      )}
+        <Label>Quiet hours</Label>
+        <Row
+          label="Hold notifications overnight"
+          checked={prefs.quietHours.enabled}
+          onChange={on => update({ quietHours: { enabled: on } })}
+        />
+        <Typography sx={{ fontSize: '0.75rem', color: MUTED, mb: 1.25 }}>
+          Local time wherever you are. Check-in, to-do and expense reminders wait until it ends; everything else still comes through.
+        </Typography>
+        <Box sx={{ display: 'flex', gap: 1.5, flexWrap: 'wrap' }}>
+          <TimeField label="From" value={prefs.quietHours.start} disabled={!prefs.quietHours.enabled}
+            onSave={v => update({ quietHours: { start: v } })} />
+          <TimeField label="Until" value={prefs.quietHours.end} disabled={!prefs.quietHours.enabled}
+            onSave={v => update({ quietHours: { end: v } })} />
+        </Box>
+
+        <Label>Briefings</Label>
+        <Box sx={{ display: 'flex', gap: 1.5, flexWrap: 'wrap' }}>
+          <TimeField label="Morning" value={prefs.briefingTimes.morning} disabled={!prefs.categories.briefings}
+            onSave={v => update({ briefingTimes: { morning: v } })} />
+          <TimeField label="Evening before" value={prefs.briefingTimes.evening} disabled={!prefs.categories.briefings}
+            onSave={v => update({ briefingTimes: { evening: v } })} />
+        </Box>
+
+        {muted.length > 0 && (
+          <>
+            <Label>Muted trips</Label>
+            <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+              {muted.map(id => (
+                <Chip
+                  key={id}
+                  label={tripNames.get(id) ?? 'Trip'}
+                  onDelete={() => update({ mute: { tripId: id, muted: false } })}
+                  sx={{ fontWeight: 600, backgroundColor: alpha(GREEN, 0.08) }}
+                />
+              ))}
+            </Box>
+          </>
+        )}
+      </Box>
     </Paper>
   );
 }

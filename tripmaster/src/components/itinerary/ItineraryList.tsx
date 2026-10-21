@@ -19,12 +19,16 @@ interface Props {
   onSkip: (stop: Stop, skipped: boolean) => void;
   /** Live flight status for a stop mirroring a flight: "Gate 102", "Delayed · now 06:50". */
   live?:  (stop: Stop) => { text: string; tone: Tone } | null;
+  /** The next date, heading the stops from after midnight: "Fri 23" */
+  afterMidnightLabel?: string;
 }
 
 // The phone-first reading of a day: one full-width row per stop, full names,
 // clashes grouped under a bracket, a big ✕ to drop what you won't go to.
-export function ItineraryList({ stops, onOpen, onSkip, live }: Props) {
+export function ItineraryList({ stops, onOpen, onSkip, live, afterMidnightLabel }: Props) {
   const clusters = overlapClusters(stops);
+  // The night runs on past midnight: one heading before the first stop from the next date
+  const firstLate = clusters.findIndex(g => g.some(s => s.afterMidnight));
 
   if (!clusters.length) {
     return (
@@ -42,6 +46,15 @@ export function ItineraryList({ stops, onOpen, onSkip, live }: Props) {
         const end   = Math.max(...group.map(s => (stopStartMinutes(s) ?? 0) + stopDuration(s)));
         return (
           <Box key={gi} sx={{ borderTop: gi ? `1px solid ${D.rule}` : 'none', py: 0.5 }}>
+            {gi === firstLate && (
+              <Typography sx={{
+                px: 2, pt: 1, pb: 0.25,
+                fontFamily: D.body, fontSize: '0.62rem', fontWeight: 800, letterSpacing: '0.08em',
+                textTransform: 'uppercase', color: D.navy,
+              }}>
+                After midnight{afterMidnightLabel ? ` · ${afterMidnightLabel}` : ''}
+              </Typography>
+            )}
             {clash && (
               <Typography sx={{
                 px: 2, pt: 1, pb: 0.25,
@@ -68,6 +81,7 @@ export function ItineraryList({ stops, onOpen, onSkip, live }: Props) {
                     opacity: stop.skipped ? 0.45 : 1,
                   }}>
                     <Box
+                      data-stop-id={stop._id}
                       onClick={() => onOpen(stop)}
                       sx={{
                         flex: 1, minWidth: 0, display: 'flex', gap: 1.25,

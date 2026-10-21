@@ -12,6 +12,7 @@ import VisibilityOffIcon    from '@mui/icons-material/VisibilityOff';
 import UndoIcon             from '@mui/icons-material/Undo';
 import LockIcon             from '@mui/icons-material/Lock';
 import NotificationsIcon    from '@mui/icons-material/Notifications';
+import NotificationsOffIcon from '@mui/icons-material/NotificationsOff';
 import AttachFileIcon       from '@mui/icons-material/AttachFile';
 import PlaceIcon            from '@mui/icons-material/Place';
 import FilterListIcon       from '@mui/icons-material/FilterList';
@@ -22,6 +23,7 @@ import { STOP_CONFIG, D }   from './Itinerary.config';
 import type { Stop }        from './Itinerary.config';
 import { stopDuration, fmtDuration, timeRangeLabel, canSkip } from './Itinerary.helpers';
 import FlightLive from '@/components/flights/FlightLive';
+import { REMINDER_OPTIONS } from '@/lib/push/leads';
 import type { FlightStatus } from '@/lib/flights/status';
 
 interface LinkedFile { _id: string; name: string; mimeType?: string; gcsUrl?: string }
@@ -32,6 +34,11 @@ interface Props {
   isMobile:    boolean;
   linkedFiles: LinkedFile[];
   reminder:    { local: string; sent: boolean } | null;
+  /** What can be changed here: a lead time for your own stops, on/off for a booking's reminders. */
+  reminderSetting?: { mode: 'lead'; value: number | null } | { mode: 'booking'; on: boolean } | null;
+  /** Set, but won't be sent: everything off, the trip muted, or this kind switched off. */
+  reminderNotice?:  string | null;
+  onReminderChange?: (stop: Stop, value: number | null | boolean) => void;
   /** The flight this stop mirrors, with its live status. */
   flight?:     { t: any; fs: FlightStatus | null; phase?: string } | null;
   onClose:     () => void;
@@ -49,6 +56,7 @@ interface Props {
 // The read-first view: nothing here moves a stop by accident.
 export function StopDetailSheet({
   stop, concurrent, isMobile, linkedFiles, reminder, flight,
+  reminderSetting = null, reminderNotice = null, onReminderChange,
   onClose, onSelect, onSkip, onEdit, onDelete, onOpenLogistics, onFilterType, navFrom = null,
 }: Props) {
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -64,6 +72,10 @@ export function StopDetailSheet({
     const editable  = !isFact && !!stop._id;
     const dur       = stopDuration(stop);
     const place     = stop.locationName || stop.address;
+    // Shown with the night before — name the date it's really on
+    const lateDate  = stop.afterMidnight && stop.scheduledStart
+      ? new Date(`${stop.scheduledStart.slice(0, 10)}T12:00:00`).toLocaleDateString('en-IE', { weekday: 'short', day: 'numeric', month: 'short' })
+      : null;
     const btnSx     = { fontFamily: D.body, fontWeight: 700, minHeight: 48, borderRadius: '10px', flex: 1 };
 
     return (
@@ -111,6 +123,10 @@ export function StopDetailSheet({
                 '&:hover': { backgroundColor: alpha(cfg.color, 0.18) },
               }}
             />
+            {lateDate && (
+              <Chip size="small" label={`After midnight · ${lateDate}`}
+                sx={{ backgroundColor: alpha(D.navy, 0.08), color: D.navy, fontWeight: 700, fontFamily: D.body }} />
+            )}
             {stop.skipped && (
               <Chip size="small" label="Not going"
                 sx={{ backgroundColor: alpha(D.navy, 0.08), color: D.navy, fontWeight: 700, fontFamily: D.body }} />
@@ -154,7 +170,51 @@ export function StopDetailSheet({
             </Box>
           )}
 
-          {reminder && (
+          {reminderSetting ? (() => {
+            const on    = reminderSetting.mode === 'lead' ? reminderSetting.value !== null : reminderSetting.on;
+            const when  = reminder ? ` · ${reminder.sent ? 'sent' : 'at'} ${reminder.local}` : '';
+            const label = reminderSetting.mode === 'lead'
+              ? (reminderSetting.value === null
+                  ? 'No reminder'
+                  : `${REMINDER_OPTIONS.find(o => o.value === reminderSetting.value)?.label ?? `${reminderSetting.value}m`} before${when}`)
+              : (on ? `Reminders on${when}` : 'Reminders off for this booking');
+            const choices: Array<{ label: string; value: number | null | boolean; selected: boolean }> =
+              reminderSetting.mode === 'lead'
+                ? REMINDER_OPTIONS.map(o => ({ label: o.label, value: o.value, selected: o.value === reminderSetting.value }))
+                : [{ label: 'On', value: true, selected: on }, { label: 'Off', value: false, selected: !on }];
+            return (
+              <Box sx={{ mb: 1.5 }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.75 }}>
+                  {on ? <NotificationsIcon sx={{ fontSize: 18, color: D.muted }} /> : <NotificationsOffIcon sx={{ fontSize: 18, color: D.muted }} />}
+                  <Typography sx={{ fontFamily: D.body, fontSize: '0.85rem', fontWeight: 700, color: D.navy }}>
+                    {label}
+                  </Typography>
+                </Box>
+                <Box role="radiogroup" aria-label="Reminder" sx={{ display: 'flex', gap: 0.75, flexWrap: 'wrap' }}>
+                  {choices.map(c => (
+                    <Chip
+                      key={String(c.value)}
+                      role="radio"
+                      aria-checked={c.selected}
+                      label={c.label}
+                      onClick={() => !c.selected && onReminderChange?.(stop, c.value)}
+                      sx={{
+                        height: 40, minWidth: 52, borderRadius: '10px', fontFamily: D.body, fontWeight: 700,
+                        backgroundColor: c.selected ? D.navy : alpha(D.navy, 0.06),
+                        color: c.selected ? '#fff' : D.navy,
+                        '&:hover': { backgroundColor: c.selected ? D.navy : alpha(D.navy, 0.12) },
+                      }}
+                    />
+                  ))}
+                </Box>
+                {reminderNotice && (
+                  <Typography sx={{ fontFamily: D.body, fontSize: '0.78rem', color: D.terra, mt: 0.75 }}>
+                    {reminderNotice}
+                  </Typography>
+                )}
+              </Box>
+            );
+          })() : reminder && (
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5, color: D.muted }}>
               <NotificationsIcon sx={{ fontSize: 18 }} />
               <Typography sx={{ fontFamily: D.body, fontSize: '0.85rem' }}>

@@ -2,12 +2,25 @@ import { NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import connectDB from '@/lib/mongodb/connection';
 import TripItinerary from '@/lib/mongodb/models/TripItinerary';
+import Trip from '@/lib/mongodb/models/Trip';
+import User from '@/lib/mongodb/models/User';
+import { insertByTime } from '@/lib/itinerary/nights';
+
+const ymd = (v: unknown) => (v instanceof Date ? v.toISOString() : String(v ?? '')).slice(0, 10);
+
+// Only the trip's owner can change its stops.
+async function ownsTrip(email: string, tripId: string): Promise<boolean> {
+  const user = await User.findOne({ email }, '_id').lean() as any;
+  if (!user) return false;
+  return !!(await Trip.exists({ _id: tripId, userId: user._id, deleted: false }));
+}
 
 export async function DELETE(_req: Request, { params }: { params: Promise<{ id: string; stopId: string }> }) {
   const { id, stopId } = await params;
   const session = await getServerSession();
   if (!session?.user?.email) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
   await connectDB();
+  if (!(await ownsTrip(session.user.email, id))) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
   const itinerary = await TripItinerary.findOne({ tripId: id });
   if (!itinerary) return NextResponse.json({ error: 'Not found' }, { status: 404 });
@@ -30,11 +43,18 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   const session = await getServerSession();
   if (!session?.user?.email) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
   await connectDB();
+  if (!(await ownsTrip(session.user.email, id))) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
   const body = await req.json();
-  const { scheduledStart, duration, name, type, notes, address, locationName, coordinates, notificationLeadMins, reference, skipped } = body;
-  // A skip/unskip alone needs no time — all-day items don't have one
-  if (!scheduledStart && skipped === undefined) return NextResponse.json({ error: 'scheduledStart required' }, { status: 400 });
+  const { scheduledStart, duration, name, type, notes, address, locationName, coordinates, notificationLeadMins, reference, skipped, lateNight } = body;
+  // A skip/unskip or a reminder change alone needs no time — all-day items don't have one
+  if (!scheduledStart && skipped === undefined && notificationLeadMins === undefined) {
+    return NextResponse.json({ error: 'scheduledStart required' }, { status: 400 });
+  }
+  if (notificationLeadMins !== undefined && notificationLeadMins !== null
+    && !(Number.isInteger(notificationLeadMins) && notificationLeadMins >= 0 && notificationLeadMins <= 24 * 60)) {
+    return NextResponse.json({ error: 'Invalid reminder time' }, { status: 400 });
+  }
 
   const itinerary = await TripItinerary.findOne({ tripId: id });
   if (!itinerary) return NextResponse.json({ error: 'Not found' }, { status: 404 });
@@ -44,6 +64,9 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     const stop = day.stops.find((s: any) => s._id?.toString() === stopId);
     if (stop) {
       if (scheduledStart) stop.scheduledStart = scheduledStart;
+      // Which night an early-hours stop belongs to; null = back to the default
+      if (lateNight === null) delete stop.lateNight;
+      else if (lateNight !== undefined) stop.lateNight = !!lateNight;
       if (skipped !== undefined) stop.skipped = !!skipped;
       if (duration             !== undefined) stop.duration             = duration;
       if (name                 !== undefined) stop.name                 = name;
@@ -68,6 +91,15 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
           ...(name     !== undefined ? { name }     : {}),
           ...(notes    !== undefined ? { notes }    : {}),
         };
+      }
+
+      // A new time on another date (an after-midnight stop) lives on that date's day
+      const target = scheduledStart && ymd(scheduledStart) !== ymd(day.date)
+        ? itinerary.days.find((d: any) => ymd(d.date) === ymd(scheduledStart))
+        : null;
+      if (target) {
+        day.stops = day.stops.filter((s: any) => s !== stop);
+        target.stops = insertByTime(target.stops ?? [], stop);
       }
       found = true;
       break;

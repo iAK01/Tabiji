@@ -18,6 +18,8 @@ import {
 } from './Itinerary.config';
 import type { Stop, KnownLocation } from './Itinerary.config';
 import { stopDuration, fmtDuration } from './Itinerary.helpers';
+import { clockMinutes, NIGHT_ENDS_MIN } from '@/lib/itinerary/nights';
+import { REMINDER_OPTIONS, stopLeadMins } from '@/lib/push/leads';
 
 interface Props {
   open:           boolean;
@@ -32,6 +34,12 @@ interface Props {
   editStop?:      Stop;
   isMobile:       boolean;
   knownLocations: KnownLocation[];
+  // An early-hours time on a day's page means either that date's morning or,
+  // after midnight, the night running on from it. Labels for the two dates; null
+  // when there's no choice (the trip's last day).
+  nightDates?:    { morning: string; afterMidnight: string } | null;
+  // Which of the two is pre-selected for a start (minutes after midnight)
+  nightDefault?:  (mins: number) => boolean;
 }
 
 // Which known location a stop is at. Rooms/stages at one venue all geocode to the
@@ -64,20 +72,12 @@ function referencePlaceholder(name: string): string {
 export function AddStopDrawer({
   open, onClose, onAdd, onUpdate, onDelete,
   defaultTime, defaultType, editStop,
-  isMobile, knownLocations,
+  isMobile, knownLocations, nightDates = null, nightDefault,
 }: Props) {
   const isEditing   = !!editStop;
   const isFromLogistics = editStop?.source === 'logistics';
 
-  const NOTIFY_OPTIONS: { label: string; value: number | null }[] = [
-    { label: 'Off',  value: null },
-    { label: '5m',   value: 5    },
-    { label: '15m',  value: 15   },
-    { label: '30m',  value: 30   },
-    { label: '45m',  value: 45   },
-    { label: '1h',   value: 60   },
-    { label: '2h',   value: 120  },
-  ];
+  const NOTIFY_OPTIONS = REMINDER_OPTIONS;
 
   const [form, setForm] = useState({
     name:                  '',
@@ -90,6 +90,7 @@ export function AddStopDrawer({
     locationName:          '',
     coordinates:           undefined as { lat: number; lng: number } | undefined,
     notificationLeadMins:  30 as number | null,
+    lateNight:             undefined as boolean | undefined,   // picked here; else nightDefault
   });
   const [saving,       setSaving]       = useState(false);
   const [showExtras,   setShowExtras]   = useState(false);
@@ -112,7 +113,9 @@ export function AddStopDrawer({
         address:              editStop.address ?? '',
         locationName:         resolveLocationName(editStop, knownLocations),
         coordinates:          editStop.coordinates,
-        notificationLeadMins: editStop.notificationLeadMins ?? 30,
+        // Off stays off; unset shows the default it actually gets
+        notificationLeadMins: stopLeadMins(editStop),
+        lateNight:            undefined,
       });
       setShowExtras(!!(editStop.notes || editStop.address));
     } else {
@@ -127,6 +130,7 @@ export function AddStopDrawer({
         locationName:         '',
         coordinates:          undefined,
         notificationLeadMins: 30,
+        lateNight:            undefined,
       });
       setShowExtras(false);
     }
@@ -153,13 +157,20 @@ export function AddStopDrawer({
     }));
   };
 
+  // Before 06:00: this date's early hours, or after midnight at the end of its night
+  const startMins  = clockMinutes({ scheduledStart: form.scheduledStart });
+  const earlyHours = startMins !== null && startMins < NIGHT_ENDS_MIN;
+  const offerNight = earlyHours && !!nightDates && !isFromLogistics;
+  const lateNight  = offerNight && (form.lateNight ?? nightDefault?.(startMins) ?? false);
+
   const submit = async () => {
     if (saving) return;
     setSaving(true);
     try {
+      const stop = { ...form, lateNight: earlyHours ? lateNight : null };
       const saved = isEditing
-        ? await onUpdate({ ...editStop, ...form })
-        : await onAdd(form);
+        ? await onUpdate({ ...editStop, ...stop })
+        : await onAdd(stop);
       if (saved) onClose();
     } finally {
       setSaving(false);
@@ -387,6 +398,42 @@ export function AddStopDrawer({
             </IconButton>
           </Box>
         </Box>
+
+        {/* ── Which date an early-hours time is on ── */}
+        {offerNight && nightDates && (
+          <Box sx={{ display: 'flex', gap: 0.75, flexWrap: 'wrap', mt: -1.25, mb: 2.5 }}>
+            {[
+              { late: false, label: `Early hours · ${nightDates.morning}` },
+              { late: true,  label: `After midnight · ${nightDates.afterMidnight}` },
+            ].map(opt => {
+              const isActive = lateNight === opt.late;
+              return (
+                <Box
+                  key={String(opt.late)}
+                  onClick={() => setForm(f => ({ ...f, lateNight: opt.late }))}
+                  sx={{
+                    display: 'flex', alignItems: 'center',
+                    minHeight: isMobile ? 44 : 32, px: 1.5,
+                    borderRadius: '20px',
+                    border: `1.5px solid ${isActive ? D.navy : alpha(D.navy, 0.15)}`,
+                    backgroundColor: isActive ? D.navy : 'transparent',
+                    cursor: 'pointer',
+                    transition: 'all 0.12s',
+                    '&:hover': { borderColor: alpha(D.navy, 0.4) },
+                    '&:active': { transform: 'scale(0.97)' },
+                  }}
+                >
+                  <Typography sx={{
+                    fontFamily: D.body, fontSize: '0.78rem', fontWeight: 700, lineHeight: 1.2,
+                    color: isActive ? '#fff' : D.muted,
+                  }}>
+                    {opt.label}
+                  </Typography>
+                </Box>
+              );
+            })}
+          </Box>
+        )}
 
         {/* ── Notify me ── */}
         <Box sx={{ mb: 2.5 }}>

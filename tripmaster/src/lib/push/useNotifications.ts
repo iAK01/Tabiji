@@ -40,6 +40,7 @@ function loadPrefs(): Promise<void> {
 }
 
 export type PrefsPatch = {
+  enabled?:       boolean;
   categories?:    Partial<NotificationPrefs['categories']>;
   quietHours?:    Partial<NotificationPrefs['quietHours']>;
   briefingTimes?: Partial<NotificationPrefs['briefingTimes']>;
@@ -48,6 +49,7 @@ export type PrefsPatch = {
 
 function applyPatch(prefs: NotificationPrefs, patch: PrefsPatch): NotificationPrefs {
   const next = resolvePrefs({
+    enabled:       patch.enabled ?? prefs.enabled,
     categories:    { ...prefs.categories,    ...patch.categories },
     quietHours:    { ...prefs.quietHours,    ...patch.quietHours },
     briefingTimes: { ...prefs.briefingTimes, ...patch.briefingTimes },
