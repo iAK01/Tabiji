@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   Box, Typography, ToggleButton, ToggleButtonGroup, List, ListItemButton,
-  ListItemIcon, ListItemText, Divider, Snackbar, Button, alpha,
+  ListItemIcon, ListItemText, ListSubheader, Divider, Snackbar, Button, alpha,
 } from '@mui/material';
 import DirectionsWalkIcon    from '@mui/icons-material/DirectionsWalk';
 import DirectionsCarIcon     from '@mui/icons-material/DirectionsCar';
@@ -12,11 +12,14 @@ import PlaceIcon             from '@mui/icons-material/Place';
 import MapIcon               from '@mui/icons-material/Map';
 import NavigationIcon        from '@mui/icons-material/Navigation';
 import ContentCopyIcon       from '@mui/icons-material/ContentCopy';
+import LocalTaxiIcon         from '@mui/icons-material/LocalTaxi';
 import {
-  NAV_APP_LABEL, copyableLocation, detectPlatform, isAppScheme, navAppsFor, navLink,
+  NAV_APP_LABEL, copyableLocation, detectPlatform, isAppScheme, navAppsFor, navLink, uberLink,
   type NavApp, type NavIntent, type NavMode, type NavigationDestination,
 } from '@/lib/navigation/links';
 import { useTravelTimes, formatTravelMins, type TravelOrigin } from '@/lib/navigation/useTravelTimes';
+import { useRideApps } from '@/lib/navigation/useRideApps';
+import type { TransportService } from '@/lib/data/ground-transport';
 import TransitSummary from './TransitSummary';
 
 const MODES = [
@@ -31,8 +34,23 @@ const APP_ICON: Record<NavApp, { Icon: typeof PlaceIcon; color: string }> = {
   waze:        { Icon: NavigationIcon, color: '#0A8FBF' },
 };
 
-// How long an iPhone gets to leave for the app before we offer the website instead.
+// How long a phone gets to leave for the app before we offer the website instead.
 const APP_OPEN_GRACE_MS = 1500;
+
+const SECTION_LABEL = {
+  fontSize: '0.7rem', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'text.secondary',
+} as const;
+
+function AppBadge({ Icon, color }: { Icon: typeof PlaceIcon; color: string }) {
+  return (
+    <Box sx={{
+      width: 30, height: 30, borderRadius: 1.5, display: 'flex', alignItems: 'center',
+      justifyContent: 'center', backgroundColor: alpha(color, 0.12),
+    }}>
+      <Icon sx={{ fontSize: 18, color }} />
+    </Box>
+  );
+}
 
 export interface NavNotice {
   text:      string;
@@ -66,23 +84,25 @@ export default function NavigateOptions({
   const platform = detectPlatform();
   const copy     = copyableLocation(destination);
   const title    = destination.name || destination.address || '';
-  const { status, times, fromLabel } = useTravelTimes(destination, from, intent === 'directions');
+  const { status, times, fromLabel, pickup } = useTravelTimes(destination, from, intent === 'directions');
   const showTransit = intent === 'directions' && mode === 'transit';
+  // Only Uber's website books a ride from a computer.
+  const rides = useRideApps().filter(svc => intent === 'directions' && (platform !== 'desktop' || svc.id === 'uber'));
+  const pasteText = destination.address || destination.name;
 
-  useEffect(() => { onLayoutChange?.(); }, [showTransit, fromLabel, onLayoutChange]);
+  useEffect(() => { onLayoutChange?.(); }, [showTransit, fromLabel, rides.length, onLayoutChange]);
 
-  const open = (app: NavApp) => {
-    onPicked?.();
-    const href = navLink(destination, app, mode, intent, platform);
+  // Web pages open in a new tab, app schemes in place. A scheme does nothing when
+  // the app isn't installed: if we're still on screen shortly after, offer
+  // `fallback` rather than leave the tap unanswered.
+  const launch = (href: string, label: string, fallback?: string) => {
     if (!isAppScheme(href)) {
       window.open(href, '_blank', 'noopener,noreferrer');
       return;
     }
     window.location.href = href;
-    if (app === 'apple_maps') return;   // always installed on iPhone
+    if (!fallback) return;
 
-    // Not installed → the scheme does nothing. If we're still on screen shortly after,
-    // offer the website rather than leave the tap unanswered.
     let left = false;
     const onHide = () => { if (document.visibilityState === 'hidden') left = true; };
     const onLeave = () => { left = true; };
@@ -93,11 +113,36 @@ export default function NavigateOptions({
       document.removeEventListener('visibilitychange', onHide);
       window.removeEventListener('pagehide', onLeave);
       window.removeEventListener('blur', onLeave);
-      if (!left) onNotice({
-        text:     `${NAV_APP_LABEL[app]} didn't open`,
-        fallback: navLink(destination, app, mode, intent, 'desktop'),
-      });
+      if (!left) onNotice({ text: `${label} didn't open`, fallback });
     }, APP_OPEN_GRACE_MS);
+  };
+
+  const open = (app: NavApp) => {
+    onPicked?.();
+    launch(
+      navLink(destination, app, mode, intent, platform),
+      NAV_APP_LABEL[app],
+      app === 'apple_maps' ? undefined : navLink(destination, app, mode, intent, 'desktop'),   // always on iPhone
+    );
+  };
+
+  // Uber opens with the trip filled in, from where the times start. The others
+  // can't be filled in, so the address goes on the clipboard first, ready to paste.
+  const ride = async (svc: TransportService) => {
+    onPicked?.();
+    if (svc.id === 'uber') {
+      launch(uberLink(destination, pickup, platform), svc.name, uberLink(destination, pickup, 'desktop'));
+      return;
+    }
+    if (pasteText) {
+      try {
+        await navigator.clipboard.writeText(pasteText);
+        onNotice({ text: `${destination.address ? 'Address' : 'Name'} copied — paste it in ${svc.name}` });
+      } catch { /* open the app anyway */ }
+    }
+    const store = platform === 'ios' ? svc.iosStore : svc.androidStore;
+    if (svc.deepLink) launch(svc.deepLink, svc.name, store ?? svc.webUrl);
+    else              launch(store ?? svc.webUrl, svc.name);
   };
 
   const copyLocation = async () => {
@@ -114,10 +159,7 @@ export default function NavigateOptions({
   return (
     <Box>
       {title && (
-        <Typography noWrap sx={{
-          px: 2, pt: 1.5, pb: 1, fontSize: '0.7rem', fontWeight: 700, letterSpacing: '0.06em',
-          textTransform: 'uppercase', color: 'text.secondary',
-        }}>
+        <Typography noWrap sx={{ ...SECTION_LABEL, px: 2, pt: 1.5, pb: 1 }}>
           {intent === 'directions' ? `Directions to ${title}` : title}
         </Typography>
       )}
@@ -154,12 +196,7 @@ export default function NavigateOptions({
           return (
             <ListItemButton key={app} onClick={() => open(app)} sx={{ minHeight: 48 }}>
               <ListItemIcon sx={{ minWidth: 44 }}>
-                <Box sx={{
-                  width: 30, height: 30, borderRadius: 1.5, display: 'flex', alignItems: 'center',
-                  justifyContent: 'center', backgroundColor: alpha(color, 0.12),
-                }}>
-                  <Icon sx={{ fontSize: 18, color }} />
-                </Box>
+                <AppBadge Icon={Icon} color={color} />
               </ListItemIcon>
               <ListItemText
                 primary={NAV_APP_LABEL[app]}
@@ -169,6 +206,26 @@ export default function NavigateOptions({
             </ListItemButton>
           );
         })}
+        {rides.length > 0 && (
+          <>
+            <Divider />
+            <ListSubheader disableSticky sx={{ ...SECTION_LABEL, lineHeight: 1, px: 2, pt: 1.5, pb: 0.5, backgroundColor: 'transparent' }}>
+              Rides
+            </ListSubheader>
+            {rides.map(svc => (
+              <ListItemButton key={svc.id} onClick={() => ride(svc)} sx={{ minHeight: 48 }}>
+                <ListItemIcon sx={{ minWidth: 44 }}>
+                  <AppBadge Icon={LocalTaxiIcon} color="#1D2642" />
+                </ListItemIcon>
+                <ListItemText
+                  primary={svc.name}
+                  secondary={svc.id !== 'uber' && pasteText ? `Copies the ${destination.address ? 'address' : 'name'}` : undefined}
+                  slotProps={{ primary: { sx: { fontWeight: 600 } } }}
+                />
+              </ListItemButton>
+            ))}
+          </>
+        )}
         {copy && (
           <>
             <Divider />

@@ -38,6 +38,8 @@ export interface TravelTimesState {
   status:    'loading' | 'done' | 'none';
   times:     TravelTimes | null;
   fromLabel: string | null;
+  /** The fallback place the times start from; null when that's where you are (or unknown) */
+  pickup:    TravelOrigin | null;
 }
 
 // Walk / drive / transit minutes for the Navigate dropdown. Starts from where you
@@ -51,20 +53,20 @@ export function useTravelTimes(
 ): TravelTimesState {
   const to     = dest.coordinates;
   const usable = enabled && !!to && Number.isFinite(to.lat) && Number.isFinite(to.lng);
-  const [state, setState] = useState<TravelTimesState>({ status: usable ? 'loading' : 'none', times: null, fromLabel: null });
+  const [state, setState] = useState<TravelTimesState>({ status: usable ? 'loading' : 'none', times: null, fromLabel: null, pickup: null });
 
   useEffect(() => {
     if (!usable || !to) return;
-    if (isOffline()) { setState({ status: 'none', times: null, fromLabel: null }); return; }
+    if (isOffline()) { setState({ status: 'none', times: null, fromLabel: null, pickup: null }); return; }
     let cancelled = false;
-    const none = () => { if (!cancelled) setState({ status: 'none', times: null, fromLabel: null }); };
+    const none = () => { if (!cancelled) setState({ status: 'none', times: null, fromLabel: null, pickup: null }); };
 
     (async () => {
       const here   = await currentPosition();
       const origin = here && km(here, to) <= NEAR_KM
-        ? { coords: here, label: 'Times from where you are now' }
+        ? { coords: here, label: 'Times from where you are now', pickup: null }
         : from && km(from.coordinates, to) > SAME_PLACE_KM
-        ? { coords: from.coordinates, label: `Times from ${from.name}` }
+        ? { coords: from.coordinates, label: `Times from ${from.name}`, pickup: from }
         : null;
       if (!origin) return none();
 
@@ -76,7 +78,7 @@ export function useTravelTimes(
         times = { times: await res.json(), at: Date.now() };
         answers.set(url, times);
       }
-      if (!cancelled) setState({ status: 'done', times: times.times, fromLabel: origin.label });
+      if (!cancelled) setState({ status: 'done', times: times.times, fromLabel: origin.label, pickup: origin.pickup });
     })().catch(none);   // no times — the dropdown works without them
 
     return () => { cancelled = true; };

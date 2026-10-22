@@ -120,3 +120,38 @@ export function navigatePageParams(p: URLSearchParams): { destination: Navigatio
     tripId: p.get('trip'),
   };
 }
+
+// ─── Ride apps ────────────────────────────────────────────────────────────────
+// Only Uber publishes a link that fills in the trip (developer.uber.com, deep links).
+// The others just open, so the picker copies the address for pasting.
+
+/** A pickup that isn't where you are now — null means "my location". */
+export interface RidePickup { name?: string; coordinates: { lat: number; lng: number } }
+
+const enc = encodeURIComponent;
+
+export function uberLink(dest: NavigationDestination, pickup: RidePickup | null, platform: Platform): string {
+  const c = latLng(dest) ? dest.coordinates! : null;
+
+  if (platform !== 'desktop') {
+    const q = ['action=setPickup'];
+    if (pickup) {
+      q.push(`pickup[latitude]=${pickup.coordinates.lat}`, `pickup[longitude]=${pickup.coordinates.lng}`);
+      if (pickup.name) q.push(`pickup[nickname]=${enc(pickup.name)}`);
+    } else {
+      q.push('pickup=my_location');
+    }
+    if (c) q.push(`dropoff[latitude]=${c.lat}`, `dropoff[longitude]=${c.lng}`);
+    if (dest.name)    q.push(`dropoff[nickname]=${enc(dest.name)}`);
+    if (dest.address) q.push(`dropoff[formatted_address]=${enc(dest.address)}`);
+    return `uber://?${q.join('&')}`;
+  }
+
+  // Uber's website (desktop, or the app isn't installed): places as JSON.
+  const place = (p: { lat: number; lng: number }, line1?: string, line2?: string) =>
+    enc(JSON.stringify({ latitude: p.lat, longitude: p.lng, addressLine1: line1 ?? '', addressLine2: line2 ?? '' }));
+  const q: string[] = [];
+  if (pickup) q.push(`pickup=${place(pickup.coordinates, pickup.name)}`);
+  if (c)      q.push(`drop[0]=${place(c, dest.name, dest.address)}`);
+  return `https://m.uber.com/looking${q.length ? `?${q.join('&')}` : ''}`;
+}
