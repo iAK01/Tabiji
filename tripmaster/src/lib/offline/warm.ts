@@ -85,7 +85,7 @@ function appScope(): Scope {
 function tripScope(tripId: string): Scope {
   return {
     key:   `trip:${tripId}`,
-    pages: [`/trips/${tripId}`],
+    pages: [`/trips/${tripId}`, `/trips/${tripId}/recap`],
     data:  TRIP_DATA.map(suffix => `/api/trips/${tripId}${suffix}`),
   };
 }

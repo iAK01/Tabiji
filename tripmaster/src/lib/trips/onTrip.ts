@@ -25,3 +25,18 @@ export function isOnTrip(trip: TripDates): boolean {
 export function displayStatus(trip: TripDates): string | undefined {
   return trip.status === 'active' && !isOnTrip(trip) ? 'confirmed' : trip.status;
 }
+
+// "Now" — one tap to the itinerary at the time it is now, and what you should be at.
+// Shown from the trip's first day to its last, and in the small hours after the
+// last while that night may still be on (the itinerary's night rule, 06:00).
+export function showsNow(trip: TripDates & { endDate?: string | Date | null }, now: Date = new Date()): boolean {
+  if (!trip.startDate || !trip.endDate || trip.status === 'cancelled') return false;
+  const today = localYmd(now);
+  const end   = ymd(trip.endDate);
+  if (today >= ymd(trip.startDate) && today <= end) return true;
+  const yesterday = localYmd(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1));
+  return yesterday === end && now.getHours() < 6;
+}
+
+/** The itinerary, opened at now — ItineraryTab reads `now` and drops it. */
+export const nowHref = (tripId: string) => `/trips/${tripId}?tab=itinerary&now=${Date.now()}`;

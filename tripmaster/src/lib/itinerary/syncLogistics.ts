@@ -6,13 +6,46 @@ import TripLogistics from '@/lib/mongodb/models/TripLogistics';
 import Trip from '@/lib/mongodb/models/Trip';
 import User from '@/lib/mongodb/models/User';
 import { resolveCheckIn, normaliseTime } from './checkInTiming';
+import { LOGISTICS_ARRAYS } from '@/lib/logistics/itemId';
 
 const DEFAULT_AIRPORT_BUFFER_MIN = 120;
 
 // A logistics stop the user has re-timed on the itinerary is remembered by a key
 // stable across syncs: which record it came from + which phase + which day.
-function overrideKey(collection: string, index: number, phase: string, date: string): string {
-  return `${collection}:${index}:${phase}:${date}`;
+function overrideKey(collection: string, ref: string, phase: string, date: string): string {
+  return `${collection}:${ref}:${phase}:${date}`;
+}
+
+// Your note on a booking's stop follows the booking wherever its date moves —
+// only breakfasts, one a day per stay, need the date to tell them apart.
+function noteKey(collection: string, ref: string, phase: string, date: string): string {
+  return `${collection}:${ref}:${phase}${phase === 'breakfast' ? `:${date}` : ''}`;
+}
+
+// Gives every booking an id of its own (lib/logistics/itemId.ts) — older ones
+// were saved without. Each is only written where that booking still has none;
+// if another sync got there first, its ids are the ones kept.
+async function ensureItemIds(log: any) {
+  let raced = false;
+  for (const field of Object.values(LOGISTICS_ARRAYS)) {
+    for (const [i, item] of (log[field] ?? []).entries()) {
+      if (!item || item.id) continue;
+      item.id = new mongoose.Types.ObjectId().toString();
+      const res = await TripLogistics.updateOne(
+        { _id: log._id, [`${field}.${i}`]: { $exists: true }, [`${field}.${i}.id`]: { $exists: false } },
+        { $set: { [`${field}.${i}.id`]: item.id } },
+      );
+      if (!res.matchedCount) raced = true;
+    }
+  }
+  if (!raced) return;
+  const saved = await TripLogistics.findById(log._id).lean() as any;
+  for (const field of Object.values(LOGISTICS_ARRAYS)) {
+    (log[field] ?? []).forEach((item: any, i: number) => {
+      const id = saved?.[field]?.[i]?.id;
+      if (item && id) item.id = id;
+    });
+  }
 }
 
 // How long before departure the traveller wants to be at the airport — a profile
@@ -139,6 +172,7 @@ export async function syncLogisticsToItinerary(tripId: string, logistics?: any) 
   try {
     const log = logistics ?? await TripLogistics.findOne({ tripId });
     if (!log) return;
+    await ensureItemIds(log);
 
     const itineraryDoc = await TripItinerary.findOne({ tripId });
     if (!itineraryDoc) return;
@@ -150,18 +184,23 @@ export async function syncLogisticsToItinerary(tripId: string, logistics?: any) 
       if (day.date) day.date = toDateString(day.date);
     }
 
-    // Harvest any user re-timings of derived logistics stops *before* wiping them,
-    // so a manual "check in at 13:00" survives the regenerate-from-scratch below.
+    // Which booking a stop came from: its id, or — on a stop made before bookings
+    // had ids — whichever booking is at its position now, as it was always matched.
+    const refOf = (ref: { collection: string; index: number; id?: string }) =>
+      ref.id ?? log[LOGISTICS_ARRAYS[ref.collection as keyof typeof LOGISTICS_ARRAYS]]?.[ref.index]?.id ?? String(ref.index);
+
+    // Harvest any user re-timings of derived logistics stops, and notes on any of
+    // them, *before* wiping them, so a manual "check in at 13:00" survives the
+    // regenerate-from-scratch below.
     const overrides = new Map<string, any>();
+    const notes     = new Map<string, string>();
     for (const day of itinerary.days) {
       for (const s of day.stops ?? []) {
         const phase = s.metadata?.phase ?? (s.logisticsRef?.collection === 'venue' ? 'venue' : null);
-        if (s.source === 'logistics' && s.userOverride && s.logisticsRef && phase) {
-          overrides.set(
-            overrideKey(s.logisticsRef.collection, s.logisticsRef.index, phase, day.date),
-            s.userOverride,
-          );
-        }
+        if (s.source !== 'logistics' || !s.logisticsRef || !phase) continue;
+        const ref = refOf(s.logisticsRef);
+        if (s.userOverride) overrides.set(overrideKey(s.logisticsRef.collection, ref, phase, day.date), s.userOverride);
+        if (s.myNotes)      notes.set(noteKey(s.logisticsRef.collection, ref, phase, day.date), s.myNotes);
       }
     }
 
@@ -286,7 +325,7 @@ export async function syncLogisticsToItinerary(tripId: string, logistics?: any) 
             address:        t.departureLocation ?? undefined,
             coordinates:    t.departureCoordinates ?? undefined,
             metadata:       { transportType: 'flight', phase: 'airport_checkin' },
-            logisticsRef:   { collection: 'transport', index: tIdx },
+            logisticsRef:   { collection: 'transport', index: tIdx, id: t.id },
           });
         }
 
@@ -316,7 +355,7 @@ export async function syncLogisticsToItinerary(tripId: string, logistics?: any) 
             ? (t.arrivalCoordinates ?? undefined)
             : (t.departureCoordinates ?? undefined),
           metadata:     { transportType: t.type, phase: 'departure' },
-          logisticsRef: { collection: 'transport', index: tIdx },
+          logisticsRef: { collection: 'transport', index: tIdx, id: t.id },
         });
       }
 
@@ -342,7 +381,7 @@ export async function syncLogisticsToItinerary(tripId: string, logistics?: any) 
             address:     t.arrivalAddress ?? t.arrivalLocation ?? undefined,
             coordinates: t.arrivalCoordinates ?? undefined,
             metadata:     { transportType: t.type, phase: 'arrival' },
-            logisticsRef: { collection: 'transport', index: tIdx },
+            logisticsRef: { collection: 'transport', index: tIdx, id: t.id },
           });
         }
       }
@@ -382,7 +421,7 @@ export async function syncLogisticsToItinerary(tripId: string, logistics?: any) 
           address:        a.address ?? undefined,
           coordinates:    a.coordinates ?? undefined,
           metadata:       { accommodationType: a.type, phase: 'checkin' },
-          logisticsRef:   { collection: 'accommodation', index: aIdx },
+          logisticsRef:   { collection: 'accommodation', index: aIdx, id: a.id },
         });
       }
 
@@ -403,7 +442,7 @@ export async function syncLogisticsToItinerary(tripId: string, logistics?: any) 
           address:        a.address ?? undefined,
           coordinates:    a.coordinates ?? undefined,
           metadata:       { accommodationType: a.type, phase: 'checkout' },
-          logisticsRef:   { collection: 'accommodation', index: aIdx },
+          logisticsRef:   { collection: 'accommodation', index: aIdx, id: a.id },
         });
       }
 
@@ -428,7 +467,7 @@ export async function syncLogisticsToItinerary(tripId: string, logistics?: any) 
             address:        a.address ?? undefined,
             coordinates:    a.coordinates ?? undefined,
             metadata:       { accommodationType: a.type, phase: 'breakfast' },
-            logisticsRef:   { collection: 'accommodation', index: aIdx },
+            logisticsRef:   { collection: 'accommodation', index: aIdx, id: a.id },
           });
           cur.setDate(cur.getDate() + 1);
         }
@@ -478,16 +517,19 @@ export async function syncLogisticsToItinerary(tripId: string, logistics?: any) 
           (v.status === 'confirmed' || v.status === 'booked') ? '✅ Confirmed' : '⏳ Not booked',
         ].filter(Boolean).join(' · '),
         metadata:     { venueType: v.type, phase: 'venue', ...(time ? {} : { allDay: true }) },
-        logisticsRef: { collection: 'venue', index: vIdx },
+        logisticsRef: { collection: 'venue', index: vIdx, id: v.id },
       });
     }
 
-    // ── Re-apply user re-timings to derived stops ─────────────────────────────
-    if (overrides.size) {
+    // ── Re-apply notes, and user re-timings to derived stops ──────────────────
+    if (overrides.size || notes.size) {
       for (const stop of newStops) {
         if (!stop.logisticsRef || !stop.metadata?.phase) continue;
+        const ref  = refOf(stop.logisticsRef);
+        const note = notes.get(noteKey(stop.logisticsRef.collection, ref, stop.metadata.phase, stop.date));
+        if (note) stop.myNotes = note;
         const ov = overrides.get(
-          overrideKey(stop.logisticsRef.collection, stop.logisticsRef.index, stop.metadata.phase, stop.date),
+          overrideKey(stop.logisticsRef.collection, ref, stop.metadata.phase, stop.date),
         );
         if (!ov) continue;
         // "Not going" applies to facts too; everything else only to derived stops

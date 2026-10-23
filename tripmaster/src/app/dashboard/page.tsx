@@ -14,6 +14,7 @@ import BackpackIcon           from '@mui/icons-material/Backpack';
 import ViewListIcon           from '@mui/icons-material/ViewList';
 import CalendarMonthIcon      from '@mui/icons-material/CalendarMonth';
 import KeyboardArrowRightIcon from '@mui/icons-material/KeyboardArrowRight';
+import ScheduleIcon from '@mui/icons-material/Schedule';
 import FlightIcon             from '@mui/icons-material/Flight';
 import TrainIcon              from '@mui/icons-material/Train';
 import DirectionsBusIcon      from '@mui/icons-material/DirectionsBus';
@@ -38,7 +39,7 @@ import { saveTripList, getTripList, clearOfflineData } from '@/lib/offline/db';
 import { useFlushQueueOnReconnect } from '@/lib/offline/useFlushQueue';
 import { warmTrips } from '@/lib/offline/warm';
 import TripReadinessPanel from '@/components/dashboard/TripReadinessPanel';
-import { isOnTrip } from '@/lib/trips/onTrip';
+import { isOnTrip, showsNow, nowHref } from '@/lib/trips/onTrip';
 import NotificationBell from '@/components/notifications/NotificationBell';
 import NavigateButton from '@/components/ui/NavigateButton';
 
@@ -216,12 +217,14 @@ function deriveRightNow(days: ItineraryDay[]): RightNow | null {
 // ─── Active trip banner ───────────────────────────────────────────────────────
 
 function ActiveTripBanner({
-  trip, rightNow, rightNowLoading, onOpen, linkedFiles = [], onOpenFile,
+  trip, rightNow, rightNowLoading, onOpen, onNow, linkedFiles = [], onOpenFile,
 }: {
   trip: Trip;
   rightNow: RightNow | null;
   rightNowLoading: boolean;
   onOpen: () => void;
+  /** Straight to the itinerary at the time it is now */
+  onNow: () => void;
   linkedFiles?: any[];
   onOpenFile?: (f: any) => void;
 }) {
@@ -301,11 +304,25 @@ function ActiveTripBanner({
 
       {/* Next action panel */}
       <Box sx={{ px: { xs: 2.5, sm: 3 }, pt: 2.25, pb: 2.75 }}>
-        <Typography sx={{ fontFamily: D.body, fontSize: '0.92rem', fontWeight: 800,
-          letterSpacing: '0.22em', color: 'text.disabled', textTransform: 'uppercase',
-          display: 'block', mb: 1.5 }}>
-          {isPast ? 'Trip complete' : rightNow?.inProgress ? 'Right now' : 'Up next'}
-        </Typography>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5 }}>
+          <Typography sx={{ fontFamily: D.body, fontSize: '0.92rem', fontWeight: 800,
+            letterSpacing: '0.22em', color: 'text.disabled', textTransform: 'uppercase', flex: 1 }}>
+            {isPast ? 'Trip complete' : rightNow?.inProgress ? 'Right now' : 'Up next'}
+          </Typography>
+          {showsNow(trip) && (
+            <Button
+              size="small" startIcon={<ScheduleIcon />}
+              onClick={e => { e.stopPropagation(); onNow(); }}
+              sx={{
+                minHeight: 44, px: 1.75, borderRadius: '10px', flexShrink: 0,
+                fontFamily: D.body, fontWeight: 800, textTransform: 'none',
+                backgroundColor: D.navy, color: 'white', '&:hover': { backgroundColor: D.navy },
+              }}
+            >
+              Now
+            </Button>
+          )}
+        </Box>
 
         {isPast && (
           <Typography sx={{ fontFamily: D.body, fontWeight: 600, color: 'text.secondary', fontSize: '0.88rem' }}>
@@ -583,6 +600,7 @@ export default function Dashboard() {
               rightNow={rightNow}
               rightNowLoading={rightNowLoading}
               onOpen={() => router.push(`/trips/${activeTrip._id}`)}
+              onNow={() => router.push(nowHref(activeTrip._id))}
               linkedFiles={rightNowFiles}
               onOpenFile={f => setViewerFile({ _id: f._id, name: f.name, mimeType: f.mimeType, gcsUrl: f.gcsUrl })}
             />

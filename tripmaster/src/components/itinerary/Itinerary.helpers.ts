@@ -196,6 +196,18 @@ export function concurrentWith(stop: Stop, stops: Stop[]): Stop[] {
   }).sort((a, b) => (stopStartMinutes(a) ?? 0) - (stopStartMinutes(b) ?? 0));
 }
 
+// Where a note can be kept: any saved stop, and a booking's stops when the sync
+// can match them back to the booking (a layover between flights can't be)
+export function canNote(stop: Stop): boolean {
+  if (!stop._id) return false;
+  return stop.source !== 'logistics' || (!!stop.logisticsRef && !!stop.metadata?.phase);
+}
+
+// Before a stop starts, "Not going"; after, "Didn't go" — the same flag
+export function skipLabel(stop: Stop, started: boolean): string {
+  return started ? (stop.skipped ? 'I went' : 'Didn’t go') : (stop.skipped ? 'Going after all' : 'Not going');
+}
+
 // What "Not going" can apply to: anything except travel and hotel bookings
 export function canSkip(stop: Stop): boolean {
   if (stop.source !== 'logistics') return !!stop._id;

@@ -9,9 +9,10 @@ import {
   TextField, Select, MenuItem, FormControl, InputLabel,
   List, ListItem, ListItemText, Divider,
   useMediaQuery, useTheme,
-  SpeedDial, SpeedDialIcon, SpeedDialAction, Fab,
+  SpeedDial, SpeedDialIcon, SpeedDialAction, Fab, ButtonBase,
 } from '@mui/material';
 import ArrowBackIcon       from '@mui/icons-material/ArrowBack';
+import ScheduleIcon        from '@mui/icons-material/Schedule';
 import EditIcon            from '@mui/icons-material/Edit';
 import DeleteForeverIcon   from '@mui/icons-material/DeleteForever';
 import WarningAmberIcon    from '@mui/icons-material/WarningAmber';
@@ -58,7 +59,7 @@ import { warmTrip }        from '@/lib/offline/warm';
 import OfflineBoundary     from '@/components/ui/OfflineBoundary';
 import { COUNTRY_LIST }    from '@/lib/data/countries';
 import AirportSearch       from '@/components/ui/AirportSearch';
-import { isOnTrip, displayStatus } from '@/lib/trips/onTrip';
+import { isOnTrip, displayStatus, showsNow } from '@/lib/trips/onTrip';
 import NotificationBell    from '@/components/notifications/NotificationBell';
 import TravelSheet         from '@/components/notifications/TravelSheet';
 import { placeTz }         from '@/lib/push/timezones';
@@ -239,6 +240,8 @@ function TripPageInner() {
   const [trip,      setTrip]      = useState<Trip | null>(null);
   const [activeTab, setActiveTabState] = useState(() => slugToTab(searchParams.get('tab')));
   const [editOpen,  setEditOpen]  = useState(false);
+  // The itinerary as it stands, to say which stops new dates would delete (null: couldn't read it)
+  const [editDays,  setEditDays]  = useState<any[] | null>(null);
   const [editSaving, setEditSaving] = useState(false);
   const photoRefreshing = useRef(false);
   const [editForm,  setEditForm]  = useState({
@@ -277,6 +280,18 @@ function TripPageInner() {
     window.history.pushState(null, '', qs ? `?${qs}` : window.location.pathname);
   }, [searchParams]);
 
+  // "Now": the itinerary at the time it is now (ItineraryTab reads ?now and drops
+  // it). Keeps a list view; the recap is what happened, so back to the plan.
+  const goToNow = () => {
+    setActiveTabState(2);
+    const params = new URLSearchParams(window.location.search);
+    params.set('tab', TAB_SLUGS[2]);
+    for (const k of ['day', 'section', 'stop', 'file', 'todo', 'expense', 'proof', 'sheet', 'i']) params.delete(k);
+    if (params.get('view') === 'recap') params.delete('view');
+    params.set('now', String(Date.now()));
+    window.history.pushState(null, '', `?${params.toString()}`);
+  };
+
   // URL → state, for back/forward navigation.
   useEffect(() => {
     const target = slugToTab(searchParams.get('tab'));
@@ -286,9 +301,12 @@ function TripPageInner() {
   // Profile's default company name — falls back into any trip that doesn't have its
   // own companyName set (older trips, or trips created before the profile had one).
   const [profileCompanyName, setProfileCompanyName] = useState('');
+  // Home, for reading stop times where you'll be (same rule as lib/push/context.ts)
+  const [homeLocation, setHomeLocation] = useState<any>(null);
   useEffect(() => {
     fetch('/api/user/profile').then(r => r.json()).then(data => {
       if (data.user?.companyName) setProfileCompanyName(data.user.companyName);
+      if (data.user?.homeLocation) setHomeLocation(data.user.homeLocation);
     }).catch(() => {});
   }, []);
 
@@ -365,6 +383,11 @@ function TripPageInner() {
       clientName:      trip.clientName      ?? '',
       thirdPartyName:  trip.thirdPartyName  ?? '',
     });
+    setEditDays(null);
+    fetch(`/api/trips/${trip._id}/itinerary`)
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => setEditDays(Array.isArray(d?.days) ? d.days : null))
+      .catch(() => setEditDays(null));
     setEditOpen(true);
   };
 
@@ -515,6 +538,30 @@ function TripPageInner() {
 
   // Status flips to 'active' 2 days early for push reminders — the on-trip UI waits for the start date
   const isActive = isOnTrip(trip);
+
+  // New dates delete the days they leave out, with your stops on them (bookings come
+  // back on their own dates) — named before saving, not found out after
+  const ymd10    = (d?: string | null) => (d ? String(d).slice(0, 10) : '');
+  const narrowed = !!editForm.startDate && !!editForm.endDate && (
+    (!!trip.startDate && editForm.startDate > ymd10(trip.startDate)) ||
+    (!!trip.endDate   && editForm.endDate   < ymd10(trip.endDate)));
+  const dropped: any[] = narrowed && editDays
+    ? editDays
+        .filter(d => ymd10(d.date) < editForm.startDate || ymd10(d.date) > editForm.endDate)
+        .flatMap(d => (d.stops ?? []).filter((st: any) => st.source !== 'logistics'))
+    : [];
+  const dropUnknown  = narrowed && !editDays;
+  const droppedNotes = dropped.filter(st => st.myNotes?.trim()).length;
+  const droppedNames = dropped.slice(0, 4).map(st => `“${String(st.name ?? '').trim() || 'Unnamed stop'}”`).join(', ')
+    + (dropped.length > 4 ? ` and ${dropped.length - 4} more` : '');
+  const stopsWord    = (n: number) => `${n} ${n === 1 ? 'stop' : 'stops'}`;
+
+  // "Now" floats bottom-left on every tab while the trip's days are on — in thumb
+  // reach, opposite the add button. Tapping Itinerary again while on it does the same.
+  const nowShown = showsNow(trip);
+  const tabProps = (i: number) => (i === 2 && nowShown
+    ? { onClick: () => { if (activeTab === 2) goToNow(); } }
+    : {});
 
   // Now if fresh, else today's (or day one's) high — never a stale "now".
   const heroWeather = weatherHeadline(trip.weather);
@@ -769,8 +816,8 @@ function TripPageInner() {
                   },
                 }}
               >
-                {tabConfig.map(({ label, Icon }) => (
-                  <Tab key={label} label={label} icon={<Icon />} iconPosition="top" />
+                {tabConfig.map(({ label, Icon }, i) => (
+                  <Tab key={label} label={label} icon={<Icon />} iconPosition="top" {...tabProps(i)} />
                 ))}
               </Tabs>
             </Container>
@@ -828,8 +875,8 @@ function TripPageInner() {
                           },
                         }}
                       >
-                        {tabConfig.map(({ label, Icon }) => (
-                          <Tab key={label} label={label} icon={<Icon />} iconPosition="top" />
+                        {tabConfig.map(({ label, Icon }, i) => (
+                          <Tab key={label} label={label} icon={<Icon />} iconPosition="top" {...tabProps(i)} />
                         ))}
                       </Tabs>
                     </Container>
@@ -845,7 +892,15 @@ function TripPageInner() {
               sx={{ scrollMarginTop: '66px' }}
             >
               {activeTab === 1 && <LogisticsTab tripId={trip._id} trip={tripWithDefaults} fabTrigger={fabTrigger} />}
-              {activeTab === 2 && <ItineraryTab tripId={trip._id} startDate={trip.startDate} endDate={trip.endDate} fabTrigger={fabTrigger} onSwitchToDiscover={() => setActiveTab(4)} onSwitchToLogistics={() => setActiveTab(1)} />}
+              {activeTab === 2 && (
+                <ItineraryTab
+                  tripId={trip._id} startDate={trip.startDate} endDate={trip.endDate}
+                  trip={trip}
+                  homeZone={placeTz(homeLocation) ?? placeTz(trip.origin as any) ?? undefined}
+                  homeCountry={homeLocation?.countryCode ?? (trip.origin as any)?.countryCode ?? null}
+                  fabTrigger={fabTrigger} onSwitchToDiscover={() => setActiveTab(4)} onSwitchToLogistics={() => setActiveTab(1)}
+                />
+              )}
               {activeTab === 3 && <PackingTab tripId={trip._id} tripType={trip.tripType} nights={trip.nights} startDate={trip.startDate} fabTrigger={fabTrigger} />}
               {activeTab === 4 && <IntelligenceTab tripId={trip._id} />}
               {activeTab === 5 && (
@@ -865,6 +920,25 @@ function TripPageInner() {
               )}
             </Box>
           </Container>
+        )}
+
+        {/* ── Now — the itinerary at the time it is now ── */}
+        {nowShown && (
+          <ButtonBase
+            onClick={goToNow}
+            aria-label="Now: the itinerary at the current time"
+            sx={{
+              position: 'fixed', left: { xs: 16, sm: 32 }, bottom: { xs: 28, sm: 36 }, zIndex: 1050,
+              minHeight: 48, px: 2, gap: 0.75, borderRadius: 99,
+              backgroundColor: D.navy, color: 'white',
+              boxShadow: `0 4px 20px ${alpha(D.navy, 0.3)}`,
+              fontFamily: D.body, fontSize: '0.9rem', fontWeight: 800,
+              '& svg': { fontSize: '1.25rem', color: D.terra },
+            }}
+          >
+            <ScheduleIcon />
+            Now
+          </ButtonBase>
         )}
 
         {/* ── Context-aware FAB ── */}
@@ -998,6 +1072,13 @@ function TripPageInner() {
                   InputProps={{ sx: { fontFamily: D.body } }}
                 />
               </Box>
+              {(dropped.length > 0 || dropUnknown) && (
+                <Typography sx={{ fontFamily: D.body, fontSize: '0.85rem', fontWeight: 700, color: D.terra, mt: -1 }}>
+                  {dropUnknown
+                    ? 'Itinerary stops on days outside these dates are deleted, with any notes on them.'
+                    : `${stopsWord(dropped.length)} on days outside these dates ${dropped.length === 1 ? 'is' : 'are'} deleted${droppedNotes ? `, with your notes on ${droppedNotes}` : ''}: ${droppedNames}.`}
+                </Typography>
+              )}
               <FormControl fullWidth>
                 <InputLabel sx={{ fontFamily: D.body }}>Status</InputLabel>
                 <Select value={editForm.status} label="Status"
@@ -1079,7 +1160,7 @@ function TripPageInner() {
                 backgroundColor: D.navy, boxShadow: 'none',
                 '&:hover': { backgroundColor: alpha(D.navy, 0.88), boxShadow: 'none' },
               }}>
-              {editSaving ? 'Saving…' : 'Save Changes'}
+              {editSaving ? 'Saving…' : dropped.length ? `Save and delete ${stopsWord(dropped.length)}` : 'Save Changes'}
             </Button>
           </DialogActions>
         </Dialog>

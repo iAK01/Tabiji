@@ -6,6 +6,8 @@ import Trip from '@/lib/mongodb/models/Trip';
 import User from '@/lib/mongodb/models/User';
 import { insertByTime } from '@/lib/itinerary/nights';
 
+const MAX_NOTE = 20_000;
+
 const ymd = (v: unknown) => (v instanceof Date ? v.toISOString() : String(v ?? '')).slice(0, 10);
 
 // Only the trip's owner can change its stops.
@@ -46,10 +48,13 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   if (!(await ownsTrip(session.user.email, id))) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
   const body = await req.json();
-  const { scheduledStart, duration, name, type, notes, address, locationName, coordinates, notificationLeadMins, reference, skipped, lateNight } = body;
-  // A skip/unskip or a reminder change alone needs no time — all-day items don't have one
-  if (!scheduledStart && skipped === undefined && notificationLeadMins === undefined) {
+  const { scheduledStart, duration, name, type, notes, address, locationName, coordinates, notificationLeadMins, reference, skipped, lateNight, myNotes } = body;
+  // A skip/unskip, a reminder change or your note alone needs no time — all-day items don't have one
+  if (!scheduledStart && skipped === undefined && notificationLeadMins === undefined && myNotes === undefined) {
     return NextResponse.json({ error: 'scheduledStart required' }, { status: 400 });
+  }
+  if (myNotes !== undefined && (typeof myNotes !== 'string' || myNotes.length > MAX_NOTE)) {
+    return NextResponse.json({ error: 'Note too long' }, { status: 400 });
   }
   if (notificationLeadMins !== undefined && notificationLeadMins !== null
     && !(Number.isInteger(notificationLeadMins) && notificationLeadMins >= 0 && notificationLeadMins <= 24 * 60)) {
@@ -68,6 +73,11 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       if (lateNight === null) delete stop.lateNight;
       else if (lateNight !== undefined) stop.lateNight = !!lateNight;
       if (skipped !== undefined) stop.skipped = !!skipped;
+      // Your own note — booking stops keep it across logistics syncs by the booking's id
+      if (myNotes !== undefined) {
+        if (myNotes.trim()) stop.myNotes = myNotes;
+        else delete stop.myNotes;
+      }
       if (duration             !== undefined) stop.duration             = duration;
       if (name                 !== undefined) stop.name                 = name;
       if (type                 !== undefined) stop.type                 = type;

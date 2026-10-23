@@ -71,9 +71,14 @@ export interface Stop {
   scheduledEnd?: string;
   time?: string;
   duration: number;
+  // What the stop is: an imported description, booking refs ("Ref: ABC123 · Confirmed")
   notes?: string;
+  // Yours: what to bring up beforehand, what happened after. Survives logistics syncs
+  // on booking stops (see syncLogistics), shown in the record and the stop's reminder.
+  myNotes?: string;
   completed?: boolean;
-  // "Not going" — hidden from the plan, no reminders, out of calendar exports; reversible
+  // "Not going" — hidden from the plan, no reminders, out of calendar exports; reversible.
+  // Once a stop has started it reads "Didn't go": every other started stop counts as went.
   skipped?: boolean;
   source?: string;
   icon?: string;
@@ -91,7 +96,7 @@ export interface Stop {
     name?:           string;
     notes?:          string;
   };
-  logisticsRef?: { collection: string; index: number };
+  logisticsRef?: { collection: string; index: number; id?: string };
   // An early-hours stop: true = part of the night before (shown after that day's
   // evening), false = its own date's morning, unset = whichever it carries on.
   lateNight?: boolean | null;

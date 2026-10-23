@@ -1,50 +1,36 @@
-// src/app/api/trips/[id]/logistics/venues/[index]/route.ts
-
 import { NextResponse } from 'next/server';
-import { getServerSession } from 'next-auth';
-import connectDB from '@/lib/mongodb/connection';
 import TripLogistics from '@/lib/mongodb/models/TripLogistics';
 import { syncLogisticsToItinerary } from '@/lib/itinerary/syncLogistics';
-import User from '@/lib/mongodb/models/User';
+import { withItemId } from '@/lib/logistics/itemId';
+import { relinkAfterRemoval } from '@/lib/logistics/relink';
+import { ownedTrip, itemIndex } from '@/lib/auth/ownedTrip';
 
-export async function DELETE(
-  _req: Request,
-  { params }: { params: Promise<{ id: string; index: string }> }
-) {
+export async function DELETE(_req: Request, { params }: { params: Promise<{ id: string; index: string }> }) {
   const { id, index } = await params;
-
-  const session = await getServerSession();
-  if (!session?.user?.email) {
-    return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
-  }
-
-  await connectDB();
-
+  const { error } = await ownedTrip(id);
+  if (error) return error;
   const logistics = await TripLogistics.findOne({ tripId: id });
-  if (!logistics) {
-    return NextResponse.json({ error: 'Not found' }, { status: 404 });
-  }
-
-  if (!Array.isArray(logistics.venues)) logistics.venues = [];
-  logistics.venues.splice(Number(index), 1);
+  const i = itemIndex(index, logistics?.venues);
+  if (!logistics || i === null) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  logistics.venues.splice(i, 1);
   await logistics.save();
-
+  // Resources and expenses linked to the bookings after it move up with them
+  await relinkAfterRemoval(id, 'venue', i);
   await syncLogisticsToItinerary(id, logistics);
-
   return NextResponse.json({ logistics });
 }
+
 export async function PUT(req: Request, { params }: { params: Promise<{ id: string; index: string }> }) {
   const { id, index } = await params;
-  const session = await getServerSession();
-  if (!session?.user?.email) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
-  await connectDB();
+  const { error } = await ownedTrip(id);
+  if (error) return error;
   const body = await req.json();
-  const user = await User.findOne({ email: session.user.email });
   const logistics = await TripLogistics.findOne({ tripId: id });
-  if (!logistics) return NextResponse.json({ error: 'Not found' }, { status: 404 });
-  logistics.venues[Number(index)] = body;
+  const i = itemIndex(index, logistics?.venues);
+  if (!logistics || i === null) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  logistics.venues[i] = withItemId(body, logistics.venues[i]);
   logistics.markModified('venues');
- await logistics.save();
-await syncLogisticsToItinerary(id, logistics);
+  await logistics.save();
+  await syncLogisticsToItinerary(id, logistics);
   return NextResponse.json({ logistics });
 }

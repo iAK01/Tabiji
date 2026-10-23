@@ -2,12 +2,13 @@
 
 import { useEffect, useState } from 'react';
 import {
-  Box, Typography, Button, IconButton, Drawer, Dialog, Chip,
+  Box, Typography, Button, IconButton, Drawer, Dialog, Chip, Collapse,
 } from '@mui/material';
 import { alpha }            from '@mui/material/styles';
 import CloseIcon            from '@mui/icons-material/Close';
 import EditIcon             from '@mui/icons-material/Edit';
-import DeleteOutlineIcon    from '@mui/icons-material/DeleteOutline';
+import EditNoteIcon         from '@mui/icons-material/EditNote';
+import ExpandMoreIcon       from '@mui/icons-material/ExpandMore';
 import VisibilityOffIcon    from '@mui/icons-material/VisibilityOff';
 import UndoIcon             from '@mui/icons-material/Undo';
 import LockIcon             from '@mui/icons-material/Lock';
@@ -21,7 +22,9 @@ import type { TravelOrigin } from '@/lib/navigation/useTravelTimes';
 import DocumentViewer, { type ViewableFile } from '@/components/files/DocumentViewer';
 import { STOP_CONFIG, D }   from './Itinerary.config';
 import type { Stop }        from './Itinerary.config';
-import { stopDuration, fmtDuration, timeRangeLabel, canSkip } from './Itinerary.helpers';
+import { stopDuration, fmtDuration, timeRangeLabel, canSkip, canNote, skipLabel } from './Itinerary.helpers';
+import { recordable, type LinkedItem } from './record';
+import { LinkedResources }  from './LinkedResources';
 import FlightLive from '@/components/flights/FlightLive';
 import { REMINDER_OPTIONS } from '@/lib/push/leads';
 import type { FlightStatus } from '@/lib/flights/status';
@@ -33,6 +36,10 @@ interface Props {
   concurrent:  Stop[];                 // other stops at the same time
   isMobile:    boolean;
   linkedFiles: LinkedFile[];
+  /** Contacts, to-dos, notes and links from Resources linked to this stop */
+  resources?:  LinkedItem[];
+  /** Whether a stop has begun, in the zone you'll be in then — after that it's went / didn't go */
+  isStarted:   (stop: Stop) => boolean;
   reminder:    { local: string; sent: boolean } | null;
   /** What can be changed here: a lead time for your own stops, on/off for a booking's reminders. */
   reminderSetting?: { mode: 'lead'; value: number | null; own?: boolean } | { mode: 'booking'; on: boolean } | null;
@@ -45,38 +52,49 @@ interface Props {
   onSelect:    (stop: Stop) => void;   // jump to a concurrent stop
   onSkip:      (stop: Stop, skipped: boolean) => void;
   onEdit:      (stop: Stop) => void;
-  onDelete:    (stop: Stop) => void;
+  onEditNote:  (stop: Stop) => void;
   onOpenLogistics: () => void;
   onFilterType:    (type: string) => void;   // "show me all the gigs"
   /** Where Navigate's times start when you're not near this stop yet */
   navFrom?:        TravelOrigin | null;
 }
 
-// Tap a stop → everything about it, plus what else is on at the same time.
-// The read-first view: nothing here moves a stop by accident.
-export function StopDetailSheet({
-  stop, concurrent, isMobile, linkedFiles, reminder, flight,
-  reminderSetting = null, reminderNotice = null, onReminderChange,
-  onClose, onSelect, onSkip, onEdit, onDelete, onOpenLogistics, onFilterType, navFrom = null,
-}: Props) {
-  const [confirmDelete, setConfirmDelete] = useState(false);
-  const [viewerFile,    setViewerFile]    = useState<ViewableFile | null>(null);
+const sectionLabelSx = {
+  fontFamily: D.body, fontSize: '0.62rem', fontWeight: 800, letterSpacing: '0.08em',
+  textTransform: 'uppercase', color: D.muted,
+} as const;
 
-  useEffect(() => { setConfirmDelete(false); }, [stop]);
+// Tap a stop → everything about it, plus what else is on at the same time.
+// The read-first view: nothing here moves a stop by accident. It changes with
+// time rather than growing: before a stop, the reminder and the clash are what
+// matter; once it's started, your note and whether you went.
+export function StopDetailSheet({
+  stop, concurrent, isMobile, linkedFiles, resources = [], isStarted, reminder, flight,
+  reminderSetting = null, reminderNotice = null, onReminderChange,
+  onClose, onSelect, onSkip, onEdit, onEditNote, onOpenLogistics, onFilterType, navFrom = null,
+}: Props) {
+  const [viewerFile,     setViewerFile]     = useState<ViewableFile | null>(null);
+  const [reminderOpen,   setReminderOpen]   = useState(false);
+  const [concurrentOpen, setConcurrentOpen] = useState(false);
+
+  useEffect(() => { setReminderOpen(false); setConcurrentOpen(false); }, [stop?._id]);
 
   const open = !!stop;
   const body = stop && (() => {
     const cfg       = STOP_CONFIG[stop.type] ?? STOP_CONFIG.other;
     const isFact    = stop.source === 'logistics' && stop.locked === true;
-    const deletable = stop.source !== 'logistics' && !!stop._id;
     const editable  = !isFact && !!stop._id;
+    const started   = isStarted(stop);
     const dur       = stopDuration(stop);
     const place     = stop.locationName || stop.address;
+    const myNotes   = stop.myNotes?.trim() ?? '';
     // Shown with the night before — name the date it's really on
     const lateDate  = stop.afterMidnight && stop.scheduledStart
       ? new Date(`${stop.scheduledStart.slice(0, 10)}T12:00:00`).toLocaleDateString('en-IE', { weekday: 'short', day: 'numeric', month: 'short' })
       : null;
     const btnSx     = { fontFamily: D.body, fontWeight: 700, minHeight: 48, borderRadius: '10px', flex: 1 };
+    // The clash is decided once the stop is under way — fold it away, one tap to look again
+    const showConcurrent = !started || concurrentOpen;
 
     return (
       <Box sx={{ display: 'flex', flexDirection: 'column', minHeight: 0, flex: 1 }}>
@@ -128,8 +146,12 @@ export function StopDetailSheet({
                 sx={{ backgroundColor: alpha(D.navy, 0.08), color: D.navy, fontWeight: 700, fontFamily: D.body }} />
             )}
             {stop.skipped && (
-              <Chip size="small" label="Not going"
+              <Chip size="small" label={started ? 'Didn’t go' : 'Not going'}
                 sx={{ backgroundColor: alpha(D.navy, 0.08), color: D.navy, fontWeight: 700, fontFamily: D.body }} />
+            )}
+            {started && !stop.skipped && canSkip(stop) && recordable(stop) && (
+              <Chip size="small" label="Went"
+                sx={{ backgroundColor: alpha(D.green, 0.14), color: D.green, fontWeight: 700, fontFamily: D.body }} />
             )}
             {isFact && (
               <Chip size="small" icon={<LockIcon sx={{ fontSize: '12px !important' }} />} label="From a booking"
@@ -170,7 +192,43 @@ export function StopDetailSheet({
             </Box>
           )}
 
-          {reminderSetting ? (() => {
+          {/* ── Your note: one line until there's something in it ── */}
+          {canNote(stop) && (myNotes ? (
+            <Box
+              onClick={() => onEditNote(stop)}
+              sx={{
+                mb: 1.5, p: 1.5, borderRadius: '10px', cursor: 'pointer',
+                backgroundColor: alpha(D.navy, 0.04),
+                '&:hover': { backgroundColor: alpha(D.navy, 0.07) },
+              }}
+            >
+              <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.5 }}>
+                <Typography sx={{ ...sectionLabelSx, flex: 1 }}>Notes</Typography>
+                <EditNoteIcon sx={{ fontSize: 18, color: D.muted }} />
+              </Box>
+              <Typography sx={{
+                fontFamily: D.body, fontSize: '0.92rem', lineHeight: 1.55, color: D.navy, whiteSpace: 'pre-wrap',
+                display: '-webkit-box', WebkitBoxOrient: 'vertical', WebkitLineClamp: 8, overflow: 'hidden',
+              }}>
+                {myNotes}
+              </Typography>
+            </Box>
+          ) : (
+            <Box
+              component="button"
+              onClick={() => onEditNote(stop)}
+              sx={{
+                display: 'flex', alignItems: 'center', gap: 1, width: '100%', minHeight: 44, mb: 1,
+                p: 0, border: 'none', background: 'none', cursor: 'pointer', color: D.muted, textAlign: 'left',
+              }}
+            >
+              <EditNoteIcon sx={{ fontSize: 20 }} />
+              <Typography sx={{ fontFamily: D.body, fontSize: '0.88rem', fontWeight: 700 }}>Add a note</Typography>
+            </Box>
+          ))}
+
+          {/* ── Reminder: one line, the choices one tap away; gone once it's started ── */}
+          {!started && (reminderSetting ? (() => {
             const on    = reminderSetting.mode === 'lead' ? reminderSetting.value !== null : reminderSetting.on;
             const when  = reminder ? ` · ${reminder.sent ? 'sent' : 'at'} ${reminder.local}` : '';
             const label = reminderSetting.mode === 'lead'
@@ -184,29 +242,43 @@ export function StopDetailSheet({
                 : [{ label: 'On', value: true, selected: on }, { label: 'Off', value: false, selected: !on }];
             return (
               <Box sx={{ mb: 1.5 }}>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.75 }}>
+                <Box
+                  component="button"
+                  onClick={() => setReminderOpen(o => !o)}
+                  aria-expanded={reminderOpen}
+                  sx={{
+                    display: 'flex', alignItems: 'center', gap: 1, width: '100%', minHeight: 44,
+                    p: 0, border: 'none', background: 'none', cursor: 'pointer', textAlign: 'left',
+                  }}
+                >
                   {on ? <NotificationsIcon sx={{ fontSize: 18, color: D.muted }} /> : <NotificationsOffIcon sx={{ fontSize: 18, color: D.muted }} />}
-                  <Typography sx={{ fontFamily: D.body, fontSize: '0.85rem', fontWeight: 700, color: D.navy }}>
+                  <Typography sx={{ fontFamily: D.body, fontSize: '0.85rem', fontWeight: 700, color: D.navy, flex: 1 }}>
                     {label}
                   </Typography>
+                  <ExpandMoreIcon sx={{
+                    fontSize: 20, color: D.muted,
+                    transform: reminderOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s',
+                  }} />
                 </Box>
-                <Box role="radiogroup" aria-label="Reminder" sx={{ display: 'flex', gap: 0.75, flexWrap: 'wrap' }}>
-                  {choices.map(c => (
-                    <Chip
-                      key={String(c.value)}
-                      role="radio"
-                      aria-checked={c.selected}
-                      label={c.label}
-                      onClick={() => !c.selected && onReminderChange?.(stop, c.value)}
-                      sx={{
-                        height: 40, minWidth: 52, borderRadius: '10px', fontFamily: D.body, fontWeight: 700,
-                        backgroundColor: c.selected ? D.navy : alpha(D.navy, 0.06),
-                        color: c.selected ? '#fff' : D.navy,
-                        '&:hover': { backgroundColor: c.selected ? D.navy : alpha(D.navy, 0.12) },
-                      }}
-                    />
-                  ))}
-                </Box>
+                <Collapse in={reminderOpen}>
+                  <Box role="radiogroup" aria-label="Reminder" sx={{ display: 'flex', gap: 0.75, flexWrap: 'wrap', pt: 0.5 }}>
+                    {choices.map(c => (
+                      <Chip
+                        key={String(c.value)}
+                        role="radio"
+                        aria-checked={c.selected}
+                        label={c.label}
+                        onClick={() => !c.selected && onReminderChange?.(stop, c.value)}
+                        sx={{
+                          height: 40, minWidth: 52, borderRadius: '10px', fontFamily: D.body, fontWeight: 700,
+                          backgroundColor: c.selected ? D.navy : alpha(D.navy, 0.06),
+                          color: c.selected ? '#fff' : D.navy,
+                          '&:hover': { backgroundColor: c.selected ? D.navy : alpha(D.navy, 0.12) },
+                        }}
+                      />
+                    ))}
+                  </Box>
+                </Collapse>
                 {reminderNotice && (
                   <Typography sx={{ fontFamily: D.body, fontSize: '0.78rem', color: D.terra, mt: 0.75 }}>
                     {reminderNotice}
@@ -221,7 +293,7 @@ export function StopDetailSheet({
                 {reminder.sent ? `Reminder sent at ${reminder.local}` : `Reminder at ${reminder.local}`}
               </Typography>
             </Box>
-          )}
+          ))}
 
           {stop.notes && (
             <Typography sx={{
@@ -242,57 +314,83 @@ export function StopDetailSheet({
             </Box>
           )}
 
+          {resources.some(r => r.resourceType !== 'file') && (
+            <Box sx={{ mb: 1.5 }}>
+              <LinkedResources items={resources} />
+            </Box>
+          )}
+
           {/* ── Same time — step through a clash without hunting on the grid ── */}
           {concurrent.length > 0 && (
             <Box sx={{ mt: 1, mb: 1 }}>
-              <Typography sx={{
-                fontFamily: D.body, fontSize: '0.62rem', fontWeight: 800, letterSpacing: '0.08em',
-                textTransform: 'uppercase', color: D.muted, mb: 0.75,
-              }}>
-                Also at this time · {concurrent.length}
-              </Typography>
-              {concurrent.map((o, i) => {
-                const oc = STOP_CONFIG[o.type] ?? STOP_CONFIG.other;
-                return (
-                  <Box key={o._id ?? i} sx={{
-                    display: 'flex', alignItems: 'center', gap: 1,
-                    borderTop: i ? `1px solid ${D.rule}` : 'none',
-                    opacity: o.skipped ? 0.5 : 1,
-                  }}>
-                    <Box
-                      onClick={() => onSelect(o)}
-                      sx={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 1, py: 1.25, cursor: 'pointer' }}
-                    >
-                      <Box sx={{ width: 4, alignSelf: 'stretch', borderRadius: 2, backgroundColor: oc.color, flexShrink: 0 }} />
-                      <Typography sx={{ fontFamily: D.display, fontSize: '0.78rem', color: oc.color, fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>
-                        {timeRangeLabel(o)}
-                      </Typography>
-                      <Typography sx={{
-                        fontFamily: D.body, fontSize: '0.88rem', fontWeight: 700, color: D.navy, minWidth: 0,
-                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                        textDecoration: o.skipped ? 'line-through' : 'none',
-                      }}>
-                        {o.name}
-                      </Typography>
-                    </Box>
-                    {canSkip(o) && (
-                      <IconButton
-                        onClick={() => onSkip(o, !o.skipped)}
-                        aria-label={o.skipped ? 'Going after all' : 'Not going'}
-                        title={o.skipped ? 'Going after all' : 'Not going'}
-                        sx={{ width: 44, height: 44, color: D.muted, flexShrink: 0 }}
+              {started ? (
+                <Box
+                  component="button"
+                  onClick={() => setConcurrentOpen(o => !o)}
+                  aria-expanded={concurrentOpen}
+                  sx={{
+                    display: 'flex', alignItems: 'center', width: '100%', minHeight: 44,
+                    p: 0, border: 'none', background: 'none', cursor: 'pointer', textAlign: 'left',
+                  }}
+                >
+                  <Typography sx={{ ...sectionLabelSx, flex: 1 }}>
+                    {concurrent.length} other{concurrent.length === 1 ? '' : 's'} at this time
+                  </Typography>
+                  <ExpandMoreIcon sx={{
+                    fontSize: 20, color: D.muted,
+                    transform: concurrentOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s',
+                  }} />
+                </Box>
+              ) : (
+                <Typography sx={{ ...sectionLabelSx, mb: 0.75 }}>
+                  Also at this time · {concurrent.length}
+                </Typography>
+              )}
+              <Collapse in={showConcurrent}>
+                {concurrent.map((o, i) => {
+                  const oc = STOP_CONFIG[o.type] ?? STOP_CONFIG.other;
+                  const label = skipLabel(o, isStarted(o));
+                  return (
+                    <Box key={o._id ?? i} sx={{
+                      display: 'flex', alignItems: 'center', gap: 1,
+                      borderTop: i ? `1px solid ${D.rule}` : 'none',
+                      opacity: o.skipped ? 0.5 : 1,
+                    }}>
+                      <Box
+                        onClick={() => onSelect(o)}
+                        sx={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 1, py: 1.25, cursor: 'pointer' }}
                       >
-                        {o.skipped ? <UndoIcon fontSize="small" /> : <CloseIcon fontSize="small" />}
-                      </IconButton>
-                    )}
-                  </Box>
-                );
-              })}
+                        <Box sx={{ width: 4, alignSelf: 'stretch', borderRadius: 2, backgroundColor: oc.color, flexShrink: 0 }} />
+                        <Typography sx={{ fontFamily: D.display, fontSize: '0.78rem', color: oc.color, fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>
+                          {timeRangeLabel(o)}
+                        </Typography>
+                        <Typography sx={{
+                          fontFamily: D.body, fontSize: '0.88rem', fontWeight: 700, color: D.navy, minWidth: 0,
+                          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                          textDecoration: o.skipped ? 'line-through' : 'none',
+                        }}>
+                          {o.name}
+                        </Typography>
+                      </Box>
+                      {canSkip(o) && (
+                        <IconButton
+                          onClick={() => onSkip(o, !o.skipped)}
+                          aria-label={label}
+                          title={label}
+                          sx={{ width: 44, height: 44, color: D.muted, flexShrink: 0 }}
+                        >
+                          {o.skipped ? <UndoIcon fontSize="small" /> : <CloseIcon fontSize="small" />}
+                        </IconButton>
+                      )}
+                    </Box>
+                  );
+                })}
+              </Collapse>
             </Box>
           )}
         </Box>
 
-        {/* ── Actions ── */}
+        {/* ── Actions ── (delete is in Edit) */}
         <Box sx={{
           flexShrink: 0, display: 'flex', gap: 1, flexWrap: 'wrap',
           px: { xs: 2.5, sm: 3 }, pt: 1.5, pb: { xs: 'max(env(safe-area-inset-bottom, 12px), 16px)', sm: 2.5 },
@@ -301,11 +399,12 @@ export function StopDetailSheet({
           {canSkip(stop) && (
             <Button
               variant="outlined"
-              startIcon={stop.skipped ? <UndoIcon /> : <VisibilityOffIcon />}
-              onClick={() => onSkip(stop, !stop.skipped)}
+              startIcon={stop.skipped ? <UndoIcon /> : started ? <CloseIcon /> : <VisibilityOffIcon />}
+              // One tap and done — a failed save comes back with its error toast
+              onClick={() => { onSkip(stop, !stop.skipped); onClose(); }}
               sx={{ ...btnSx, color: D.navy, borderColor: alpha(D.navy, 0.25) }}
             >
-              {stop.skipped ? 'Going after all' : 'Not going'}
+              {skipLabel(stop, started)}
             </Button>
           )}
           {editable && (
@@ -324,17 +423,6 @@ export function StopDetailSheet({
               sx={{ ...btnSx, color: D.terra, borderColor: alpha(D.terra, 0.4) }}
             >
               Open booking
-            </Button>
-          )}
-          {deletable && (
-            <Button
-              variant={confirmDelete ? 'contained' : 'text'}
-              color="error"
-              startIcon={<DeleteOutlineIcon />}
-              onClick={() => (confirmDelete ? onDelete(stop) : setConfirmDelete(true))}
-              sx={{ ...btnSx, flex: confirmDelete ? 1 : '0 0 auto', boxShadow: 'none' }}
-            >
-              {confirmDelete ? 'Tap again to delete' : 'Delete'}
             </Button>
           )}
         </Box>

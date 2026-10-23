@@ -3,9 +3,7 @@
 // No writes — purely informational.
 
 import { NextResponse } from 'next/server';
-import { getServerSession } from 'next-auth';
-import connectDB from '@/lib/mongodb/connection';
-import Trip from '@/lib/mongodb/models/Trip';
+import { ownedTrip } from '@/lib/auth/ownedTrip';
 import TripItinerary from '@/lib/mongodb/models/TripItinerary';
 import TripLogistics from '@/lib/mongodb/models/TripLogistics';
 import TripPacking from '@/lib/mongodb/models/TripPacking';
@@ -17,17 +15,10 @@ export async function GET(
   _req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await getServerSession();
-  if (!session?.user?.email) {
-    return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
-  }
-
   const { id: tripId } = await params;
-  await connectDB();
-
-  // Verify ownership
-  const trip = await Trip.findById(tripId).lean() as any;
-  if (!trip) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  const owned = await ownedTrip(tripId);
+  if (owned.error) return owned.error;
+  const trip = owned.trip.toObject() as any;
 
   // Fetch everything in parallel
   const [itinerary, logistics, packing, intelligence, files, pushLogs] = await Promise.all([

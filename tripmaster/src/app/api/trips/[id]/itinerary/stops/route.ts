@@ -1,14 +1,12 @@
 import { NextResponse } from 'next/server';
-import { getServerSession } from 'next-auth';
-import connectDB from '@/lib/mongodb/connection';
+import { ownedTrip } from '@/lib/auth/ownedTrip';
 import TripItinerary from '@/lib/mongodb/models/TripItinerary';
 import mongoose from 'mongoose';
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const session = await getServerSession();
-  if (!session?.user?.email) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
-  await connectDB();
+  const { error } = await ownedTrip(id);
+  if (error) return error;
 
   const { dayDate, stop } = await req.json();
   const itinerary = await TripItinerary.findOne({ tripId: id });

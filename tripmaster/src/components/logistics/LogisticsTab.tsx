@@ -459,6 +459,60 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
   };
 
   // ── Deletes ─────────────────────────────────────────────────────────────────
+  // What goes with a booking, said before it's deleted: your notes on its itinerary
+  // stops go with it; files and expenses linked to it stay, unlinked. Read from the
+  // saved copies, so it works offline too.
+  const [deleteImpact, setDeleteImpact] = useState<{ notes: string[]; kept: number; checked: boolean } | null>(null);
+  useEffect(() => {
+    setDeleteImpact(null);
+    if (!deleteTarget || !logistics) return;
+    const { kind, index } = deleteTarget;
+    const collection = kind === 'accom' ? 'accommodation' : kind;
+    const item = (kind === 'transport' ? logistics.transportation : kind === 'accom' ? logistics.accommodation : logistics.venues ?? [])[index];
+    const getJson = (url: string) => fetch(url).then(r => { if (!r.ok) throw new Error(String(r.status)); return r.json(); });
+    let live = true;
+    Promise.all([
+      getJson(`/api/trips/${tripId}/itinerary`),
+      getJson(`/api/trips/${tripId}/files`),
+      getJson(`/api/trips/${tripId}/expenses`).catch(() => ({ expenses: [] })),
+    ]).then(([it, f, ex]) => {
+      if (!live) return;
+      const fromIt = (ref: any) => ref?.collection === collection && (item?.id && ref.id ? ref.id === item.id : ref.index === index);
+      const notes  = (it.days ?? []).flatMap((d: any) => d.stops ?? [])
+        .filter((st: any) => st.source === 'logistics' && fromIt(st.logisticsRef) && st.myNotes?.trim())
+        .map((st: any) => String(st.name ?? '').trim() || 'a stop');
+      const linkedHere = (x: any) => x.linkedTo?.collection === collection && x.linkedTo?.entryId === String(index);
+      const kept = (f.files ?? []).filter(linkedHere).length + (ex.expenses ?? []).filter(linkedHere).length;
+      setDeleteImpact({ notes: Array.from(new Set<string>(notes)), kept, checked: true });
+    }).catch(() => { if (live) setDeleteImpact({ notes: [], kept: 0, checked: false }); });
+    return () => { live = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deleteTarget]);
+
+  const nameOf = (target: { kind: MenuKind; index: number } | null): string => {
+    if (!target || !logistics) return '';
+    const { kind, index } = target;
+    const item = kind === 'transport' ? logistics.transportation[index]
+      : kind === 'accom' ? logistics.accommodation[index]
+      : (logistics.venues ?? [])[index];
+    return kind === 'transport'
+      ? (item?.departureLocation && item?.arrivalLocation ? `${item.departureLocation} → ${item.arrivalLocation}` : '')
+      : item?.name ?? '';
+  };
+
+  // Files linked to the bookings after a deleted one move up with them (as the
+  // server does in lib/logistics/relink.ts); the deleted one's are unlinked.
+  const relinkFiles = (collection: string, index: number) => setFilesById(prev => {
+    const next = new Map<string, any[]>();
+    for (const [key, files] of prev) {
+      const [c, e] = key.split(':');
+      const at = Number(e);
+      if (c !== collection || !Number.isInteger(at) || at < index) next.set(key, files);
+      else if (at > index) next.set(`${c}:${at - 1}`, files);
+    }
+    return next;
+  });
+
   const confirmDelete = async () => {
     if (!deleteTarget || saving) return;
     const { kind, index } = deleteTarget;
@@ -482,12 +536,7 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
       venue:     `/api/trips/${tripId}/logistics/venues/${index}`,
     };
 
-    const item = kind === 'transport' ? logistics.transportation[index]
-      : kind === 'accom' ? logistics.accommodation[index]
-      : (logistics.venues ?? [])[index];
-    const itemName = kind === 'transport'
-      ? (item?.departureLocation && item?.arrivalLocation ? `${item.departureLocation} → ${item.arrivalLocation}` : '')
-      : item?.name;
+    const itemName = nameOf(deleteTarget);
 
     setSaving(true);
     try {
@@ -498,7 +547,10 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
         { type: 'DELETE_LOGISTICS_ITEM', tripId, payload: { kind, index } },
         () => fetch(urlMap[kind], { method: 'DELETE' }),
       );
-      if (result !== false) setDeleteTarget(null);
+      if (result !== false) {
+        relinkFiles(kind === 'accom' ? 'accommodation' : kind, index);
+        setDeleteTarget(null);
+      }
     } finally {
       setSaving(false);
     }
@@ -1269,11 +1321,31 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
       </Menu>
 
       {/* ── Delete confirmation ── */}
-      <Dialog open={Boolean(deleteTarget)} onClose={() => setDeleteTarget(null)}>
+      <Dialog open={Boolean(deleteTarget)} onClose={() => setDeleteTarget(null)} maxWidth="xs" fullWidth>
         <DialogTitle sx={{ fontFamily: D.display, fontSize: '1.1rem' }}>
-          Delete this item?
+          {nameOf(deleteTarget) ? `Delete “${nameOf(deleteTarget)}”?` : 'Delete this item?'}
         </DialogTitle>
-        <DialogContent>
+        <DialogContent sx={{ display: 'flex', flexDirection: 'column', gap: 1.25 }}>
+          {!deleteImpact && (
+            <Typography variant="body2" color="text.secondary" sx={{ fontFamily: D.body }}>
+              Checking what’s linked to it…
+            </Typography>
+          )}
+          {deleteImpact && deleteImpact.notes.length > 0 && (
+            <Typography variant="body2" sx={{ fontFamily: D.body, fontWeight: 700, color: D.terra }}>
+              Your notes on {deleteImpact.notes.map(n => `“${n}”`).join(', ')} in the itinerary are deleted with it.
+            </Typography>
+          )}
+          {deleteImpact && !deleteImpact.checked && (
+            <Typography variant="body2" sx={{ fontFamily: D.body, fontWeight: 700, color: D.terra }}>
+              Any notes you wrote on its itinerary stops are deleted with it.
+            </Typography>
+          )}
+          {deleteImpact && deleteImpact.kept > 0 && (
+            <Typography variant="body2" sx={{ fontFamily: D.body }}>
+              {deleteImpact.kept === 1 ? 'The file or expense' : `The ${deleteImpact.kept} files and expenses`} linked to it stay, unlinked.
+            </Typography>
+          )}
           <Typography variant="body2" color="text.secondary" sx={{ fontFamily: D.body }}>
             This cannot be undone.
           </Typography>
@@ -1288,7 +1360,7 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
           <Button
             variant="contained"
             onClick={confirmDelete}
-            disabled={saving}
+            disabled={saving || !deleteImpact}
             sx={{
               fontFamily: D.display, fontSize: '0.8rem',
               bgcolor: '#dc2626', boxShadow: 'none',

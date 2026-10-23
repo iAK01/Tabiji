@@ -12,7 +12,7 @@ import { resolveCheckIn, normaliseTime } from '@/lib/itinerary/checkInTiming';
 import { getCountryTransport, resolveServices } from '@/lib/data/ground-transport';
 import { atTime, placeZone, tripZones, wallClock, ymd } from '@/lib/push/timezones';
 import {
-  buildLegs, connectingLeg, coords, departurePoint, homeAt, stayOn, whereAt, JOURNEY_TYPES,
+  buildLegs, connectingLeg, coords, departurePoint, homeAt, stayOn, stopClock, stopTime, whereAt, JOURNEY_TYPES,
   type LatLng, type Leg, type Point,
 } from '@/lib/push/journey';
 import { inQuietHours, QUIET_EXEMPT, type NotificationCategory, type NotificationPrefs } from '@/lib/push/prefs';
@@ -247,11 +247,10 @@ function missingProofs(expenses: any[], collection: string, index: number, categ
 
 // ---- Itinerary helpers --------------------------------------------------------
 
-function stopTime(dayDate: string, stop: any, zone: string): DateTime | null {
-  if (stop.scheduledStart) {
-    return wallClock(String(stop.scheduledStart).includes('T') ? stop.scheduledStart : `${ymd(dayDate)}T${stop.scheduledStart}`, zone);
-  }
-  return stop.time ? atTime(dayDate, stop.time, zone) : null;
+// The first line of your own note on a stop — what you wanted to bring up
+function noteLine(stop: any): string | null {
+  const line = String(stop?.myNotes ?? '').split('\n').map((l: string) => l.trim()).find(Boolean);
+  return line ? (line.length > 120 ? `${line.slice(0, 119)}…` : line) : null;
 }
 
 // The itinerary's check-in stop for a booking: the same estimate resolveCheckIn
@@ -334,15 +333,7 @@ export function planTrip(data: TripData, r: Recipient, drive: DriveTimes, nowMs:
   const zoneAt   = whereAt(trip, legs, r.home.zone);
   const isHomeAt = homeAt(trip, legs);
 
-  // A stop's time is local to wherever you are then — on a travel day that can
-  // be home rather than the trip's zone. Read it in the trip's zone, see where
-  // you'd be at that moment, and re-read it there if that's somewhere else.
-  const localStopTime = (dayDate: string, stop: any): DateTime | null => {
-    const guess = stopTime(dayDate, stop, zoneFor(ymd(dayDate)));
-    if (!guess) return null;
-    const zone = zoneAt(guess.toMillis());
-    return zone === guess.zoneName ? guess : stopTime(dayDate, stop, zone);
-  };
+  const localStopTime = stopClock(trip, legs, r.home.zone);
 
   // Reminder before each stop on this trip, when it has its own (else your default)
   const tripLead = parseTripLead(trip.reminderLeadMins);
@@ -752,8 +743,10 @@ export function planTrip(data: TripData, r: Recipient, drive: DriveTimes, nowMs:
 
   // ── Venues ─────────────────────────────────────────────────────────────────
   // "Not going" on the event's itinerary stop silences the event too
-  const skippedVenue = (i: number) => days.some((d: any) => (d.stops ?? []).some((st: any) =>
-    st.source === 'logistics' && st.skipped && st.logisticsRef?.collection === 'venue' && st.logisticsRef?.index === i));
+  // The itinerary's copy of a venue — where "Not going" and your note on it live
+  const venueStop = (i: number) => days.flatMap((d: any) => d.stops ?? []).find((st: any) =>
+    st.source === 'logistics' && st.logisticsRef?.collection === 'venue' && st.logisticsRef?.index === i);
+  const skippedVenue = (i: number) => !!venueStop(i)?.skipped;
 
   venues.forEach((v: any, i: number) => {
     const time = normaliseTime(v.time);
@@ -775,7 +768,7 @@ export function planTrip(data: TripData, r: Recipient, drive: DriveTimes, nowMs:
       at: event.toMillis() - lead * MIN, until: event.toMillis(), deferrable: false,
       payload: {
         title: `${KIND[v.type] ?? 'Event'}: ${v.name} ${startsIn(event.toMillis(), nowMs)}`,
-        body:  [`${v.address ? `${v.address} · ` : ''}${event.toFormat('HH:mm')}`, docsLine(docs)].filter(Boolean).join('\n'),
+        body:  [`${v.address ? `${v.address} · ` : ''}${event.toFormat('HH:mm')}`, noteLine(venueStop(i)), docsLine(docs)].filter(Boolean).join('\n'),
         url:   sheetUrl(tripId, 'venue', i),
         tag:   `venue-${i}`,
         actions: [...(nav ? [{ action: 'directions', title: 'Directions', url: nav }] : []), ...extra],
@@ -815,6 +808,7 @@ export function planTrip(data: TripData, r: Recipient, drive: DriveTimes, nowMs:
             : `${KIND[stop.type] ?? 'Event'}: ${stop.name} ${when}`,
           body:  [stop.reference && stop.type !== 'transport' ? stop.reference : null,
                   `${stop.address ? `${stop.address} · ` : ''}${event.toFormat('HH:mm')}`,
+                  noteLine(stop),
                   docsLine(docs)].filter(Boolean).join('\n'),
           url:   stopId
             ? `/trips/${tripId}?tab=itinerary&day=${dayNo}&stop=${stopId}`

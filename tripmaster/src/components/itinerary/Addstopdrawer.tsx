@@ -501,7 +501,7 @@ export function AddStopDrawer({
             fontFamily: D.body, fontSize: '0.75rem',
             fontWeight: 600, letterSpacing: '0.04em',
           }}>
-            {showExtras ? 'Hide details' : 'Add location / notes'}
+            {showExtras ? 'Hide details' : 'Add location / details'}
           </Typography>
         </Box>
 
@@ -576,7 +576,7 @@ export function AddStopDrawer({
             />
 
             <TextField
-              label="Notes"
+              label="Details"
               value={form.notes}
               onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
               fullWidth

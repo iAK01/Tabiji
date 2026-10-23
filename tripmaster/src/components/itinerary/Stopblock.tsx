@@ -7,6 +7,7 @@ import { alpha }          from '@mui/material/styles';
 import DeleteIcon         from '@mui/icons-material/Delete';
 import LockIcon           from '@mui/icons-material/Lock';
 import NotificationsIcon  from '@mui/icons-material/Notifications';
+import EditNoteIcon       from '@mui/icons-material/EditNote';
 import NavigateButton     from '@/components/ui/NavigateButton';
 import type { TravelOrigin } from '@/lib/navigation/useTravelTimes';
 import DocumentViewer, { type ViewableFile } from '@/components/files/DocumentViewer';
@@ -91,6 +92,7 @@ export function StopBlock({ stop, onDelete, onClick, onResize, pxPerMin, isMobil
   const hasLocation = !!(stop.address || stop.coordinates);
   const displayName = stop.name?.trim() || 'Unnamed stop';
   const hasFiles    = linkedFiles.length > 0;
+  const hasNote     = !!stop.myNotes?.trim();
   const canMove     = editMode && !isFact;
   const limits      = bounds ?? { min: DAY_START_HOUR * 60, max: DAY_END_HOUR * 60 - duration };
 
@@ -356,6 +358,7 @@ export function StopBlock({ stop, onDelete, onClick, onResize, pxPerMin, isMobil
                 </Typography>
               )}
               {reminder && <ReminderMark reminder={reminder} size={isMobile ? 10 : 9} />}
+              {hasNote && <EditNoteIcon aria-label="Has notes" sx={{ fontSize: isMobile ? 13 : 12, color: alpha(D.navy, 0.5), flexShrink: 0 }} />}
               {isFact && <LockIcon sx={{ fontSize: 9, color: alpha(D.navy, 0.35), flexShrink: 0 }} />}
             </Box>
           ) : (
@@ -389,6 +392,7 @@ export function StopBlock({ stop, onDelete, onClick, onResize, pxPerMin, isMobil
                   {displayName}
                 </Typography>
                 {reminder && <ReminderMark reminder={reminder} size={isMobile ? 11 : 10} />}
+                {hasNote && <EditNoteIcon aria-label="Has notes" sx={{ fontSize: isMobile ? 14 : 13, color: alpha(D.navy, 0.5), flexShrink: 0 }} />}
                 {isFact && (
                   <LockIcon sx={{ fontSize: 10, color: alpha(D.navy, 0.35), flexShrink: 0 }} />
                 )}

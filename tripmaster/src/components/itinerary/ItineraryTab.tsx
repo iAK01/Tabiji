@@ -12,6 +12,7 @@ import {
   Box, Typography, Paper, Button,
   IconButton, Chip, CircularProgress, Tooltip, Menu, MenuItem,
   ToggleButton, ToggleButtonGroup,
+  Dialog, DialogTitle, DialogContent, DialogActions,
 } from '@mui/material';
 import { alpha }              from '@mui/material/styles';
 import { useTheme, useMediaQuery } from '@mui/material';
@@ -30,6 +31,7 @@ import ZoomOutIcon        from '@mui/icons-material/ZoomOut';
 import CloseIcon          from '@mui/icons-material/Close';
 import NightsStayIcon     from '@mui/icons-material/NightsStay';
 import ChevronRightIcon   from '@mui/icons-material/ChevronRight';
+import AutoStoriesIcon    from '@mui/icons-material/AutoStories';
 import NavigateButton     from '@/components/ui/NavigateButton';
 import ExportCalendarDialog from '@/components/calendar/ExportCalendarDialog';
 import { saveTripCache, getTripCache } from '@/lib/offline/db';
@@ -51,20 +53,23 @@ import {
   dayPages, carriesOnPage,
 } from './Itinerary.helpers';
 import { clockMinutes, daysBetween, insertByTime, DAY_MINS, NIGHT_ENDS_MIN } from '@/lib/itinerary/nights';
-import { localYmd }             from '@/lib/trips/onTrip';
 import { HourRuler, GridLines, FreeGap, TravelConnector } from './Timelinechrome';
 import { StopBlock }            from './Stopblock';
 import { AddStopDrawer }        from './Addstopdrawer';
 import { FreeSuggestionsModal } from './FreeSuggestionsModal';
 import { StopDetailSheet }      from './StopDetailSheet';
+import { StopNoteEditor }       from './StopNoteEditor';
 import { ItineraryList }        from './ItineraryList';
+import { ItineraryRecap }       from './ItineraryRecap';
+import { hereNow, linkedIndex, linkedFor, recordable, recordDays, startedCheck, type LinkedItem } from './record';
 import { useUrlParam }          from '@/lib/hooks/useUrlParam';
+import { showsNow }             from '@/lib/trips/onTrip';
 import { useFlights }           from '@/lib/flights/useFlights';
 import { stopNote }             from '@/lib/flights/status';
 import { haversineKm }          from '@/lib/geo/geocode';
 import type { TravelOrigin }    from '@/lib/navigation/useTravelTimes';
 
-const VIEW_MODES = ['timeline', 'list'] as const;
+const VIEW_MODES = ['timeline', 'list', 'recap'] as const;
 const MIN_ZOOM   = 1;
 const MAX_ZOOM   = 3;
 const clampZoom  = (z: number) => Math.round(Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z)) * 20) / 20;
@@ -76,9 +81,10 @@ const ymdOf    = (v: string) => String(v).split('T')[0];
 const dayLabel = (date: string, opts: Intl.DateTimeFormatOptions) =>
   new Date(`${ymdOf(date)}T12:00:00`).toLocaleDateString('en-IE', opts);
 
-// Minutes from a day's midnight to now — past 24:00 in the small hours after it
-const minutesSince = (date: string, now = new Date()) =>
-  daysBetween(ymdOf(date), localYmd(now)) * DAY_MINS + now.getHours() * 60 + now.getMinutes();
+// Minutes from a day's midnight to now — past 24:00 in the small hours after it.
+// `here` is now on the itinerary's clock (record.ts hereNow), not the phone's.
+const minutesSince = (date: string, here: { ymd: string; mins: number }) =>
+  daysBetween(ymdOf(date), here.ymd) * DAY_MINS + here.mins;
 
 // When a page's last stop finishes, in its minutes
 const pageEnd = (stops: Stop[]) =>
@@ -95,6 +101,10 @@ interface Props {
   tripId:           string;
   startDate:        string;
   endDate:          string;
+  /** For when stops happen in the right zone (record.ts startedCheck) */
+  trip?:            any;
+  homeZone?:        string;
+  homeCountry?:     string | null;
   fabTrigger?:      { action: string; seq: number } | null;
   onSwitchToDiscover?:  () => void;
   onSwitchToLogistics?: () => void;
@@ -111,7 +121,7 @@ interface Accom {
   checkOut:     string;   // YYYY-MM-DD
 }
 
-export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, onSwitchToLogistics }: Props) {
+export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabTrigger, onSwitchToDiscover, onSwitchToLogistics }: Props) {
   const theme    = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
 
@@ -123,7 +133,8 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
   // ── State ────────────────────────────────────────────────────────────────────
   const [days,           setDays]           = useState<Day[]>([]);
   const [loading,        setLoading]        = useState(true);
-  const [filesByStop,    setFilesByStop]    = useState<Map<string, Array<{ _id: string; name: string; mimeType?: string; gcsUrl?: string }>>>(new Map());
+  // Resources linked to stops — files, and the notes, contacts and to-dos shown with them
+  const [linked,         setLinked]         = useState<Map<string, LinkedItem[]>>(new Map());
   const [activeDayIdx,   setActiveDayIdx]   = useState(0);
   const [calculating,    setCalculating]    = useState(false);
   const [quickAddAnchor, setQuickAddAnchor] = useState<HTMLElement | null>(null);
@@ -149,6 +160,12 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
   const [typeFilter,  setTypeFilter]  = useState<string[]>([]);
   const [showSkipped, setShowSkipped] = useState(false);
   const [sheetKey,    setSheetKey]    = useState<string | null>(null);
+  const [noteKey,     setNoteKey]     = useState<string | null>(null);
+  // Every stop delete asks first and says what goes with it — resolves once
+  // deleted (true) or cancelled / failed (false), so the drawer knows to close
+  const [pendingDelete, setPendingDelete] = useState<{ stop: Stop; resolve: (deleted: boolean) => void } | null>(null);
+  const [deletingStop,  setDeletingStop]  = useState(false);
+  const askDelete = (stop: Stop) => new Promise<boolean>(resolve => setPendingDelete({ stop, resolve }));
   const zoomRef  = useRef(1);
   const pinchRef = useRef<HTMLDivElement>(null);
   zoomRef.current = zoom;
@@ -167,6 +184,16 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
   // When each stop's notification goes out — same planner the sender uses.
   const [transport,     setTransport]     = useState<any[]>([]);
   const flights = useFlights(tripId);
+  // Whether a stop has begun, read where you'll be then — after that, went or didn't go
+  const startedAt = useMemo(
+    () => startedCheck(trip, transport, { zone: homeZone, countryCode: homeCountry }),
+    [trip, transport, homeZone, homeCountry],
+  );
+  // Now, on the itinerary's clock — for the now line, today's page and "Now"
+  const here = useMemo(
+    () => hereNow(trip, transport, { zone: homeZone, countryCode: homeCountry }),
+    [trip, transport, homeZone, homeCountry],
+  );
   const [reminders,     setReminders]     = useState<Array<{ local: string; sent: boolean; ref?: { stopId?: string; collection?: string; index?: number; phase?: string } }>>([]);
   // Whether anything will be sent at all, and which bookings had theirs switched off
   const [reminderState, setReminderState] = useState<{
@@ -191,16 +218,19 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
       const byNum = days.findIndex(d => String(d.dayNumber) === dayParam);
       if (byNum !== -1) { setActiveDayIdx(byNum); return; }
     }
-    // In the small hours while last night's programme is still on, that's the day
-    const now       = new Date();
-    const today     = localYmd(now);
-    const lastNight = days.findIndex(d => daysBetween(ymdOf(d.date), today) === 1);
-    const idx = lastNight !== -1 && minutesSince(days[lastNight].date, now) < pageEnd(pages[lastNight]?.stops ?? [])
-      ? lastNight
-      : days.findIndex(d => ymdOf(d.date) === today);
+    const idx = nowPageIdx(here());
     // Write it to the URL too, so the address bar always names the day on screen
     selectDay(idx !== -1 ? idx : 0);
   }, [days, pages, searchParams]);
+
+  // The page now is on: today's — or, in the small hours while last night's
+  // programme is still on, last night's. -1 when now isn't a day of the trip.
+  const nowPageIdx = (h: { ymd: string; mins: number }) => {
+    const lastNight = days.findIndex(d => daysBetween(ymdOf(d.date), h.ymd) === 1);
+    return lastNight !== -1 && minutesSince(days[lastNight].date, h) < pageEnd(pages[lastNight]?.stops ?? [])
+      ? lastNight
+      : days.findIndex(d => ymdOf(d.date) === h.ymd);
+  };
 
   // ── Keep the active day in the URL so refresh / back / deep-links land right ──
   const selectDay = (i: number) => {
@@ -242,6 +272,43 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
     }, 250);
     setTimeout(() => setHighlightStop(cur => (cur === stopId ? null : cur)), 4000);
   }, [days, pages, searchParams, pathname]);
+
+  // ── "Now" (the trip's tab bar): the page now's on, the now line, and what you
+  // should be at — on now, else next up — rung like a notification link ─────────
+  const nowParam = searchParams.get('now');
+  useEffect(() => {
+    if (!nowParam || days.length === 0) return;
+    const h   = here();
+    const idx = nowPageIdx(h);
+    const params = new URLSearchParams(window.location.search);
+    params.delete('now');
+    if (idx !== -1 && days[idx].dayNumber != null) params.set('day', String(days[idx].dayNumber));
+    window.history.replaceState(null, '', `${pathname}?${params.toString()}`);
+    if (idx === -1) return;
+
+    deepLinkedRef.current = false;
+    setActiveDayIdx(idx);
+    setSheetKey(null);
+    setTypeFilter([]);
+    const mins  = minutesSince(days[idx].date, h);
+    const timed = (pages[idx]?.stops ?? [])
+      .filter(s => !s.skipped && s._id)
+      .map(s => ({ s, start: stopStartMinutes(s) }))
+      .filter((x): x is { s: Stop; start: number } => x.start !== null)
+      .sort((a, b) => a.start - b.start);
+    const target = (timed.find(x => x.start <= mins && mins < x.start + Math.max(stopDuration(x.s), 1))
+      ?? timed.find(x => x.start > mins))?.s._id ?? null;
+    if (target) {
+      setHighlightStop(target);
+      setTimeout(() => setHighlightStop(cur => (cur === target ? null : cur)), 4000);
+    }
+    // The now line where there is one (the timeline), else the stop itself
+    setTimeout(() => {
+      const el = nowLineRef.current ?? (target ? document.querySelector(`[data-stop-id="${target}"]`) : null);
+      el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 250);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nowParam, days.length]);
 
   // ── Reminder times for the bells — refreshed shortly after any change ────────
   const loadReminders = useCallback(() => {
@@ -468,29 +535,11 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
     loadItinerary();
   }, [tripId]);
 
-  // ── Load files linked to itinerary stops ─────────────────────────────────────
+  // ── Load resources linked to itinerary stops ─────────────────────────────────
   useEffect(() => {
     fetch(`/api/trips/${tripId}/files`)
       .then(r => r.json())
-      .then(data => {
-        const files: any[] = data.files ?? [];
-        const map = new Map<string, Array<{ _id: string; name: string; mimeType?: string; gcsUrl?: string }>>();
-        for (const f of files) {
-          if (f.resourceType === 'file' && f.linkedTo?.entryId && f.gcsUrl) {
-            const entry = { _id: f._id, name: f.name, mimeType: f.mimeType, gcsUrl: f.gcsUrl };
-            // Index by entryId (itinerary stop _id)
-            if (!map.has(f.linkedTo.entryId)) map.set(f.linkedTo.entryId, []);
-            map.get(f.linkedTo.entryId)!.push(entry);
-            // Also index by collection:entryId for logistics-sourced stops
-            if (f.linkedTo.collection) {
-              const logKey = `${f.linkedTo.collection}:${f.linkedTo.entryId}`;
-              if (!map.has(logKey)) map.set(logKey, []);
-              map.get(logKey)!.push(entry);
-            }
-          }
-        }
-        setFilesByStop(map);
-      })
+      .then(data => setLinked(linkedIndex(data.files ?? [])))
       .catch(() => {});
   }, [tripId]);
 
@@ -750,6 +799,38 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
     }
   };
 
+  // Your note on a stop. Resolves false when it couldn't be saved or queued, so the
+  // editor stays open with what was typed.
+  const saveNote = async (stop: Stop, text: string): Promise<boolean> => {
+    if (!stop._id) { reportSaveFailure(`your note on ${quoted(stop)}`); return false; }
+    const prevDays    = days;
+    const myNotes     = text.trim() ? text : undefined;
+    const updatedDays = days.map(d => ({
+      ...d,
+      stops: d.stops.map(s => (s._id === stop._id ? { ...s, myNotes } : s)),
+    }));
+    setDays(updatedDays);
+    try {
+      await saveTripCache(tripId, { ...(await getTripCache(tripId)), itinerary: updatedDays });
+
+      const res = await sendOrQueue(
+        { type: 'RESCHEDULE_STOP', tripId, payload: { stopId: stop._id, myNotes: text } },
+        () => fetch(`/api/trips/${tripId}/itinerary/stops/${stop._id}`, {
+          method:  'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ myNotes: text }),
+        }),
+        savedDays(updatedDays),
+      );
+      if (res) setDays(await daysFrom(res));
+      return true;
+    } catch (err) {
+      await undoDays(prevDays);
+      reportSaveFailure(`your note on ${quoted(stop)}`, err);
+      return false;
+    }
+  };
+
   const rescheduleStop = async (stopId: string, newStartMin: number) => {
     const prevDays = days;
     const target   = activeStops.find(s => s._id === stopId);
@@ -887,14 +968,14 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
   // Zoom widens the grid only when there's a clash to pull apart
   const timelineWidthPct = 100 * (maxCols > 1 ? zoom : 1);
 
-  const filesFor = (stop: Stop) =>
-    (stop._id && filesByStop.get(stop._id)?.length)
-      ? filesByStop.get(stop._id)!
-      : (stop as any).logisticsRef
-      ? filesByStop.get(`${(stop as any).logisticsRef.collection}:${String((stop as any).logisticsRef.index)}`) ?? []
-      : [];
+  const filesFor = (stop: Stop) => linkedFor(linked, stop).filter(f => f.resourceType === 'file');
+
+  // Started, by the date the stop is stored on (an after-midnight one is on the next)
+  const isStarted = (stop: Stop) =>
+    startedAt(stop.afterMidnight && nextDay ? nextDay.date : activeDay.date, stop);
 
   const sheetStop = sheetKey ? activeStops.find(s => stopKey(s) === sheetKey) ?? null : null;
+  const noteStop  = noteKey  ? activeStops.find(s => stopKey(s) === noteKey)  ?? null : null;
   const ALL_DAY_COLLAPSED = 6;
   const shownAllDay      = showAllDay ? allDayStops : allDayStops.slice(0, ALL_DAY_COLLAPSED);
 
@@ -948,7 +1029,7 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
   };
 
   // Now, on this page's clock — today, or past 24:00 on last night's page
-  const nowMins = activeDay ? minutesSince(activeDay.date) : null;
+  const nowMins = activeDay ? minutesSince(activeDay.date, here()) : null;
 
   // The early-hours choice in the drawer: what's pre-selected for a time
   const nightDates = activeDay && nextDay
@@ -1278,11 +1359,12 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.25 }}>
           <ToggleButtonGroup
             size="small" exclusive value={viewMode}
-            onChange={(_, v) => { if (v) { setViewMode(v); if (v === 'list') setEditMode(false); } }}
+            onChange={(_, v) => { if (v) { setViewMode(v); if (v !== 'timeline') setEditMode(false); } }}
             sx={{ flexShrink: 0, '& .MuiToggleButton-root': { px: 1.25, gap: 0.5, fontFamily: D.body, fontWeight: 700, fontSize: '0.72rem', minHeight: 36 } }}
           >
             <ToggleButton value="timeline" aria-label="Timeline"><ViewDayIcon sx={{ fontSize: 18 }} />{!isMobile && 'Timeline'}</ToggleButton>
             <ToggleButton value="list" aria-label="List"><ViewAgendaIcon sx={{ fontSize: 18 }} />{!isMobile && 'List'}</ToggleButton>
+            <ToggleButton value="recap" aria-label="Recap"><AutoStoriesIcon sx={{ fontSize: 18 }} />{!isMobile && 'Recap'}</ToggleButton>
           </ToggleButtonGroup>
 
           {/* Type filter — one scrolling line */}
@@ -1290,7 +1372,7 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
             flex: 1, minWidth: 0, display: 'flex', gap: 0.5, overflowX: 'auto',
             scrollbarWidth: 'none', '&::-webkit-scrollbar': { display: 'none' },
           }}>
-            {typesToday.length > 1 && (
+            {typesToday.length > 1 && viewMode !== 'recap' && (
               <Chip
                 label="All"
                 onClick={() => setTypeFilter([])}
@@ -1303,7 +1385,7 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
                 }}
               />
             )}
-            {typesToday.length > 1 && typesToday.map(t => {
+            {typesToday.length > 1 && viewMode !== 'recap' && typesToday.map(t => {
               const c  = STOP_CONFIG[t];
               const on = typeFilter.includes(t);
               return (
@@ -1359,8 +1441,20 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
         </Box>
       )}
 
+      {/* ── Recap — the day as it happened ── */}
+      {activeDay && viewMode === 'recap' && (
+        <ItineraryRecap
+          day={recordDays(days, startedAt, s => linkedFor(linked, s))[activeDayIdx]}
+          upcoming={activeStops.filter(s => !s.skipped && recordable(s) && !isStarted(s)).length}
+          recapHref={`/trips/${tripId}/recap`}
+          onOpen={s => setSheetKey(stopKey(s))}
+          onEditNote={s => setNoteKey(stopKey(s))}
+          onSkip={skipStop}
+        />
+      )}
+
       {/* ── Timeline / list ── */}
-      {activeDay && (
+      {activeDay && viewMode !== 'recap' && (
         <Paper sx={{
           backgroundColor: '#ffffff',
           overflow: 'hidden',
@@ -1462,6 +1556,7 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
               onSkip={skipStop}
               live={liveFor}
               afterMidnightLabel={nextDay ? dayLabel(nextDay.date, { weekday: 'short', day: 'numeric' }) : undefined}
+              isStarted={isStarted}
             />
           ) : (
           <DndContext
@@ -1556,7 +1651,7 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
                     <Box key={stop._id ?? i}>
                       <StopBlock
                         stop={stop}
-                        onDelete={stop._id ? () => deleteStop(stop._id!) : undefined}
+                        onDelete={stop._id ? () => askDelete(stop) : undefined}
                         onClick={() => handleStopClick(stop)}
                         onResize={(newStartMin, newDuration) => resizeStop(stop, newStartMin, newDuration)}
                         pxPerMin={pxPerMin}
@@ -1619,6 +1714,8 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
         concurrent={sheetStop ? concurrentWith(sheetStop, activeStops) : []}
         isMobile={isMobile}
         linkedFiles={sheetStop ? filesFor(sheetStop) : []}
+        resources={sheetStop ? linkedFor(linked, sheetStop) : []}
+        isStarted={isStarted}
         reminder={sheetStop ? reminderFor(sheetStop) : null}
         reminderSetting={sheetStop ? reminderSettingFor(sheetStop) : null}
         reminderNotice={sheetStop ? reminderNoticeFor(sheetStop) : null}
@@ -1633,13 +1730,82 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
           const t = stopStartMinutes(s);
           openDrawer(t !== null ? formatTime(t) : '09:00', s.type, s);
         }}
-        onDelete={async s => {
-          // Closes once deleted or queued; a failed delete puts the stop (and this sheet) back
-          if (s._id && await deleteStop(s._id)) setSheetKey(k => (k === s._id ? null : k));
-        }}
+        onEditNote={s => setNoteKey(stopKey(s))}
         onOpenLogistics={() => { setSheetKey(null); onSwitchToLogistics?.(); }}
         onFilterType={t => { setSheetKey(null); setTypeFilter([t]); }}
       />
+
+      {/* ── Your note on a stop — mounted per edit, over the sheet when opened from it ── */}
+      {noteStop && (
+        <StopNoteEditor
+          open
+          title={noteStop.name?.trim() || 'Unnamed stop'}
+          initial={noteStop.myNotes ?? ''}
+          started={isStarted(noteStop)}
+          isMobile={isMobile}
+          onSave={text => saveNote(noteStop, text)}
+          // Done goes back to the itinerary — the sheet it was opened from closes too
+          onClose={() => { setNoteKey(null); setSheetKey(null); }}
+        />
+      )}
+
+      {/* ── Delete a stop? — with your note on it, if there is one ── */}
+      {(() => {
+        const target = pendingDelete?.stop;
+        const note   = target?.myNotes?.trim();
+        const kept   = target ? linkedFor(linked, target).length : 0;
+        const close  = (deleted: boolean) => { pendingDelete?.resolve(deleted); setPendingDelete(null); };
+        return (
+          <Dialog open={!!pendingDelete} onClose={() => !deletingStop && close(false)} maxWidth="xs" fullWidth>
+            <DialogTitle sx={{ fontFamily: D.display, fontSize: '1.1rem', color: D.navy }}>
+              Delete {quoted(target)}?
+            </DialogTitle>
+            <DialogContent sx={{ display: 'flex', flexDirection: 'column', gap: 1.25 }}>
+              {note && (
+                <Box>
+                  <Typography sx={{ fontFamily: D.body, fontSize: '0.88rem', fontWeight: 700, color: D.terra }}>
+                    Your note on it is deleted too:
+                  </Typography>
+                  <Typography sx={{
+                    fontFamily: D.body, fontSize: '0.85rem', color: D.navy, whiteSpace: 'pre-wrap', mt: 0.5,
+                    pl: 1.25, borderLeft: `3px solid ${alpha(D.terra, 0.4)}`,
+                    display: '-webkit-box', WebkitBoxOrient: 'vertical', WebkitLineClamp: 5, overflow: 'hidden',
+                  }}>
+                    {note}
+                  </Typography>
+                </Box>
+              )}
+              {kept > 0 && (
+                <Typography sx={{ fontFamily: D.body, fontSize: '0.85rem', color: D.navy }}>
+                  {kept === 1 ? 'The item' : `The ${kept} items`} linked to it from Resources stay there.
+                </Typography>
+              )}
+              <Typography sx={{ fontFamily: D.body, fontSize: '0.85rem', color: D.muted }}>
+                This can’t be undone.
+              </Typography>
+            </DialogContent>
+            <DialogActions sx={{ px: 3, pb: 2.5, gap: 1 }}>
+              <Button onClick={() => close(false)} disabled={deletingStop} sx={{ fontFamily: D.body, fontWeight: 700, minHeight: 44 }}>
+                Cancel
+              </Button>
+              <Button
+                variant="contained" color="error" disabled={deletingStop}
+                onClick={async () => {
+                  if (!target?._id) { close(false); return; }
+                  setDeletingStop(true);
+                  const deleted = await deleteStop(target._id);
+                  setDeletingStop(false);
+                  if (deleted) setSheetKey(k => (k === stopKey(target) ? null : k));
+                  close(deleted);
+                }}
+                sx={{ fontFamily: D.body, fontWeight: 700, minHeight: 44, boxShadow: 'none' }}
+              >
+                {deletingStop ? 'Deleting…' : 'Delete'}
+              </Button>
+            </DialogActions>
+          </Dialog>
+        );
+      })()}
 
       {/* ── Filter on → a floating way back to everything, wherever you've scrolled ── */}
       {typeFilter.length > 0 && (
@@ -1650,7 +1816,8 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
           sx={{
             position: 'fixed', left: '50%', transform: 'translateX(-50%)',
             bottom: 'calc(env(safe-area-inset-bottom, 0px) + 24px)', zIndex: 1100,
-            borderRadius: 99, px: 2.25, minHeight: 48, maxWidth: 'calc(100vw - 120px)',
+            // Narrower while the trip page's Now pill sits bottom-left
+            borderRadius: 99, px: 2.25, minHeight: 48, maxWidth: showsNow(trip ?? {}) ? 'calc(100vw - 260px)' : 'calc(100vw - 120px)',
             backgroundColor: D.navy, color: '#fff', boxShadow: '0 6px 20px rgba(0,0,0,0.25)',
             fontFamily: D.body, fontWeight: 700, textTransform: 'none', fontSize: '0.88rem',
             '&:hover': { backgroundColor: D.navy },
@@ -1680,7 +1847,7 @@ export default function ItineraryTab({ tripId, fabTrigger, onSwitchToDiscover, o
         onUpdate={updateStop}
         onDelete={
           drawer.editStop?._id && drawer.editStop.source !== 'logistics'
-            ? () => deleteStop(drawer.editStop!._id!)
+            ? () => askDelete(drawer.editStop!)
             : undefined
         }
         defaultTime={drawer.time}

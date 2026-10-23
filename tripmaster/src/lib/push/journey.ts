@@ -6,7 +6,7 @@
 import { DateTime } from 'luxon';
 import { airportByIata } from '@/lib/data/airports';
 import {
-  airportCodeIn, airportCountryCode, placeCity, placeZone, tripZones, wallClock, ymd,
+  airportCodeIn, airportCountryCode, atTime, placeCity, placeZone, tripZones, wallClock, ymd,
 } from '@/lib/push/timezones';
 
 export const JOURNEY_TYPES = new Set(['flight', 'train', 'bus', 'ferry']);
@@ -163,6 +163,31 @@ export function whereAt(trip: TripLike, legs: Leg[], homeZone: string): (ms: num
     if (last.arr && ms < last.arr.toMillis()) return last.dep.zoneName ?? homeZone;
     if (last.arrivesHome) return homeZone;
     return last.arr?.zoneName ?? zoneFor(DateTime.fromMillis(ms).toISODate());
+  };
+}
+
+/** A stop's stored wall-clock time, read in `zone`. */
+export function stopTime(dayDate: string, stop: any, zone: string): DateTime | null {
+  if (stop.scheduledStart) {
+    return wallClock(String(stop.scheduledStart).includes('T') ? stop.scheduledStart : `${ymd(dayDate)}T${stop.scheduledStart}`, zone);
+  }
+  return stop.time ? atTime(dayDate, stop.time, zone) : null;
+}
+
+/**
+ * When an itinerary stop happens. Its time is local to wherever you are then — on
+ * a travel day that can be home rather than the trip's zone. Read it in the trip's
+ * zone, see where you'd be at that moment, and re-read it there if that's
+ * somewhere else. Shared by the planner and the itinerary, so both agree.
+ */
+export function stopClock(trip: TripLike, legs: Leg[], homeZone: string): (dayDate: string, stop: any) => DateTime | null {
+  const zoneFor = tripZones(trip as any);
+  const zoneAt  = whereAt(trip, legs, homeZone);
+  return (dayDate, stop) => {
+    const guess = stopTime(dayDate, stop, zoneFor(ymd(dayDate)));
+    if (!guess) return null;
+    const zone = zoneAt(guess.toMillis());
+    return zone === guess.zoneName ? guess : stopTime(dayDate, stop, zone);
   };
 }
 

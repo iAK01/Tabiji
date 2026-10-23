@@ -63,6 +63,7 @@ interface Stop {
   time?: string;
   duration: number;
   notes?: string;
+  myNotes?: string;
   skipped?: boolean;
   logisticsRef?: { collection: string; index: number };
 }
@@ -241,6 +242,17 @@ function NowCard({ pick, nowMins, linkedFiles, onOpenFile, onDismiss, live }: {
           {stop.notes && (
             <Typography sx={{ fontFamily: D.body, fontSize: '0.78rem', color: D.muted, mt: 0.5, fontStyle: 'italic', lineHeight: 1.45 }}>
               {stop.notes}
+            </Typography>
+          )}
+
+          {/* Your note — what you wanted to bring up, in front of you as it starts */}
+          {stop.myNotes?.trim() && (
+            <Typography sx={{
+              fontFamily: D.body, fontSize: '0.88rem', color: D.navy, mt: 1, lineHeight: 1.5, whiteSpace: 'pre-wrap',
+              pl: 1.25, borderLeft: `3px solid ${alpha(D.navy, 0.15)}`,
+              display: '-webkit-box', WebkitBoxOrient: 'vertical', WebkitLineClamp: 6, overflow: 'hidden',
+            }}>
+              {stop.myNotes.trim()}
             </Typography>
           )}
 

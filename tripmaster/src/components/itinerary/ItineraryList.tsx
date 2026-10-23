@@ -5,10 +5,11 @@ import { alpha }       from '@mui/material/styles';
 import CloseIcon       from '@mui/icons-material/Close';
 import UndoIcon        from '@mui/icons-material/Undo';
 import LockIcon        from '@mui/icons-material/Lock';
+import EditNoteIcon    from '@mui/icons-material/EditNote';
 import { STOP_CONFIG, D } from './Itinerary.config';
 import type { Stop }   from './Itinerary.config';
 import {
-  stopStartMinutes, stopDuration, formatTime, fmtDuration, overlapClusters, canSkip,
+  stopStartMinutes, stopDuration, formatTime, fmtDuration, overlapClusters, canSkip, skipLabel,
 } from './Itinerary.helpers';
 import { TONE } from '@/components/flights/FlightLive';
 import type { Tone } from '@/lib/flights/status';
@@ -21,11 +22,13 @@ interface Props {
   live?:  (stop: Stop) => { text: string; tone: Tone } | null;
   /** The next date, heading the stops from after midnight: "Fri 23" */
   afterMidnightLabel?: string;
+  /** Started stops are went / didn't go rather than going / not going */
+  isStarted?: (stop: Stop) => boolean;
 }
 
 // The phone-first reading of a day: one full-width row per stop, full names,
 // clashes grouped under a bracket, a big ✕ to drop what you won't go to.
-export function ItineraryList({ stops, onOpen, onSkip, live, afterMidnightLabel }: Props) {
+export function ItineraryList({ stops, onOpen, onSkip, live, afterMidnightLabel, isStarted }: Props) {
   const clusters = overlapClusters(stops);
   // The night runs on past midnight: one heading before the first stop from the next date
   const firstLate = clusters.findIndex(g => g.some(s => s.afterMidnight));
@@ -110,6 +113,7 @@ export function ItineraryList({ stops, onOpen, onSkip, live, afterMidnightLabel 
                         }}>
                           {stop.name?.trim() || 'Unnamed stop'}
                           {isFact && <LockIcon sx={{ fontSize: 11, color: alpha(D.navy, 0.35), ml: 0.5, verticalAlign: 'middle' }} />}
+                          {stop.myNotes?.trim() && <EditNoteIcon aria-label="Has notes" sx={{ fontSize: 15, color: alpha(D.navy, 0.5), ml: 0.5, verticalAlign: 'middle' }} />}
                         </Typography>
                         {sub && (
                           <Typography sx={{
@@ -129,8 +133,8 @@ export function ItineraryList({ stops, onOpen, onSkip, live, afterMidnightLabel 
                     {canSkip(stop) && (
                       <IconButton
                         onClick={() => onSkip(stop, !stop.skipped)}
-                        aria-label={stop.skipped ? 'Going after all' : 'Not going'}
-                        title={stop.skipped ? 'Going after all' : 'Not going'}
+                        aria-label={skipLabel(stop, !!isStarted?.(stop))}
+                        title={skipLabel(stop, !!isStarted?.(stop))}
                         sx={{ alignSelf: 'center', width: 44, height: 44, mr: 0.5, color: alpha(D.navy, 0.35), flexShrink: 0 }}
                       >
                         {stop.skipped ? <UndoIcon fontSize="small" /> : <CloseIcon fontSize="small" />}
