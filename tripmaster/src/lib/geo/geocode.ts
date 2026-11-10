@@ -63,7 +63,7 @@ const GENERIC = new Set([
   'workshop', 'panel', 'event', 'opening', 'closing', 'welcome', 'party', 'concert', 'showcase',
 ]);
 
-function words(s: string): string[] {
+export function words(s: string): string[] {
   return s.normalize('NFD').replace(/\p{M}/gu, '').replace(/ß/g, 'ss').toLowerCase()
     .split(/[^\p{L}\p{N}]+/u)
     .filter(w => w.length > 1 && !/^\d+$/.test(w) && !STOPWORDS.has(w));

@@ -5,7 +5,7 @@
 // All pure functions over the stored WeatherResult, so changing a threshold or a
 // phrase applies to cached data without a refetch. Fetching lives in weather.ts.
 
-export const WEATHER_VERSION = 5;
+export const WEATHER_VERSION = 6;   // 6: home keeps first/last-day hours + its point
 
 export type DaySource = 'forecast' | 'historical';
 
@@ -90,7 +90,9 @@ export interface WeatherResult {
   seaTemp?:         number | null;
   home?: {
     city:         string;
-    days:         DayWeather[];   // same dates, same forecast/typical split as the trip
+    lat?:         number;         // v6 — the point home's weather is for
+    lon?:         number;
+    days:         DayWeather[];   // same dates, same forecast/typical split as the trip; hours on the first and last only
     seaTemp:      number | null;
     monthlyHighs: number[] | null; // Jan–Dec average daily high
   };

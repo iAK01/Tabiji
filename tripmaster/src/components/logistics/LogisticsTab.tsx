@@ -8,7 +8,7 @@
 // because it closes over transport state and setter. Rendering it as <TransportFields />
 // would cause React to treat it as a new component type each render and remount all fields.
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import {
   Box, Typography, Button, Paper, Tabs, Tab, TextField,
   Select, MenuItem, FormControl, InputLabel, Chip,
@@ -47,6 +47,7 @@ import VenueCard          from './VenueCard';
 import TripDateTimePicker from '@/components/ui/TripDateTimePicker';
 import GettingThereStrip  from './GettingThereStrip';
 import { useUrlParam } from '@/lib/hooks/useUrlParam';
+import { tripAreas } from '@/lib/geo/tripAreas';
 import type { TravelOrigin } from '@/lib/navigation/useTravelTimes';
 
 const LOGISTICS_SECTIONS = ['transport', 'accommodation', 'venues', 'documents'] as const;
@@ -67,6 +68,7 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
   const theme   = useTheme();
   const mobile  = useMediaQuery(theme.breakpoints.down('sm'));
   const flights = useFlights(tripId);
+  const areas   = useMemo(() => tripAreas(trip), [trip]);
 
   // Section lives in the URL (?section=accommodation) so links and refresh land on it
   const [sectionSlug, setSectionSlug] = useUrlParam('section', LOGISTICS_SECTIONS, 'transport');
@@ -784,20 +786,22 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
           </FormControl>
           <AddressSearch
             label="From (station)" value={transport.departureLocation}
+            coordinates={transport.departureCoordinates} tripId={tripId} areas={areas}
             placeholder="Dublin Heuston"
-            onChange={(r: ResolvedAddress | null) => setTransport(p => ({
+            onChange={(r: ResolvedAddress) => setTransport(p => ({
               ...p,
-              departureLocation:    r?.address     ?? '',
-              departureCoordinates: r?.coordinates ?? null,
+              departureLocation:    r.address,
+              departureCoordinates: r.coordinates,
             }))}
           />
           <AddressSearch
             label="To (station)" value={transport.arrivalLocation}
+            coordinates={transport.arrivalCoordinates} tripId={tripId} areas={areas}
             placeholder="Belfast Great Victoria St"
-            onChange={(r: ResolvedAddress | null) => setTransport(p => ({
+            onChange={(r: ResolvedAddress) => setTransport(p => ({
               ...p,
-              arrivalLocation:    r?.address     ?? '',
-              arrivalCoordinates: r?.coordinates ?? null,
+              arrivalLocation:    r.address,
+              arrivalCoordinates: r.coordinates,
             }))}
           />
           <TextField label="Seat / coach" fullWidth placeholder="Coach B, Seat 42"
@@ -809,18 +813,20 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
             value={transport.details.operator} onChange={e => setDetail('operator', e.target.value)} />
           <AddressSearch
             label="From (stop / station)" value={transport.departureLocation}
-            onChange={(r: ResolvedAddress | null) => setTransport(p => ({
+            coordinates={transport.departureCoordinates} tripId={tripId} areas={areas}
+            onChange={(r: ResolvedAddress) => setTransport(p => ({
               ...p,
-              departureLocation:    r?.address     ?? '',
-              departureCoordinates: r?.coordinates ?? null,
+              departureLocation:    r.address,
+              departureCoordinates: r.coordinates,
             }))}
           />
           <AddressSearch
             label="To (stop / station)" value={transport.arrivalLocation}
-            onChange={(r: ResolvedAddress | null) => setTransport(p => ({
+            coordinates={transport.arrivalCoordinates} tripId={tripId} areas={areas}
+            onChange={(r: ResolvedAddress) => setTransport(p => ({
               ...p,
-              arrivalLocation:    r?.address     ?? '',
-              arrivalCoordinates: r?.coordinates ?? null,
+              arrivalLocation:    r.address,
+              arrivalCoordinates: r.coordinates,
             }))}
           />
           <TextField label="Seat" fullWidth value={transport.details.seat}
@@ -832,20 +838,22 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
             value={transport.details.operator} onChange={e => setDetail('operator', e.target.value)} />
           <AddressSearch
             label="From (port)" value={transport.departureLocation}
+            coordinates={transport.departureCoordinates} tripId={tripId} areas={areas}
             placeholder="Dublin Port"
-            onChange={(r: ResolvedAddress | null) => setTransport(p => ({
+            onChange={(r: ResolvedAddress) => setTransport(p => ({
               ...p,
-              departureLocation:    r?.address     ?? '',
-              departureCoordinates: r?.coordinates ?? null,
+              departureLocation:    r.address,
+              departureCoordinates: r.coordinates,
             }))}
           />
           <AddressSearch
             label="To (port)" value={transport.arrivalLocation}
+            coordinates={transport.arrivalCoordinates} tripId={tripId} areas={areas}
             placeholder="Holyhead"
-            onChange={(r: ResolvedAddress | null) => setTransport(p => ({
+            onChange={(r: ResolvedAddress) => setTransport(p => ({
               ...p,
-              arrivalLocation:    r?.address     ?? '',
-              arrivalCoordinates: r?.coordinates ?? null,
+              arrivalLocation:    r.address,
+              arrivalCoordinates: r.coordinates,
             }))}
           />
           <FormControl fullWidth>
@@ -870,20 +878,22 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
           )}
           <AddressSearch
             label="From" value={transport.departureLocation}
+            coordinates={transport.departureCoordinates} tripId={tripId} areas={areas}
             placeholder="Your departure address"
-            onChange={(r: ResolvedAddress | null) => setTransport(p => ({
+            onChange={(r: ResolvedAddress) => setTransport(p => ({
               ...p,
-              departureLocation:    r?.address     ?? '',
-              departureCoordinates: r?.coordinates ?? null,
+              departureLocation:    r.address,
+              departureCoordinates: r.coordinates,
             }))}
           />
           <AddressSearch
             label="To" value={transport.arrivalLocation}
+            coordinates={transport.arrivalCoordinates} tripId={tripId} areas={areas}
             placeholder="Your destination address"
-            onChange={(r: ResolvedAddress | null) => setTransport(p => ({
+            onChange={(r: ResolvedAddress) => setTransport(p => ({
               ...p,
-              arrivalLocation:    r?.address     ?? '',
-              arrivalCoordinates: r?.coordinates ?? null,
+              arrivalLocation:    r.address,
+              arrivalCoordinates: r.coordinates,
             }))}
           />
           <TextField label="Vehicle (optional)" fullWidth placeholder="Tesla Model 3"
@@ -896,27 +906,29 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
             onChange={e => setDetail('rentalCompany', e.target.value)} />
           <AddressSearch
             label="Pickup location" value={transport.details.pickupLocation}
+            coordinates={transport.details.pickupCoordinates} tripId={tripId} areas={areas}
             placeholder="OTP Airport Terminal 1"
-            onChange={(r: ResolvedAddress | null) => {
-              setDetail('pickupLocation',    r?.address     ?? '');
-              setDetail('pickupCoordinates', r?.coordinates ?? null);
+            onChange={(r: ResolvedAddress) => {
+              setDetail('pickupLocation',    r.address);
+              setDetail('pickupCoordinates', r.coordinates);
               setTransport(p => ({
                 ...p,
-                departureLocation:    r?.address     ?? '',
-                departureCoordinates: r?.coordinates ?? null,
+                departureLocation:    r.address,
+                departureCoordinates: r.coordinates,
               }));
             }}
           />
           <AddressSearch
             label="Drop-off location" value={transport.details.dropoffLocation}
+            coordinates={transport.details.dropoffCoordinates} tripId={tripId} areas={areas}
             placeholder="Same / City centre"
-            onChange={(r: ResolvedAddress | null) => {
-              setDetail('dropoffLocation',    r?.address     ?? '');
-              setDetail('dropoffCoordinates', r?.coordinates ?? null);
+            onChange={(r: ResolvedAddress) => {
+              setDetail('dropoffLocation',    r.address);
+              setDetail('dropoffCoordinates', r.coordinates);
               setTransport(p => ({
                 ...p,
-                arrivalLocation:    r?.address     ?? '',
-                arrivalCoordinates: r?.coordinates ?? null,
+                arrivalLocation:    r.address,
+                arrivalCoordinates: r.coordinates,
               }));
             }}
           />
@@ -927,20 +939,22 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
         {type === 'taxi' && (<>
           <AddressSearch
             label="From" value={transport.departureLocation}
+            coordinates={transport.departureCoordinates} tripId={tripId} areas={areas}
             placeholder="OTP Airport"
-            onChange={(r: ResolvedAddress | null) => setTransport(p => ({
+            onChange={(r: ResolvedAddress) => setTransport(p => ({
               ...p,
-              departureLocation:    r?.address     ?? '',
-              departureCoordinates: r?.coordinates ?? null,
+              departureLocation:    r.address,
+              departureCoordinates: r.coordinates,
             }))}
           />
           <AddressSearch
             label="To" value={transport.arrivalLocation}
+            coordinates={transport.arrivalCoordinates} tripId={tripId} areas={areas}
             placeholder="Hotel / City centre"
-            onChange={(r: ResolvedAddress | null) => setTransport(p => ({
+            onChange={(r: ResolvedAddress) => setTransport(p => ({
               ...p,
-              arrivalLocation:    r?.address     ?? '',
-              arrivalCoordinates: r?.coordinates ?? null,
+              arrivalLocation:    r.address,
+              arrivalCoordinates: r.coordinates,
             }))}
           />
           <TextField label="Operator (optional)" fullWidth placeholder="Bolt, Free Now…"
@@ -950,20 +964,22 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
         {type === 'private_transfer' && (<>
           <AddressSearch
             label="From" value={transport.departureLocation}
+            coordinates={transport.departureCoordinates} tripId={tripId} areas={areas}
             placeholder="OTP Airport"
-            onChange={(r: ResolvedAddress | null) => setTransport(p => ({
+            onChange={(r: ResolvedAddress) => setTransport(p => ({
               ...p,
-              departureLocation:    r?.address     ?? '',
-              departureCoordinates: r?.coordinates ?? null,
+              departureLocation:    r.address,
+              departureCoordinates: r.coordinates,
             }))}
           />
           <AddressSearch
             label="To" value={transport.arrivalLocation}
+            coordinates={transport.arrivalCoordinates} tripId={tripId} areas={areas}
             placeholder="Hotel"
-            onChange={(r: ResolvedAddress | null) => setTransport(p => ({
+            onChange={(r: ResolvedAddress) => setTransport(p => ({
               ...p,
-              arrivalLocation:    r?.address     ?? '',
-              arrivalCoordinates: r?.coordinates ?? null,
+              arrivalLocation:    r.address,
+              arrivalCoordinates: r.coordinates,
             }))}
           />
           <TextField label="Operator / provider" fullWidth placeholder="Company or driver name"
@@ -975,20 +991,22 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
         {type === 'bicycle' && (<>
           <AddressSearch
             label="From" value={transport.departureLocation}
+            coordinates={transport.departureCoordinates} tripId={tripId} areas={areas}
             placeholder="Starting point"
-            onChange={(r: ResolvedAddress | null) => setTransport(p => ({
+            onChange={(r: ResolvedAddress) => setTransport(p => ({
               ...p,
-              departureLocation:    r?.address     ?? '',
-              departureCoordinates: r?.coordinates ?? null,
+              departureLocation:    r.address,
+              departureCoordinates: r.coordinates,
             }))}
           />
           <AddressSearch
             label="To" value={transport.arrivalLocation}
+            coordinates={transport.arrivalCoordinates} tripId={tripId} areas={areas}
             placeholder="Destination"
-            onChange={(r: ResolvedAddress | null) => setTransport(p => ({
+            onChange={(r: ResolvedAddress) => setTransport(p => ({
               ...p,
-              arrivalLocation:    r?.address     ?? '',
-              arrivalCoordinates: r?.coordinates ?? null,
+              arrivalLocation:    r.address,
+              arrivalCoordinates: r.coordinates,
             }))}
           />
         </>)}
@@ -1491,12 +1509,13 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
             <AddressSearch
               label="Address"
               value={accom.address}
-              placeholder="Search for the hotel or property address…"
-              onChange={(r: ResolvedAddress | null) => setAccom(p => ({
+              coordinates={accom.coordinates} tripId={tripId} areas={areas}
+              placeholder="Hotel or property address"
+              onChange={(r: ResolvedAddress) => setAccom(p => ({
                 ...p,
-                address:         r?.address     ?? '',
-                coordinates:     r?.coordinates ?? null,
-                addressVerified: !!r,
+                address:         r.address,
+                coordinates:     r.coordinates,
+                addressVerified: !!r.coordinates,
               }))}
             />
             <TextField label="Check in" type="date" fullWidth InputLabelProps={{ shrink: true }}
@@ -1630,11 +1649,12 @@ export default function LogisticsTab({ tripId, trip, fabTrigger }: LogisticsTabP
             <AddressSearch
               label="Address"
               value={venue.address}
+              coordinates={venue.coordinates} tripId={tripId} areas={areas}
               placeholder="East Link Bridge, North Wall Quay…"
-              onChange={(r: ResolvedAddress | null) => setVenue(p => ({
+              onChange={(r: ResolvedAddress) => setVenue(p => ({
                 ...p,
-                address:     r?.address     ?? '',
-                coordinates: r?.coordinates ?? null,
+                address:     r.address,
+                coordinates: r.coordinates,
               }))}
             />
             <TextField label="Date" type="date" fullWidth InputLabelProps={{ shrink: true }}

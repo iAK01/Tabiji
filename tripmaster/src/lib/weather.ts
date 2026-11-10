@@ -917,8 +917,12 @@ export async function fetchTripWeather(inputs: WeatherInputs, user?: any): Promi
     seaTemp,
     home: homeSeries?.days.length ? {
       city:         inputs.home!.city,
-      // Home only feeds the comparison — its hourly detail would just bloat the trip doc.
-      days:         homeSeries.days.map(({ hours: _hours, ...d }) => d),
+      lat:          homePoint!.lat,
+      lon:          homePoint!.lon,
+      // Home feeds the comparison, plus the hours of the first and last days — travel
+      // days start or end there (the itinerary's hour glyphs before you fly). Every
+      // other day's hours would just bloat the trip doc.
+      days:         homeSeries.days.map(({ hours, ...d }) => (d.date === start || d.date === end ? { ...d, hours } : d)),
       seaTemp:      homeSea,
       monthlyHighs,
     } : undefined,

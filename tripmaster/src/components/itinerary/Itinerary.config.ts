@@ -66,7 +66,7 @@ export interface Stop {
   address?: string;
   // Which trip location chip was picked — several rooms at one venue share an address
   locationName?: string;
-  coordinates?: { lat: number; lng: number };
+  coordinates?: { lat: number; lng: number } | null;   // null = not pinned
   scheduledStart?: string;
   scheduledEnd?: string;
   time?: string;

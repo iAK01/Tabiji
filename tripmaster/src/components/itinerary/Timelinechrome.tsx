@@ -1,6 +1,6 @@
 'use client';
 
-import { Box, Typography } from '@mui/material';
+import { Box, ButtonBase, Typography } from '@mui/material';
 import { alpha }           from '@mui/material/styles';
 import DirectionsWalkIcon  from '@mui/icons-material/DirectionsWalk';
 import LocalTaxiIcon       from '@mui/icons-material/LocalTaxi';
@@ -10,12 +10,17 @@ import {
 } from './Itinerary.config';
 import type { Stop } from './Itinerary.config';
 import { minutesToPx, stopStartMinutes, formatTime } from './Itinerary.helpers';
+import type { HourWeather } from './hourWeather';
+import { weatherIcon, warmth } from '@/components/weather/weatherUi';
 
 // ─── Hour ruler ────────────────────────────────────────────────────────────────
-export function HourRuler({ pxPerMin, startHour = DAY_START_HOUR, endHour = DAY_END_HOUR, nextDayLabel }: {
+export function HourRuler({ pxPerMin, startHour = DAY_START_HOUR, endHour = DAY_END_HOUR, nextDayLabel, weather, onWeatherTap }: {
   pxPerMin: number; startHour?: number; endHour?: number;
   /** Under the midnight mark when the night runs on past it: "Fri" */
   nextDayLabel?: string;
+  /** Page hour → that hour's weather, drawn between its mark and the next */
+  weather?: Map<number, HourWeather> | null;
+  onWeatherTap?: (w: HourWeather) => void;
 }) {
   const hourH = 60 * pxPerMin;
   const hours = Array.from(
@@ -51,7 +56,53 @@ export function HourRuler({ pxPerMin, startHour = DAY_START_HOUR, endHour = DAY_
           )}
         </Box>
       ))}
+      {weather && [...weather].map(([h, w]) => (
+        <HourWeatherGlyph
+          key={`wx-${h}`} w={w} hour={h}
+          top={(h - startHour) * hourH + hourH / 2 - GLYPH_H / 2}
+          onTap={onWeatherTap}
+        />
+      ))}
     </Box>
+  );
+}
+
+const GLYPH_H = 44;
+
+function HourWeatherGlyph({ w, hour, top, onTap }: {
+  w: HourWeather; hour: number; top: number; onTap?: (w: HourWeather) => void;
+}) {
+  const { Icon, color } = weatherIcon(w.code, '', w.isDay);
+  const time = `${String(hour % 24).padStart(2, '0')}:00`;
+  return (
+    <ButtonBase
+      onClick={() => onTap?.(w)}
+      aria-label={`${time} ${w.city}: ${w.temp}°${w.feels != null ? `, feels like ${w.feels}°` : ''}. Open weather`}
+      sx={{
+        position: 'absolute', top, right: 6, width: 50, height: GLYPH_H,
+        borderRadius: '8px', pr: 0.75,
+        display: 'flex', flexDirection: 'column', alignItems: 'flex-end', justifyContent: 'center',
+        '&:hover': { backgroundColor: alpha(D.navy, 0.04) },
+      }}
+    >
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.25 }}>
+        <Icon sx={{ fontSize: 13, color }} />
+        <Typography sx={{
+          fontFamily: D.body, fontSize: '0.7rem', fontWeight: 800, lineHeight: 1,
+          fontVariantNumeric: 'tabular-nums', color: warmth(w.temp),
+        }}>
+          {w.temp}°
+        </Typography>
+      </Box>
+      {w.feels != null && (
+        <Typography sx={{
+          fontFamily: D.body, fontSize: '0.56rem', fontWeight: 600, lineHeight: 1, mt: 0.4,
+          fontVariantNumeric: 'tabular-nums', color: alpha(D.navy, 0.45), whiteSpace: 'nowrap',
+        }}>
+          feels {w.feels}°
+        </Typography>
+      )}
+    </ButtonBase>
   );
 }
 

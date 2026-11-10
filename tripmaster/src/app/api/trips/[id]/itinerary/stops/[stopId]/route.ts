@@ -1,28 +1,18 @@
 import { NextResponse } from 'next/server';
-import { getServerSession } from 'next-auth';
-import connectDB from '@/lib/mongodb/connection';
+import { ownedTrip } from '@/lib/auth/ownedTrip';
 import TripItinerary from '@/lib/mongodb/models/TripItinerary';
-import Trip from '@/lib/mongodb/models/Trip';
-import User from '@/lib/mongodb/models/User';
 import { insertByTime } from '@/lib/itinerary/nights';
+import { pinIfFound } from '@/lib/geo/pinAddress';
+import { tripAreas } from '@/lib/geo/tripAreas';
 
 const MAX_NOTE = 20_000;
 
 const ymd = (v: unknown) => (v instanceof Date ? v.toISOString() : String(v ?? '')).slice(0, 10);
 
-// Only the trip's owner can change its stops.
-async function ownsTrip(email: string, tripId: string): Promise<boolean> {
-  const user = await User.findOne({ email }, '_id').lean() as any;
-  if (!user) return false;
-  return !!(await Trip.exists({ _id: tripId, userId: user._id, deleted: false }));
-}
-
 export async function DELETE(_req: Request, { params }: { params: Promise<{ id: string; stopId: string }> }) {
   const { id, stopId } = await params;
-  const session = await getServerSession();
-  if (!session?.user?.email) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
-  await connectDB();
-  if (!(await ownsTrip(session.user.email, id))) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  const { error } = await ownedTrip(id);
+  if (error) return error;
 
   const itinerary = await TripItinerary.findOne({ tripId: id });
   if (!itinerary) return NextResponse.json({ error: 'Not found' }, { status: 404 });
@@ -42,10 +32,8 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string; stopId: string }> }) {
   const { id, stopId } = await params;
-  const session = await getServerSession();
-  if (!session?.user?.email) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
-  await connectDB();
-  if (!(await ownsTrip(session.user.email, id))) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  const { trip, error } = await ownedTrip(id);
+  if (error) return error;
 
   const body = await req.json();
   const { scheduledStart, duration, name, type, notes, address, locationName, coordinates, notificationLeadMins, reference, skipped, lateNight, myNotes } = body;
@@ -60,6 +48,13 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     && !(Number.isInteger(notificationLeadMins) && notificationLeadMins >= 0 && notificationLeadMins <= 24 * 60)) {
     return NextResponse.json({ error: 'Invalid reminder time' }, { status: 400 });
   }
+
+  // null = not pinned (the edit form sends it so a changed address drops the old pin).
+  // An address arriving unpinned — saved before the form's lookup answered, or
+  // queued offline — gets its pin here.
+  const pin = coordinates === null && typeof address === 'string' && address.trim()
+    ? await pinIfFound(address, tripAreas(trip))
+    : coordinates;
 
   const itinerary = await TripItinerary.findOne({ tripId: id });
   if (!itinerary) return NextResponse.json({ error: 'Not found' }, { status: 404 });
@@ -84,7 +79,8 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       if (notes                !== undefined) stop.notes                = notes;
       if (address              !== undefined) stop.address              = address;
       if (locationName         !== undefined) stop.locationName         = locationName;
-      if (coordinates          !== undefined) stop.coordinates          = coordinates;
+      if (pin === null) delete stop.coordinates;
+      else if (pin !== undefined) stop.coordinates = pin;
       if (notificationLeadMins !== undefined) stop.notificationLeadMins = notificationLeadMins;
       if (reference            !== undefined) stop.reference            = reference;
 

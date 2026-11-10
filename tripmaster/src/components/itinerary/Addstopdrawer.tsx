@@ -17,11 +17,15 @@ import {
   STOP_CONFIG, QUICK_ADD_TYPES, DEFAULT_DURATIONS, D,
 } from './Itinerary.config';
 import type { Stop, KnownLocation } from './Itinerary.config';
+import type { TripArea } from '@/lib/geo/tripAreas';
 import { stopDuration, fmtDuration } from './Itinerary.helpers';
 import { clockMinutes, NIGHT_ENDS_MIN } from '@/lib/itinerary/nights';
 import { REMINDER_OPTIONS, stopLeadMins } from '@/lib/push/leads';
 
 interface Props {
+  tripId:         string;
+  /** tripAreas(trip) — where address suggestions come from */
+  areas:          TripArea[];
   open:           boolean;
   onClose:        () => void;
   // Each resolves true once saved or queued offline; false means it failed (and has
@@ -72,7 +76,7 @@ function referencePlaceholder(name: string): string {
 }
 
 export function AddStopDrawer({
-  open, onClose, onAdd, onUpdate, onDelete,
+  tripId, areas, open, onClose, onAdd, onUpdate, onDelete,
   defaultTime, defaultType, inheritedLeadFor, editStop,
   isMobile, knownLocations, nightDates = null, nightDefault,
 }: Props) {
@@ -90,7 +94,8 @@ export function AddStopDrawer({
     notes:                 '',
     address:               '',
     locationName:          '',
-    coordinates:           undefined as { lat: number; lng: number } | undefined,
+    // null = not pinned; sent as null so an edit clears an old pin (the server then tries to pin)
+    coordinates:           null as { lat: number; lng: number } | null,
     // undefined = follow the trip / your default; only sent once picked
     notificationLeadMins:  undefined as number | null | undefined,
     lateNight:             undefined as boolean | undefined,   // picked here; else nightDefault
@@ -115,7 +120,7 @@ export function AddStopDrawer({
         notes:                editStop.notes ?? '',
         address:              editStop.address ?? '',
         locationName:         resolveLocationName(editStop, knownLocations),
-        coordinates:          editStop.coordinates,
+        coordinates:          editStop.coordinates ?? null,
         // Its own setting if it has one (Off stays off), else it follows the default
         notificationLeadMins: editStop.notificationLeadMins,
         lateNight:            undefined,
@@ -131,7 +136,7 @@ export function AddStopDrawer({
         notes:                '',
         address:              '',
         locationName:         '',
-        coordinates:          undefined,
+        coordinates:          null,
         notificationLeadMins: undefined,
         lateNight:            undefined,
       });
@@ -139,18 +144,18 @@ export function AddStopDrawer({
     }
   }, [defaultTime, defaultType, editStop, open, knownLocations]);
 
-  const handleAddressChange = (result: ResolvedAddress | null) => {
+  const handleAddressChange = (result: ResolvedAddress) => {
     setForm(f => ({
       ...f,
-      address:      result?.address     ?? '',
+      address:      result.address,
       locationName: '',
-      coordinates:  result?.coordinates ?? undefined,
-      name: f.name || result?.address?.split(',')[0] || f.name,
+      coordinates:  result.coordinates,
+      name:         f.name || result.name || '',
     }));
   };
 
   const handleLocationChip = (loc: KnownLocation) => {
-    setForm(f => ({ ...f, address: loc.address ?? loc.label, locationName: loc.label, coordinates: loc.coordinates }));
+    setForm(f => ({ ...f, address: loc.address ?? loc.label, locationName: loc.label, coordinates: loc.coordinates ?? null }));
   };
 
   const adjustDuration = (delta: number) => {
@@ -570,9 +575,10 @@ export function AddStopDrawer({
             <AddressSearch
               label="Location (optional)"
               value={form.address}
-              placeholder="Search for a place…"
+              coordinates={form.coordinates}
               onChange={handleAddressChange}
-              noValidation
+              tripId={tripId}
+              areas={areas}
             />
 
             <TextField

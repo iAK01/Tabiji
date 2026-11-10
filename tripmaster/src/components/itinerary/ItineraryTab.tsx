@@ -67,6 +67,9 @@ import { showsNow }             from '@/lib/trips/onTrip';
 import { useFlights }           from '@/lib/flights/useFlights';
 import { stopNote }             from '@/lib/flights/status';
 import { haversineKm }          from '@/lib/geo/geocode';
+import { tripAreas }            from '@/lib/geo/tripAreas';
+import type { WeatherResult }   from '@/lib/weather-insights';
+import { pageHourWeather, type HourWeather } from './hourWeather';
 import type { TravelOrigin }    from '@/lib/navigation/useTravelTimes';
 
 const VIEW_MODES = ['timeline', 'list', 'recap'] as const;
@@ -140,6 +143,17 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
   const [quickAddAnchor, setQuickAddAnchor] = useState<HTMLElement | null>(null);
   const [showAllDay,     setShowAllDay]     = useState(false);
   const [knownLocations, setKnownLocations] = useState<KnownLocation[]>([]);
+  const areas = useMemo(() => tripAreas(trip), [trip]);
+  // For the hour glyphs. A read the page works without — offline it's the warmed copy.
+  const [weather, setWeather] = useState<WeatherResult | null>(null);
+  useEffect(() => {
+    let live = true;
+    fetch(`/api/trips/${tripId}/weather`)
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => { if (live && d?.weather) setWeather(d.weather); })
+      .catch(() => {});
+    return () => { live = false; };
+  }, [tripId]);
   const [accoms,         setAccoms]         = useState<Accom[]>([]);
   const [drawer, setDrawer] = useState<{
     open:       boolean;
@@ -1019,6 +1033,19 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
     : DAY_END_HOUR;
   const effectiveTimelineH = (effectiveEndHour - effectiveStartHour) * 60 * pxPerMin;
 
+  const hourWeather = weather && activeDayYmd
+    ? pageHourWeather(weather, activeDayYmd, activeStops, effectiveStartHour, effectiveEndHour)
+    : null;
+  // A glyph opens that day in the Weather tab — same native pushState as the tabs
+  const openWeatherDay = (w: HourWeather) => {
+    const n = (weather?.days ?? []).findIndex(d => d.date === w.date);
+    const params = new URLSearchParams(window.location.search);
+    for (const k of ['day', 'section', 'view', 'stop', 'file', 'todo', 'expense', 'proof', 'sheet', 'i']) params.delete(k);
+    params.set('tab', 'weather');
+    if (n >= 0) params.set('day', String(n + 1));
+    window.history.pushState(null, '', `?${params.toString()}`);
+  };
+
   // Where a dragged stop may start. Past midnight only into a next day the trip
   // has, and not for booking stops — their logistics sync keys on the date.
   const dragBounds = (stop: Stop) => {
@@ -1574,6 +1601,7 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
                 <HourRuler
                   pxPerMin={pxPerMin} startHour={effectiveStartHour} endHour={effectiveEndHour}
                   nextDayLabel={nextDay ? dayLabel(nextDay.date, { weekday: 'short' }) : undefined}
+                  weather={hourWeather} onWeatherTap={openWeatherDay}
                 />
               </Box>
 
@@ -1841,6 +1869,8 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
 
       {/* ── Add / edit drawer ── */}
       <AddStopDrawer
+        tripId={tripId}
+        areas={areas}
         open={drawer.open}
         onClose={() => setDrawer(d => ({ ...d, open: false, editStop: undefined }))}
         onAdd={addStop}
