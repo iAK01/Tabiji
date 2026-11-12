@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState, useCallback, Suspense } from 'react';
+import { useEffect, useRef, useState, useCallback, memo, Suspense } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import {
   Box, Container, Typography, AppBar, Toolbar, IconButton,
@@ -63,6 +63,8 @@ import { isOnTrip, displayStatus, showsNow } from '@/lib/trips/onTrip';
 import NotificationBell    from '@/components/notifications/NotificationBell';
 import TravelSheet         from '@/components/notifications/TravelSheet';
 import { placeTz }         from '@/lib/push/timezones';
+import { TabActiveContext } from '@/lib/hooks/useTabActive';
+import { onTripWrite }     from '@/lib/trips/tripWrites';
 
 const MapTab = dynamic(() => import('@/components/map/MapTab'), { ssr: false });
 
@@ -174,6 +176,35 @@ const slugToTab = (slug: string | null): number => {
   const i = slug ? TAB_SLUGS.indexOf(slug) : 0;
   return i >= 0 ? i : 0;
 };
+const ALL_TABS = [...TAB_SLUGS.keys()];
+
+// Sub-view and deep-link params belong to the tab (or sheet) that set them
+const TAB_PARAMS = ['day', 'section', 'view', 'stop', 'file', 'todo', 'expense', 'proof', 'sheet', 'i'];
+// Where you were on a tab — put back in the address when you return to it
+const RETURN_PARAMS: Record<number, string[]> = {
+  1: ['section'],
+  2: ['day', 'view'],
+  [EXPENSES_TAB_INDEX]: ['view'],
+};
+
+// A tab you've opened stays loaded, so coming back to it is instant and asks the
+// server nothing. It's loaded afresh only when something it shows may have
+// changed: a change saved anywhere else on the page, or the app having been in
+// the background this long (edits from another device).
+const AWAY_RELOAD_MS = 5 * 60_000;
+
+// A tab once opened: kept mounted, hidden while another is on screen. Hidden, it
+// isn't re-rendered along with the page; it picks up new props when it's back.
+const KeptPane = memo(
+  function KeptPane({ active, children }: { active: boolean; children: React.ReactNode }) {
+    return (
+      <TabActiveContext.Provider value={active}>
+        <Box sx={active ? undefined : { display: 'none' }}>{children}</Box>
+      </TabActiveContext.Provider>
+    );
+  },
+  (prev, next) => !prev.active && !next.active,
+);
 
 export type FabTrigger = { action: string; seq: number };
 type FabActionConfig = { label: string; icon: React.ReactNode; action: string };
@@ -265,6 +296,76 @@ function TripPageInner() {
   const [deleteError,        setDeleteError]        = useState('');
   const [localTime,          setLocalTime]          = useState('');
 
+  // ── Opened tabs, kept loaded (see KeptPane) ──────────────────────────────────
+  const [opened,   setOpened]   = useState<Set<number>>(() => new Set([activeTab]));
+  const [paneKeys, setPaneKeys] = useState<Record<number, number>>({});   // bumped: start that tab afresh
+  const openedRef    = useRef(opened);
+  const activeRef    = useRef(activeTab);
+  const switchedAt   = useRef(0);
+  const staleTabs    = useRef(new Set<number>());                         // load these afresh when next shown
+  const returnParams = useRef<Record<number, URLSearchParams>>({});
+
+  // Every change of tab comes through here: the tab bar, Back / Forward, links
+  // between tabs, Now. True when the tab comes back exactly as you left it.
+  const showTab = useCallback((next: number): boolean => {
+    const prev = activeRef.current;
+    if (next === prev) return true;
+    // Left with a sheet or dialog up: that tab starts afresh next time, so nothing
+    // of it stays on screen over the one you've gone to
+    const leftOpen = !!document.querySelector('.MuiModal-root:not(.MuiModal-hidden)');
+    const reload   = staleTabs.current.delete(next);
+    const kept     = openedRef.current.has(next) && !reload;
+    const nextOpened = new Set(openedRef.current);
+    if (leftOpen) { nextOpened.delete(prev); staleTabs.current.delete(prev); }
+    nextOpened.add(next);
+    openedRef.current  = nextOpened;
+    activeRef.current  = next;
+    switchedAt.current = Date.now();
+    setOpened(nextOpened);
+    if (reload) setPaneKeys(k => ({ ...k, [next]: (k[next] ?? 0) + 1 }));
+    // A quick add meant for the tab you were on mustn't fire in this one
+    setFabTrigger(null);
+    setActiveTabState(next);
+    return kept;
+  }, []);
+
+  // A change saved on the page: every tab but the one that made it (it already
+  // shows it) loads afresh when next shown. Switched since it was sent? Then it
+  // can't be told which made it, so all of them do.
+  useEffect(() => {
+    if (!id) return;
+    return onTripWrite(String(id), startedAt => {
+      const maker = switchedAt.current <= startedAt ? activeRef.current : -1;
+      for (const t of ALL_TABS) if (t !== maker) staleTabs.current.add(t);
+    });
+  }, [id]);
+
+  // Back after a while in the background: the other tabs load afresh when next shown
+  useEffect(() => {
+    let hiddenAt = 0;
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') { hiddenAt = Date.now(); return; }
+      if (hiddenAt && Date.now() - hiddenAt >= AWAY_RELOAD_MS) {
+        for (const t of ALL_TABS) if (t !== activeRef.current) staleTabs.current.add(t);
+      }
+      hiddenAt = 0;
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => document.removeEventListener('visibilitychange', onVisibility);
+  }, []);
+
+  // Remember where you are on the tab on screen, for coming back to it
+  useEffect(() => {
+    const keep = RETURN_PARAMS[activeTab];
+    if (!keep || slugToTab(searchParams.get('tab')) !== activeTab) return;
+    const saved = new URLSearchParams();
+    for (const k of keep) {
+      const v = searchParams.get(k);
+      if (v !== null) saved.set(k, v);
+    }
+    returnParams.current[activeTab] = saved;
+  }, [searchParams, activeTab]);
+
   // ── Tab ↔ URL ────────────────────────────────────────────────────────────────
   // Tab change pushes a history entry so the browser / hardware back button steps
   // back through tabs instead of leaving the trip. ?tab is dropped for Overview.
@@ -272,20 +373,20 @@ function TripPageInner() {
   // router.push re-requests this dynamic page from the server, which offline turns
   // every tab tap into a full reload.
   const setActiveTab = useCallback((next: number) => {
-    setActiveTabState(next);
-    const params = new URLSearchParams(Array.from(searchParams.entries()));
+    const kept   = showTab(next);
+    const params = new URLSearchParams(window.location.search);
     if (next === 0) params.delete('tab');
     else params.set('tab', TAB_SLUGS[next] ?? 'overview');
-    // Sub-view and deep-link params belong to the tab (or sheet) that set them
-    for (const k of ['day', 'section', 'view', 'stop', 'file', 'todo', 'expense', 'proof', 'sheet', 'i']) params.delete(k);
+    for (const k of TAB_PARAMS) params.delete(k);
+    if (kept) returnParams.current[next]?.forEach((v, k) => params.set(k, v));
     const qs = params.toString();
     window.history.pushState(null, '', qs ? `?${qs}` : window.location.pathname);
-  }, [searchParams]);
+  }, [showTab]);
 
   // "Now": the itinerary at the time it is now (ItineraryTab reads ?now and drops
   // it). Keeps a list view; the recap is what happened, so back to the plan.
   const goToNow = () => {
-    setActiveTabState(2);
+    showTab(2);
     const params = new URLSearchParams(window.location.search);
     params.set('tab', TAB_SLUGS[2]);
     for (const k of ['day', 'section', 'stop', 'file', 'todo', 'expense', 'proof', 'sheet', 'i']) params.delete(k);
@@ -296,9 +397,8 @@ function TripPageInner() {
 
   // URL → state, for back/forward navigation.
   useEffect(() => {
-    const target = slugToTab(searchParams.get('tab'));
-    setActiveTabState(prev => (prev === target ? prev : target));
-  }, [searchParams]);
+    showTab(slugToTab(searchParams.get('tab')));
+  }, [searchParams, showTab]);
 
   // Profile's default company name — falls back into any trip that doesn't have its
   // own companyName set (older trips, or trips created before the profile had one).
@@ -911,31 +1011,33 @@ function TripPageInner() {
         {/* ── Tabs — shown above content on all tabs except overview ── */}
         {activeTab !== 0 && tabsBar}
 
-        {/* ── Tab content ── */}
-        {activeTab === 0 ? (
-          <>
-            <Box
-              ref={isActive ? tabContentRef : undefined}
-              sx={{ scrollMarginTop: { xs: '54px', sm: '66px' } }}
-            >
+        {/* ── Tab content — every tab opened so far stays mounted, only the active one shown ── */}
+        <Box
+          ref={activeTab === 0 && isActive ? tabContentRef : undefined}
+          sx={{ scrollMarginTop: { xs: '54px', sm: '66px' } }}
+        >
+          {opened.has(0) && (
+            <KeptPane key={`0:${paneKeys[0] ?? 0}`} active={activeTab === 0}>
               <TripOverview
                 trip={trip}
                 onNavigate={setActiveTab}
                 coverPhotoUrl={trip.coverPhotoUrl}
                 coverPhotoCredit={trip.coverPhotoCredit}
                 onRefreshPhoto={refreshPhoto}
-                tabsSlot={tabsBar}
+                tabsSlot={activeTab === 0 ? tabsBar : undefined}
               />
-            </Box>
-          </>
-        ) : (
-          <Container maxWidth="lg" sx={{ py: { xs: 3, sm: 4 }, px: { xs: 2, sm: 3 } }}>
-            <Box
-              ref={isActive ? tabContentRef : undefined}
-              sx={{ scrollMarginTop: { xs: '54px', sm: '66px' } }}
-            >
-              {activeTab === 1 && <LogisticsTab tripId={trip._id} trip={tripWithDefaults} fabTrigger={fabTrigger} />}
-              {activeTab === 2 && (
+            </KeptPane>
+          )}
+        </Box>
+        <Container maxWidth="lg" sx={{ py: { xs: 3, sm: 4 }, px: { xs: 2, sm: 3 }, ...(activeTab === 0 && { display: 'none' }) }}>
+          <Box
+            ref={activeTab !== 0 && isActive ? tabContentRef : undefined}
+            sx={{ scrollMarginTop: { xs: '54px', sm: '66px' } }}
+          >
+            {ALL_TABS.filter(i => i !== 0 && opened.has(i)).map(i => {
+              let content: React.ReactNode = null;
+              if (i === 1) content = <LogisticsTab tripId={trip._id} trip={tripWithDefaults} fabTrigger={fabTrigger} />;
+              else if (i === 2) content = (
                 <ItineraryTab
                   tripId={trip._id} startDate={trip.startDate} endDate={trip.endDate}
                   trip={trip}
@@ -943,27 +1045,25 @@ function TripPageInner() {
                   homeCountry={homeLocation?.countryCode ?? (trip.origin as any)?.countryCode ?? null}
                   fabTrigger={fabTrigger} onSwitchToDiscover={() => setActiveTab(4)} onSwitchToLogistics={() => setActiveTab(1)}
                 />
-              )}
-              {activeTab === 3 && <PackingTab tripId={trip._id} tripType={trip.tripType} nights={trip.nights} startDate={trip.startDate} fabTrigger={fabTrigger} />}
-              {activeTab === 4 && <IntelligenceTab tripId={trip._id} />}
-              {activeTab === 5 && (
-                <WeatherTab
-                  tripId={trip._id}
-                  destinationCity={trip.destination?.city}
-                />
-              )}
-              {activeTab === 6 && (
+              );
+              else if (i === 3) content = <PackingTab tripId={trip._id} tripType={trip.tripType} nights={trip.nights} startDate={trip.startDate} fabTrigger={fabTrigger} />;
+              else if (i === 4) content = <IntelligenceTab tripId={trip._id} />;
+              else if (i === 5) content = <WeatherTab tripId={trip._id} destinationCity={trip.destination?.city} />;
+              else if (i === 6) content = (
                 <OfflineBoundary message="Map unavailable offline">
                   <MapTab tripId={trip._id} trip={trip} />
                 </OfflineBoundary>
-              )}
-              {activeTab === 7 && <FilesTab tripId={trip._id} fabTrigger={fabTrigger} />}
-              {activeTab === EXPENSES_TAB_INDEX && isWorkTrip(trip.tripType) && (
-                <ExpensesTab tripId={trip._id} trip={tripWithDefaults} fabTrigger={fabTrigger} />
-              )}
-            </Box>
-          </Container>
-        )}
+              );
+              else if (i === 7) content = <FilesTab tripId={trip._id} fabTrigger={fabTrigger} />;
+              else if (i === EXPENSES_TAB_INDEX && isWorkTrip(trip.tripType)) {
+                content = <ExpensesTab tripId={trip._id} trip={tripWithDefaults} fabTrigger={fabTrigger} />;
+              }
+              return content && (
+                <KeptPane key={`${i}:${paneKeys[i] ?? 0}`} active={activeTab === i}>{content}</KeptPane>
+              );
+            })}
+          </Box>
+        </Container>
 
         {/* ── Now — the itinerary at the time it is now ── */}
         {nowShown && (

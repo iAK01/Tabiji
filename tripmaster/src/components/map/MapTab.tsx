@@ -11,6 +11,7 @@ import MapIcon            from '@mui/icons-material/Map';
 import FullscreenIcon     from '@mui/icons-material/Fullscreen';
 import FullscreenExitIcon from '@mui/icons-material/FullscreenExit';
 import { airports as AIRPORT_DB } from '@/lib/data/airports';
+import { useTabActive } from '@/lib/hooks/useTabActive';
 
 const D = {
   navy:    '#1D2642',
@@ -322,6 +323,11 @@ export default function MapTab({ tripId, trip }: MapTabProps) {
     const t = setTimeout(() => mapRef.current?.resize(), 320);
     return () => clearTimeout(t);
   }, [mapExpanded]);
+
+  // Back on screen after being hidden behind another tab (the window may have
+  // changed size meanwhile): fit the map to its box again
+  const active = useTabActive();
+  useEffect(() => { if (active) mapRef.current?.resize(); }, [active]);
 
   useEffect(() => {
     Promise.all([

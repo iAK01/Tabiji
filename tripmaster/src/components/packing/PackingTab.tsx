@@ -32,6 +32,7 @@ import { packingCounts } from '@/lib/packing/counts';
 import { searchItems, similarByName, nameKey } from '@/lib/packing/search';
 import { tripItemFromCatalogue, catalogueQuantity } from '@/lib/packing/fromCatalogue';
 import { useUrlParam } from '@/lib/hooks/useUrlParam';
+import { useTabActive } from '@/lib/hooks/useTabActive';
 import { useWakeLock } from '@/lib/hooks/useWakeLock';
 import PackingCardDeck from './PackingCardDeck';
 import { qtyLabel, type PackStatus } from './packing.helpers';
@@ -255,10 +256,11 @@ export default function PackingTab({ tripId, tripType, nights, startDate, fabTri
   useEffect(() => { packingRef.current = packing; }, [packing]);
   const commitPacking = (next: PackingList) => { packingRef.current = next; setPacking(next); };
 
-  // Keep the screen on while packing, if they've asked to.
+  // Keep the screen on while packing, if they've asked to — not while on another tab.
   const [keepAwake, setKeepAwake] = useState(false);
   const awakeAsked = useRef(false);   // a tap, as opposed to restoring last time's choice
-  const wake = useWakeLock(keepAwake, () => {
+  const active = useTabActive();
+  const wake = useWakeLock(keepAwake && active, () => {
     setKeepAwake(false);
     // Restoring it on page load can be refused without a tap first; only a refused tap needs saying.
     if (awakeAsked.current) {

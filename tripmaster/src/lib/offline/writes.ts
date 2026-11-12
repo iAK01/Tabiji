@@ -2,6 +2,7 @@ import { flushQueue, getQueueCount, queueAction } from './db';
 import { isOffline, markNetworkDown } from './connectivity';
 import { refreshSavedData } from './warm';
 import { DATA_CACHE } from './sw';
+import { noteTripWrite } from '@/lib/trips/tripWrites';
 
 // GET path → function from the saved response body to its updated body (null/undefined = leave as is).
 export type SavedDataUpdates = Record<string, (saved: any) => any>;
@@ -29,6 +30,7 @@ export async function sendOrQueue(
   send: () => Promise<Response>,
   optimistic?: SavedDataUpdates,
 ): Promise<Response | null> {
+  const startedAt   = Date.now();
   const queuedAhead = await getQueueCount().catch(() => 0);
   if (!isOffline() && queuedAhead === 0) {
     try {
@@ -41,6 +43,7 @@ export async function sendOrQueue(
   }
   await queueAction(action);
   if (optimistic) await patchSavedData(optimistic);
+  noteTripWrite(action.tripId, startedAt);
   if (!isOffline()) {
     flushQueue()
       .then(({ synced }) => synced.forEach(a => refreshSavedData(a.tripId)))

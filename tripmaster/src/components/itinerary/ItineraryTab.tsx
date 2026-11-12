@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, useMemo, useCallback, Fragment } from 'react';
-import { useSearchParams, usePathname } from 'next/navigation';
+import { usePathname } from 'next/navigation';
 import {
   DndContext, DragEndEvent,
   PointerSensor, TouchSensor,
@@ -67,6 +67,7 @@ import { ItineraryList }        from './ItineraryList';
 import { ItineraryRecap }       from './ItineraryRecap';
 import { hereNow, linkedIndex, linkedFor, recordable, recordDays, startedCheck, type LinkedItem } from './record';
 import { useUrlParam }          from '@/lib/hooks/useUrlParam';
+import { useTabActive, useTabSearchParams } from '@/lib/hooks/useTabActive';
 import { showsNow }             from '@/lib/trips/onTrip';
 import { useFlights }           from '@/lib/flights/useFlights';
 import { stopNote }             from '@/lib/flights/status';
@@ -137,8 +138,10 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
   const theme    = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
 
-  const searchParams = useSearchParams();
+  const searchParams = useTabSearchParams();
   const pathname     = usePathname();
+  // Hidden behind another tab: nothing here may change the address or scroll
+  const active       = useTabActive();
 
   const basePxPerMin = isMobile ? PX_PER_MIN_MOBILE : PX_PER_MIN_DESKTOP;
 
@@ -243,7 +246,7 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
   // adding a stop), or the active day tab snaps back mid-edit.
   const hasAutoSelectedRef = useRef(false);
   useEffect(() => {
-    if (days.length === 0 || hasAutoSelectedRef.current) return;
+    if (!active || days.length === 0 || hasAutoSelectedRef.current) return;
     hasAutoSelectedRef.current = true;
     const dayParam = searchParams.get('day');
     if (dayParam) {
@@ -253,7 +256,7 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
     const idx = nowPageIdx(here());
     // Write it to the URL too, so the address bar always names the day on screen
     selectDay(idx !== -1 ? idx : 0);
-  }, [days, pages, searchParams]);
+  }, [days, pages, searchParams, active]);
 
   // The page now is on: today's — or, in the small hours while last night's
   // programme is still on, last night's. -1 when now isn't a day of the trip.
@@ -287,7 +290,7 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
   // ── Notification link to a stop: open its day, scroll to it, ring it ─────────
   useEffect(() => {
     const stopId = searchParams.get('stop');
-    if (!stopId || days.length === 0) return;
+    if (!active || !stopId || days.length === 0) return;
     // The page it's shown on — an after-midnight stop is on the night before's
     const idx = pages.findIndex(p => p.stops.some(s => s._id === stopId));
     // Drop the param either way so it doesn't fire again; keep tab and day.
@@ -303,13 +306,13 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
       document.querySelector(`[data-stop-id="${stopId}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }, 250);
     setTimeout(() => setHighlightStop(cur => (cur === stopId ? null : cur)), 4000);
-  }, [days, pages, searchParams, pathname]);
+  }, [days, pages, searchParams, pathname, active]);
 
   // ── "Now" (the trip's tab bar): the page now's on, the now line, and what you
   // should be at — on now, else next up — rung like a notification link ─────────
   const nowParam = searchParams.get('now');
   useEffect(() => {
-    if (!nowParam || days.length === 0) return;
+    if (!active || !nowParam || days.length === 0) return;
     const h   = here();
     const idx = nowPageIdx(h);
     const params = new URLSearchParams(window.location.search);
@@ -340,7 +343,7 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
       el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }, 250);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nowParam, days.length]);
+  }, [nowParam, days.length, active]);
 
   // ── Reminder times for the bells — refreshed shortly after any change ────────
   const loadReminders = useCallback(() => {
@@ -496,24 +499,25 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
   // ── Scroll to current time when the page on screen has it ─────────────────────
   // The line only renders on the page now falls in (today, or last night's page
   // in the small hours), so its presence is the test.
+  // Coming back to the tab counts as opening it.
   useEffect(() => {
-    if (!nowLineRef.current || deepLinkedRef.current) return;
+    if (!active || !nowLineRef.current || deepLinkedRef.current) return;
     setTimeout(() => {
       nowLineRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }, 100);
-  }, [activeDayIdx, days]);
+  }, [activeDayIdx, days, active]);
 
   // ── Keep the chosen day centred in the day strip ─────────────────────────────
   useEffect(() => {
     const strip = dayStripRef.current;
     // By day index, not child index — the phone strip has month labels between days
     const cell  = strip?.querySelector<HTMLElement>(`[data-day-idx="${activeDayIdx}"]`);
-    if (!strip || !cell) return;
+    if (!active || !strip || !cell) return;
     strip.scrollTo({
       left:     cell.offsetLeft - (strip.clientWidth - cell.offsetWidth) / 2,
       behavior: stripTappedRef.current ? 'smooth' : 'auto',
     });
-  }, [activeDayIdx, days.length]);
+  }, [activeDayIdx, days.length, active]);
 
   // Each day opens with its empty morning folded again
   useEffect(() => { setShowEarly(false); }, [activeDayIdx]);

@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useTabSearchParams } from './useTabActive';
 
 // A tab's sub-view (Logistics → Accommodation, an Expenses view…) kept in the URL
 // so a refresh or shared link lands in the same place. Uses replaceState, not
@@ -14,7 +14,7 @@ export function useUrlParam<T extends string, F extends T | null>(
   allowed: readonly T[],
   fallback: F,
 ): [T | F, (next: T | F) => void] {
-  const searchParams = useSearchParams();
+  const searchParams = useTabSearchParams();
 
   const read = useCallback((): T | F => {
     const v = searchParams.get(key);

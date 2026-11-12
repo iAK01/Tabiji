@@ -23,7 +23,7 @@ import { EXPENSE_CATEGORIES as CATEGORIES, EXPENSE_PAYERS as PAYERS, EXPENSE_STA
 import { getProofSlots, FUEL_RECEIPT_SLOT, type ProofSlot } from '@/lib/logistics/expenseProofs';
 import { compressImageFile } from '@/lib/utils/imageCompression';
 import { useUrlParam } from '@/lib/hooks/useUrlParam';
-import { useSearchParams } from 'next/navigation';
+import { useTabActive, useTabSearchParams } from '@/lib/hooks/useTabActive';
 
 const EXPENSE_VIEWS = ['expenses', 'documents'] as const;
 
@@ -99,7 +99,8 @@ export default function ExpensesTab({ tripId, trip, fabTrigger }: ExpensesTabPro
 
   // Notification links: ?expense=<id>&proof=<slot key> opens that expense with
   // the missing proof picked out.
-  const searchParams = useSearchParams();
+  const searchParams = useTabSearchParams();
+  const active       = useTabActive();   // hidden behind another tab: links wait
   const [focusProof, setFocusProof] = useState<string | null>(null);
 
   useEffect(() => {
@@ -156,7 +157,7 @@ export default function ExpensesTab({ tripId, trip, fabTrigger }: ExpensesTabPro
   };
 
   useEffect(() => {
-    if (loading) return;
+    if (loading || !active) return;
     const expenseId = searchParams.get('expense');
     if (!expenseId) return;
     const proof  = searchParams.get('proof');
@@ -174,7 +175,7 @@ export default function ExpensesTab({ tripId, trip, fabTrigger }: ExpensesTabPro
     setTimeout(() => document.querySelector(`[data-proof-slot="${proof}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 350);
     setTimeout(() => setFocusProof(cur => (cur === proof ? null : cur)), 6000);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading, expenses, searchParams]);
+  }, [loading, expenses, searchParams, active]);
 
   const addProofFiles = (key: string, files: FileList | null) => {
     if (!files || files.length === 0) return;

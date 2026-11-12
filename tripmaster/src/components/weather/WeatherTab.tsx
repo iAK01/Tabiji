@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useTabSearchParams } from '@/lib/hooks/useTabActive';
 import {
   Box, Typography, Paper, CircularProgress, Alert, IconButton, Tooltip,
 } from '@mui/material';
@@ -357,7 +357,7 @@ function HomeCompareView({ c }: { c: HomeCompare }) {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 export default function WeatherTab({ tripId, destinationCity }: Props) {
-  const searchParams = useSearchParams();
+  const searchParams = useTabSearchParams();
   const [weather,    setWeather]    = useState<WeatherResult | null>(null);
   const [loading,    setLoading]    = useState(true);
   const [refreshing, setRefreshing] = useState(false);

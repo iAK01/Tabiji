@@ -71,7 +71,7 @@ import { useSmartExtract, type SmartExtractSource } from '@/lib/extract/useSmart
 import { isFileCached } from '@/lib/offline/fileCache';
 import { saveTripCache, getTripCache } from '@/lib/offline/db';
 import { readSaved, assertSaved, reportSaveFailure } from '@/lib/offline/saveErrors';
-import { useSearchParams } from 'next/navigation';
+import { useTabActive, useTabSearchParams } from '@/lib/hooks/useTabActive';
 
 // ─── Smart Extract ────────────────────────────────────────────────────────────
 // Mime types we can pull structured trip data out of (PDF + images natively,
@@ -1341,7 +1341,11 @@ export default function FilesTab({ tripId, fabTrigger }: FilesTabProps) {
   const uploadExtract = useSmartExtract(tripId);
 
   // Notification links: ?file=<id> opens a document, ?todo=<id> points at a to-do.
-  const searchParams = useSearchParams();
+  const searchParams = useTabSearchParams();
+  // Hidden behind another tab: no opening links, no catching page-wide drops
+  const active       = useTabActive();
+  const activeRef    = useRef(active);
+  useEffect(() => { activeRef.current = active; }, [active]);
   const [linkedViewer, setLinkedViewer] = useState<ViewableFile | null>(null);
   const [highlightId,  setHighlightId]  = useState<string | null>(null);
 
@@ -1392,7 +1396,7 @@ export default function FilesTab({ tripId, fabTrigger }: FilesTabProps) {
   }, [tripId]);
 
   useEffect(() => {
-    if (loading) return;
+    if (loading || !active) return;
     const fileId = searchParams.get('file');
     const todoId = searchParams.get('todo');
     if (!fileId && !todoId) return;
@@ -1411,7 +1415,7 @@ export default function FilesTab({ tripId, fabTrigger }: FilesTabProps) {
     setHighlightId(target._id);
     setTimeout(() => document.getElementById(`resource-${target._id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 200);
     setTimeout(() => setHighlightId(cur => (cur === target._id ? null : cur)), 4000);
-  }, [loading, files, searchParams]);
+  }, [loading, files, searchParams, active]);
 
   const highlightSx = (id: string) => ({
     transition: 'background-color 0.4s, box-shadow 0.4s',
@@ -1497,7 +1501,7 @@ export default function FilesTab({ tripId, fabTrigger }: FilesTabProps) {
 
   useEffect(() => {
     let depth = 0;
-    const hasFiles = (e: DragEvent) => Array.from(e.dataTransfer?.types ?? []).includes('Files');
+    const hasFiles = (e: DragEvent) => activeRef.current && Array.from(e.dataTransfer?.types ?? []).includes('Files');
     // Any open dialog (upload, extract review, viewer…) owns drops while it's up.
     const ready = () => !document.querySelector('[role="dialog"]');
     const reset = () => { depth = 0; setPageDrag(false); };
