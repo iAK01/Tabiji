@@ -6,7 +6,7 @@ import NearMeIcon          from '@mui/icons-material/NearMe';
 import NearMeDisabledIcon  from '@mui/icons-material/NearMeDisabled';
 import MapIcon             from '@mui/icons-material/Map';
 import { canNavigate }     from '@/lib/navigation/links';
-import type { NavIntent, NavMode, NavigationDestination } from '@/lib/navigation/links';
+import type { NavIntent, NavMode, NavigationDestination, NavOrigin } from '@/lib/navigation/links';
 import NavigateOptions, { NavigateNotice, type NavNotice } from '@/components/navigation/NavigateOptions';
 import type { TravelOrigin } from '@/lib/navigation/useTravelTimes';
 
@@ -19,9 +19,14 @@ interface NavigateButtonProps {
   intent?:   NavIntent;
   /** Where the dropdown's times start when you're not near the place (stop before, hotel) */
   from?:     TravelOrigin | null;
+  /** Route from this place (your hotel) instead of where you are */
+  origin?:   NavOrigin | null;
   /** 'icon'   = icon-only button (default, used inside cards)
-   *  'button' = full text button (used in larger contexts)  */
-  variant?:  'icon' | 'button';
+   *  'button' = full text button (used in larger contexts)
+   *  'text'   = icon + label, no outline (a line in a sheet) */
+  variant?:  'icon' | 'button' | 'text';
+  /** Replaces the navigate icon on 'button' / 'text' */
+  icon?:     typeof NearMeIcon;
   /** Label shown when variant='button'. Defaults to 'Navigate' ('Map' for intent='view') */
   label?:    string;
   /** MUI size */
@@ -41,7 +46,9 @@ export default function NavigateButton({
   suggestedMode = 'driving',
   intent        = 'directions',
   from,
+  origin        = null,
   variant       = 'icon',
+  icon,
   label         = intent === 'view' ? 'Map' : 'Navigate',
   size          = 'small',
   sx            = {},
@@ -61,10 +68,12 @@ export default function NavigateButton({
 
   const tooltipTitle = !able
     ? 'No location data — add an address to enable navigation'
-    : intent === 'view' ? `Show ${place} in a map app` : `Navigate to ${place}`;
+    : intent === 'view' ? `Show ${place} in a map app`
+    : origin ? `Route from ${origin.name} to ${place}` : `Navigate to ${place}`;
 
   // ── Shared icon ─────────────────────────────────────────────────────────────
   const Icon = !able ? NearMeDisabledIcon : intent === 'view' ? MapIcon : NearMeIcon;
+  const StartIcon = able && icon ? icon : Icon;
 
   return (
     <Box component="span" sx={{ display: 'contents' }} onClick={stop} onPointerDown={stop} onKeyDown={stopKeys}>
@@ -91,6 +100,19 @@ export default function NavigateButton({
             >
               <Icon sx={{ fontSize: size === 'small' ? 24 : 32 }} />
             </IconButton>
+          ) : variant === 'text' ? (
+            <Button
+              size={size}
+              variant="text"
+              onClick={handleClick}
+              disabled={!able}
+              aria-haspopup="true"
+              aria-expanded={!!anchor}
+              startIcon={<StartIcon />}
+              sx={{ textTransform: 'none', ...sx }}
+            >
+              {label}
+            </Button>
           ) : (
             <Button
               size={size}
@@ -99,7 +121,7 @@ export default function NavigateButton({
               disabled={!able}
               aria-haspopup="true"
               aria-expanded={!!anchor}
-              startIcon={<Icon />}
+              startIcon={<StartIcon />}
               sx={{
                 borderColor: able ? 'primary.main' : 'divider',
                 color:       able ? 'primary.main' : 'text.disabled',
@@ -125,6 +147,7 @@ export default function NavigateButton({
           intent={intent}
           initialMode={suggestedMode}
           from={from}
+          origin={origin}
           onPicked={() => setAnchor(null)}
           onNotice={setNotice}
           onLayoutChange={refit}

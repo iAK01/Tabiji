@@ -14,8 +14,8 @@ import NavigationIcon        from '@mui/icons-material/Navigation';
 import ContentCopyIcon       from '@mui/icons-material/ContentCopy';
 import LocalTaxiIcon         from '@mui/icons-material/LocalTaxi';
 import {
-  NAV_APP_LABEL, copyableLocation, detectPlatform, isAppScheme, navAppsFor, navLink, uberLink,
-  type NavApp, type NavIntent, type NavMode, type NavigationDestination,
+  NAV_APP_LABEL, copyableLocation, detectPlatform, isAppScheme, navAppsFor, navLink, uberLink, takesOrigin,
+  type NavApp, type NavIntent, type NavMode, type NavigationDestination, type NavOrigin,
 } from '@/lib/navigation/links';
 import { useTravelTimes, formatTravelMins, type TravelOrigin } from '@/lib/navigation/useTravelTimes';
 import { useRideApps } from '@/lib/navigation/useRideApps';
@@ -66,6 +66,7 @@ export default function NavigateOptions({
   intent      = 'directions',
   initialMode = 'driving',
   from,
+  origin = null,
   onPicked,
   onNotice,
   onLayoutChange,
@@ -75,6 +76,8 @@ export default function NavigateOptions({
   initialMode?: NavMode;
   /** Where times start when you're not near the place yet */
   from?:        TravelOrigin | null;
+  /** Route from here (your hotel) instead of where you are — times, links and Uber pickup all start here */
+  origin?:      NavOrigin | null;
   onPicked?:    () => void;
   onNotice:     (n: NavNotice) => void;
   /** Height changed (transit summary, "Times from…") — lets a dropdown re-fit the screen */
@@ -84,10 +87,21 @@ export default function NavigateOptions({
   const platform = detectPlatform();
   const copy     = copyableLocation(destination);
   const title    = destination.name || destination.address || '';
-  const { status, times, fromLabel, pickup } = useTravelTimes(destination, from, intent === 'directions');
+  const routeFrom = intent === 'directions' ? origin : null;
+  const pinnedFrom: TravelOrigin | null = routeFrom?.coordinates
+    ? { name: routeFrom.name, coordinates: routeFrom.coordinates }
+    : null;
+  const { status, times, fromLabel, pickup: nearPickup } = useTravelTimes(
+    destination, routeFrom ? pinnedFrom : from, intent === 'directions', !!routeFrom,
+  );
+  // From your hotel, the Uber pickup is the hotel — even when the times didn't load
+  const pickup = routeFrom ? pinnedFrom : nearPickup;
   const showTransit = intent === 'directions' && mode === 'transit';
-  // Only Uber's website books a ride from a computer.
-  const rides = useRideApps().filter(svc => intent === 'directions' && (platform !== 'desktop' || svc.id === 'uber'));
+  // Only Uber's website books a ride from a computer; from an unpinned hotel it can't set the pickup.
+  const rides = useRideApps().filter(svc => intent === 'directions'
+    && (platform !== 'desktop' || svc.id === 'uber')
+    && !(svc.id === 'uber' && routeFrom && !pinnedFrom));
+  const apps  = navAppsFor(platform).filter(app => !routeFrom || takesOrigin(app));
   const pasteText = destination.address || destination.name;
 
   useEffect(() => { onLayoutChange?.(); }, [showTransit, fromLabel, rides.length, onLayoutChange]);
@@ -120,9 +134,9 @@ export default function NavigateOptions({
   const open = (app: NavApp) => {
     onPicked?.();
     launch(
-      navLink(destination, app, mode, intent, platform),
+      navLink(destination, app, mode, intent, platform, routeFrom),
       NAV_APP_LABEL[app],
-      app === 'apple_maps' ? undefined : navLink(destination, app, mode, intent, 'desktop'),   // always on iPhone
+      app === 'apple_maps' ? undefined : navLink(destination, app, mode, intent, 'desktop', routeFrom),   // always on iPhone
     );
   };
 
@@ -160,7 +174,7 @@ export default function NavigateOptions({
     <Box>
       {title && (
         <Typography noWrap sx={{ ...SECTION_LABEL, px: 2, pt: 1.5, pb: 1 }}>
-          {intent === 'directions' ? `Directions to ${title}` : title}
+          {intent !== 'directions' ? title : routeFrom ? `From ${routeFrom.name} to ${title}` : `Directions to ${title}`}
         </Typography>
       )}
 
@@ -191,7 +205,7 @@ export default function NavigateOptions({
       {showTransit && <TransitSummary status={status} times={times} />}
 
       <List disablePadding>
-        {navAppsFor(platform).map(app => {
+        {apps.map(app => {
           const { Icon, color } = APP_ICON[app];
           return (
             <ListItemButton key={app} onClick={() => open(app)} sx={{ minHeight: 48 }}>

@@ -65,6 +65,7 @@ import { StopDetailSheet }      from './StopDetailSheet';
 import { StopNoteEditor }       from './StopNoteEditor';
 import { ItineraryList }        from './ItineraryList';
 import { ItineraryRecap }       from './ItineraryRecap';
+import { RepeatStopDialog }     from './RepeatStopDialog';
 import { hereNow, linkedIndex, linkedFor, recordable, recordDays, startedCheck, type LinkedItem } from './record';
 import { useUrlParam }          from '@/lib/hooks/useUrlParam';
 import { useTabActive, useTabSearchParams } from '@/lib/hooks/useTabActive';
@@ -77,7 +78,9 @@ import type { WeatherResult }   from '@/lib/weather-insights';
 import { pageHourWeather, type HourWeather } from './hourWeather';
 import { isTravelDay }          from '@/lib/trips/presence';
 import type { TravelOrigin }    from '@/lib/navigation/useTravelTimes';
+import type { NavOrigin }       from '@/lib/navigation/links';
 import type { Highlight }       from '@/lib/itinerary/highlight';
+import { repeatStop }           from '@/lib/itinerary/repeat';
 
 const VIEW_MODES = ['timeline', 'list', 'recap'] as const;
 const VIEW_OPTIONS = [
@@ -196,6 +199,7 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
   const [showSkipped, setShowSkipped] = useState(false);
   const [sheetKey,    setSheetKey]    = useState<string | null>(null);
   const [noteKey,     setNoteKey]     = useState<string | null>(null);
+  const [repeatKey,   setRepeatKey]   = useState<string | null>(null);
   // Every stop delete asks first and says what goes with it — resolves once
   // deleted (true) or cancelled / failed (false), so the drawer knows to close
   const [pendingDelete, setPendingDelete] = useState<{ stop: Stop; resolve: (deleted: boolean) => void } | null>(null);
@@ -855,28 +859,64 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
     }
   };
 
-  // Your colour on a stop — shown at once, undone with a toast if it can't be saved or queued
-  const setHighlight = async (stop: Stop, highlight: Highlight | null) => {
+  // One quick change to a stop (no time involved) — shown at once, undone with a toast
+  // naming `what` if it can't be saved or queued
+  const patchStop = async (stop: Stop, fields: Record<string, unknown>, shown: Partial<Stop>, what: string) => {
     if (!stop._id) return;
     const prevDays    = days;
-    const updatedDays = changeStop(days, stop._id, s => ({ ...s, highlight: highlight ?? undefined }));
+    const updatedDays = changeStop(days, stop._id, s => ({ ...s, ...shown }));
     setDays(updatedDays);
     try {
       await saveTripCache(tripId, { ...(await getTripCache(tripId)), itinerary: updatedDays });
 
       const res = await sendOrQueue(
-        { type: 'RESCHEDULE_STOP', tripId, payload: { stopId: stop._id, highlight } },
+        { type: 'RESCHEDULE_STOP', tripId, payload: { stopId: stop._id, ...fields } },
         () => fetch(`/api/trips/${tripId}/itinerary/stops/${stop._id}`, {
           method:  'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body:    JSON.stringify({ highlight }),
+          body:    JSON.stringify(fields),
         }),
         savedDays(updatedDays),
       );
       if (res) setDays(await daysFrom(res));
     } catch (err) {
       await undoDays(prevDays);
-      reportSaveFailure(`the colour for ${quoted(stop)}`, err);
+      reportSaveFailure(`${what} for ${quoted(stop)}`, err);
+    }
+  };
+
+  const setHighlight = (stop: Stop, highlight: Highlight | null) =>
+    patchStop(stop, { highlight }, { highlight: highlight ?? undefined }, 'the colour');
+
+  const setStopType = (stop: Stop, type: string) =>
+    patchStop(stop, { type }, { type }, 'the new type');
+
+  // A copy of the stop on each day `offsets` away. Resolves false when it couldn't be
+  // saved or queued, so the day picker stays open.
+  const repeatOn = async (stop: Stop, offsets: number[]): Promise<boolean> => {
+    if (!stop._id) { reportSaveFailure(`the repeats of ${quoted(stop)}`); return false; }
+    const prevDays = days;
+    const { days: updatedDays, added } = repeatStop(days, stop._id, offsets, () => undefined);
+    if (!added) return true;
+    setDays(updatedDays);
+    try {
+      await saveTripCache(tripId, { ...(await getTripCache(tripId)), itinerary: updatedDays });
+
+      const res = await sendOrQueue(
+        { type: 'REPEAT_STOP', tripId, payload: { stopId: stop._id, offsets, name: stop.name } },
+        () => fetch(`/api/trips/${tripId}/itinerary/stops/${stop._id}/repeat`, {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ offsets }),
+        }),
+        savedDays(updatedDays),
+      );
+      if (res) setDays(await daysFrom(res));
+      return true;
+    } catch (err) {
+      await undoDays(prevDays);
+      reportSaveFailure(`the repeats of ${quoted(stop)}`, err);
+      return false;
     }
   };
 
@@ -1057,6 +1097,7 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
 
   const sheetStop = sheetKey ? activeStops.find(s => stopKey(s) === sheetKey) ?? null : null;
   const noteStop  = noteKey  ? activeStops.find(s => stopKey(s) === noteKey)  ?? null : null;
+  const repeatOf  = repeatKey ? activeStops.find(s => stopKey(s) === repeatKey) ?? null : null;
   const ALL_DAY_COLLAPSED = 6;
   const shownAllDay      = showAllDay ? allDayStops : allDayStops.slice(0, ALL_DAY_COLLAPSED);
 
@@ -1085,6 +1126,24 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
       .pop()?.s;
     if (prev?.coordinates) return { name: prev.name, coordinates: prev.coordinates };
     return elsewhere(basedAt?.coordinates) ? { name: basedAt!.name, coordinates: basedAt!.coordinates! } : null;
+  };
+
+  // Where you're staying on a stop's date — both stays on a changeover day. Not offered
+  // for the hotel itself.
+  const hotelsFor = (stop: Stop): NavOrigin[] => {
+    const day = stop.scheduledStart?.slice(0, 10) || activeDayYmd;
+    const at  = stop.coordinates;
+    const seen = new Set<string>();
+    return accoms
+      .filter(a => a.checkIn <= day && day <= a.checkOut && (a.coordinates || a.address))
+      .filter(a => !(at && a.coordinates && haversineKm(a.coordinates.lat, a.coordinates.lng, at.lat, at.lng) <= 0.05))
+      .filter(a => !(a.address && stop.address && a.address.trim() === stop.address.trim()))
+      .filter(a => {
+        const key = `${a.name}|${a.address ?? ''}`;
+        if (seen.has(key)) return false;
+        seen.add(key); return true;
+      })
+      .map(a => ({ name: a.name, address: a.address, coordinates: a.coordinates ?? null }));
   };
 
   // Per-day effective timeline bounds — expands upward for early flights, downward for late-night events
@@ -2053,6 +2112,7 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
         onReminderChange={(s, v) => (typeof v === 'boolean' ? setBookingReminder(s, v) : setStopReminder(s, v))}
         flight={sheetStop ? flightFor(sheetStop) : null}
         navFrom={sheetStop ? navFromFor(sheetStop) : null}
+        hotels={sheetStop ? hotelsFor(sheetStop) : []}
         onClose={() => setSheetKey(null)}
         onSelect={s => setSheetKey(stopKey(s))}
         onSkip={skipStop}
@@ -2063,9 +2123,27 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
         }}
         onEditNote={s => setNoteKey(stopKey(s))}
         onHighlight={setHighlight}
+        onChangeType={setStopType}
+        onRepeat={s => setRepeatKey(stopKey(s))}
         onOpenLogistics={() => { setSheetKey(null); onSwitchToLogistics?.(); }}
         onFilterType={t => { setSheetKey(null); setTypeFilter([t]); }}
       />
+
+      {/* ── Repeat a stop on other days — over the sheet; done goes back to the itinerary ── */}
+      {repeatOf && activeDay && (
+        <RepeatStopDialog
+          stop={repeatOf}
+          days={days}
+          pageDate={ymdOf(activeDay.date)}
+          isMobile={isMobile}
+          onClose={() => setRepeatKey(null)}
+          onRepeat={async offsets => {
+            const ok = await repeatOn(repeatOf, offsets);
+            if (ok) setSheetKey(null);
+            return ok;
+          }}
+        />
+      )}
 
       {/* ── Your note on a stop — mounted per edit, over the sheet when opened from it ── */}
       {noteStop && (

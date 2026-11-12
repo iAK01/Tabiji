@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import {
   Box, Typography, Button, IconButton, Drawer, Dialog, Chip, Collapse,
+  Menu, MenuItem, ListItemIcon, ListItemText, ListSubheader, Divider,
 } from '@mui/material';
 import { alpha }            from '@mui/material/styles';
 import CloseIcon            from '@mui/icons-material/Close';
@@ -17,10 +18,14 @@ import NotificationsOffIcon from '@mui/icons-material/NotificationsOff';
 import AttachFileIcon       from '@mui/icons-material/AttachFile';
 import PlaceIcon            from '@mui/icons-material/Place';
 import FilterListIcon       from '@mui/icons-material/FilterList';
+import HotelIcon            from '@mui/icons-material/Hotel';
+import CheckIcon            from '@mui/icons-material/Check';
+import EventRepeatIcon      from '@mui/icons-material/EventRepeat';
 import NavigateButton       from '@/components/ui/NavigateButton';
 import type { TravelOrigin } from '@/lib/navigation/useTravelTimes';
+import type { NavOrigin }  from '@/lib/navigation/links';
 import DocumentViewer, { type ViewableFile } from '@/components/files/DocumentViewer';
-import { STOP_CONFIG, D }   from './Itinerary.config';
+import { STOP_CONFIG, QUICK_ADD_TYPES, D } from './Itinerary.config';
 import type { Stop }        from './Itinerary.config';
 import { stopDuration, fmtDuration, timeRangeLabel, canSkip, canNote, canColour, skipLabel } from './Itinerary.helpers';
 import { HighlightSwatches } from './HighlightPicker';
@@ -56,10 +61,15 @@ interface Props {
   onEdit:      (stop: Stop) => void;
   onEditNote:  (stop: Stop) => void;
   onHighlight: (stop: Stop, h: Highlight | null) => void;
+  onChangeType: (stop: Stop, type: string) => void;
+  /** Open the day picker to repeat this stop on other days */
+  onRepeat:    (stop: Stop) => void;
   onOpenLogistics: () => void;
   onFilterType:    (type: string) => void;   // "show me all the gigs"
   /** Where Navigate's times start when you're not near this stop yet */
   navFrom?:        TravelOrigin | null;
+  /** Where you're staying that day — a route from each, laid out in the map app */
+  hotels?:         NavOrigin[];
 }
 
 const sectionLabelSx = {
@@ -74,13 +84,14 @@ const sectionLabelSx = {
 export function StopDetailSheet({
   stop, concurrent, isMobile, linkedFiles, resources = [], isStarted, reminder, flight,
   reminderSetting = null, reminderNotice = null, onReminderChange,
-  onClose, onSelect, onSkip, onEdit, onEditNote, onHighlight, onOpenLogistics, onFilterType, navFrom = null,
+  onClose, onSelect, onSkip, onEdit, onEditNote, onHighlight, onChangeType, onRepeat, onOpenLogistics, onFilterType, navFrom = null, hotels = [],
 }: Props) {
   const [viewerFile,     setViewerFile]     = useState<ViewableFile | null>(null);
   const [reminderOpen,   setReminderOpen]   = useState(false);
   const [concurrentOpen, setConcurrentOpen] = useState(false);
+  const [typeAnchor,     setTypeAnchor]     = useState<HTMLElement | null>(null);
 
-  useEffect(() => { setReminderOpen(false); setConcurrentOpen(false); }, [stop?._id]);
+  useEffect(() => { setReminderOpen(false); setConcurrentOpen(false); setTypeAnchor(null); }, [stop?._id]);
 
   const open = !!stop;
   const body = stop && (() => {
@@ -91,6 +102,9 @@ export function StopDetailSheet({
     const dur       = stopDuration(stop);
     const place     = stop.locationName || stop.address;
     const myNotes   = stop.myNotes?.trim() ?? '';
+    // A booking's stops are rebuilt from the booking — a new type or a repeat wouldn't fit
+    const canRetype = !!stop._id && stop.source !== 'logistics';
+    const typeName  = (t: string) => { const l = (STOP_CONFIG[t] ?? STOP_CONFIG.other).label; return l.replace(/^\S+\s*/, '') || l; };
     // Shown with the night before — name the date it's really on
     const lateDate  = stop.afterMidnight && stop.scheduledStart
       ? new Date(`${stop.scheduledStart.slice(0, 10)}T12:00:00`).toLocaleDateString('en-IE', { weekday: 'short', day: 'numeric', month: 'short' })
@@ -140,16 +154,49 @@ export function StopDetailSheet({
           <Box sx={{ display: 'flex', gap: 0.75, flexWrap: 'wrap', mb: 1.5 }}>
             <Chip
               size="small"
-              icon={<FilterListIcon sx={{ fontSize: '14px !important' }} />}
-              label={cfg.label.replace(/^\S+\s*/, '') || cfg.label}
-              onClick={() => onFilterType(stop.type)}
-              title="Show only these on the day"
+              label={
+                <Box component="span" sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.25 }}>
+                  {typeName(stop.type)}
+                  <ExpandMoreIcon sx={{ fontSize: 16, mr: -0.5 }} />
+                </Box>
+              }
+              onClick={e => setTypeAnchor(e.currentTarget)}
+              aria-haspopup="true"
+              aria-expanded={!!typeAnchor}
               sx={{
                 backgroundColor: alpha(cfg.color, 0.1), color: cfg.color, fontWeight: 700, fontFamily: D.body,
-                '& .MuiChip-icon': { color: cfg.color },
                 '&:hover': { backgroundColor: alpha(cfg.color, 0.18) },
               }}
             />
+            <Menu
+              anchorEl={typeAnchor} open={!!typeAnchor} onClose={() => setTypeAnchor(null)}
+              slotProps={{ paper: { sx: { borderRadius: '12px', minWidth: 220 } } }}
+            >
+              <MenuItem onClick={() => { setTypeAnchor(null); onFilterType(stop.type); }} sx={{ minHeight: 48 }}>
+                <ListItemIcon><FilterListIcon fontSize="small" /></ListItemIcon>
+                <ListItemText primary="Show only this type" slotProps={{ primary: { sx: { fontFamily: D.body, fontWeight: 700 } } }} />
+              </MenuItem>
+              {canRetype && <Divider />}
+              {canRetype && (
+                <ListSubheader disableSticky sx={{ ...sectionLabelSx, lineHeight: 1, pt: 1.5, pb: 0.75, backgroundColor: 'transparent' }}>
+                  Change to
+                </ListSubheader>
+              )}
+              {canRetype && QUICK_ADD_TYPES.map(t => {
+                const c  = STOP_CONFIG[t];
+                const on = t === stop.type;
+                return (
+                  <MenuItem
+                    key={t} selected={on} sx={{ minHeight: 44 }}
+                    onClick={() => { setTypeAnchor(null); if (!on) onChangeType(stop, t); }}
+                  >
+                    <ListItemIcon><c.Icon fontSize="small" sx={{ color: c.color }} /></ListItemIcon>
+                    <ListItemText primary={typeName(t)} slotProps={{ primary: { sx: { fontFamily: D.body, fontWeight: 600 } } }} />
+                    {on && <CheckIcon fontSize="small" sx={{ color: D.muted, ml: 1 }} />}
+                  </MenuItem>
+                );
+              })}
+            </Menu>
             {lateDate && (
               <Chip size="small" label={`After midnight · ${lateDate}`}
                 sx={{ backgroundColor: alpha(D.navy, 0.08), color: D.navy, fontWeight: 700, fontFamily: D.body }} />
@@ -194,6 +241,24 @@ export function StopDetailSheet({
               )}
             </Box>
           )}
+
+          {(stop.address || stop.coordinates) && hotels.map(h => (
+            <NavigateButton
+              key={`${h.name}|${h.address ?? ''}`}
+              variant="text"
+              icon={HotelIcon}
+              label={`Route from ${h.name}`}
+              origin={h}
+              destination={{ name: stop.name, address: stop.address, coordinates: stop.coordinates ?? null }}
+              suggestedMode="walking"
+              sx={{
+                display: 'flex', justifyContent: 'flex-start', width: '100%', minHeight: 44, px: 0, mt: -1, mb: 1,
+                fontFamily: D.body, fontSize: '0.85rem', fontWeight: 700, textAlign: 'left',
+                '& .MuiButton-startIcon': { ml: 0, mr: 1 },
+                '& .MuiButton-startIcon > *': { fontSize: '18px !important' },
+              }}
+            />
+          ))}
 
           {flight && (
             <Box sx={{ mb: 1.5 }}>
@@ -303,6 +368,20 @@ export function StopDetailSheet({
               </Typography>
             </Box>
           ))}
+
+          {canRetype && (
+            <Box
+              component="button"
+              onClick={() => onRepeat(stop)}
+              sx={{
+                display: 'flex', alignItems: 'center', gap: 1, width: '100%', minHeight: 44, mb: 1,
+                p: 0, border: 'none', background: 'none', cursor: 'pointer', color: D.muted, textAlign: 'left',
+              }}
+            >
+              <EventRepeatIcon sx={{ fontSize: 20 }} />
+              <Typography sx={{ fontFamily: D.body, fontSize: '0.88rem', fontWeight: 700 }}>Repeat on other days</Typography>
+            </Box>
+          )}
 
           {stop.notes && (
             <Typography sx={{

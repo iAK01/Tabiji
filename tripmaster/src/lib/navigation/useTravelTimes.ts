@@ -44,12 +44,14 @@ export interface TravelTimesState {
 
 // Walk / drive / transit minutes for the Navigate dropdown. Starts from where you
 // are when you're near the place; otherwise from `from`; otherwise no times.
+// `fixed`: always from `from` (directions from your hotel), wherever you are.
 // Only runs while the dropdown is open — nothing is looked up for buttons nobody taps.
 
 export function useTravelTimes(
   dest:    NavigationDestination,
   from:    TravelOrigin | null | undefined,
   enabled: boolean,
+  fixed  = false,
 ): TravelTimesState {
   const to     = dest.coordinates;
   const usable = enabled && !!to && Number.isFinite(to.lat) && Number.isFinite(to.lng);
@@ -62,7 +64,7 @@ export function useTravelTimes(
     const none = () => { if (!cancelled) setState({ status: 'none', times: null, fromLabel: null, pickup: null }); };
 
     (async () => {
-      const here   = await currentPosition();
+      const here   = fixed ? null : await currentPosition();
       const origin = here && km(here, to) <= NEAR_KM
         ? { coords: here, label: 'Times from where you are now', pickup: null }
         : from && km(from.coordinates, to) > SAME_PLACE_KM
@@ -82,7 +84,7 @@ export function useTravelTimes(
     })().catch(none);   // no times — the dropdown works without them
 
     return () => { cancelled = true; };
-  }, [usable, to?.lat, to?.lng, from?.name, from?.coordinates.lat, from?.coordinates.lng]);
+  }, [usable, fixed, to?.lat, to?.lng, from?.name, from?.coordinates.lat, from?.coordinates.lng]);
 
   return state;
 }

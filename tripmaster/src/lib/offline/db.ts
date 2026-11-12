@@ -141,6 +141,15 @@ async function dispatchQueuedAction(action: any): Promise<boolean> {
         res = await fetch(`/api/trips/${action.tripId}/itinerary/stops/${action.stopId}`, { method: 'DELETE' });
         break;
 
+      case 'REPEAT_STOP': {
+        const { stopId, offsets } = action.payload;
+        res = await fetch(`/api/trips/${action.tripId}/itinerary/stops/${stopId}/repeat`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ offsets }),
+        });
+        break;
+      }
+
       case 'CALCULATE_TRAVEL':
         res = await fetch(`/api/trips/${action.tripId}/itinerary/calculate-travel`, { method: 'POST' });
         break;
@@ -294,6 +303,7 @@ function describeAction(action: any): string {
     case 'ADD_STOP':                return `the itinerary stop${p.stop?.name ? ` “${p.stop.name}”` : ''}`;
     case 'RESCHEDULE_STOP':         return 'a change to an itinerary stop';
     case 'DELETE_STOP':             return 'removing an itinerary stop';
+    case 'REPEAT_STOP':             return `repeating${p.name ? ` “${p.name}”` : ' a stop'} on other days`;
     case 'CALCULATE_TRAVEL':        return 'recalculated travel times';
     case 'ADD_TRANSPORT':
     case 'EDIT_TRANSPORT':          return 'a transport booking';

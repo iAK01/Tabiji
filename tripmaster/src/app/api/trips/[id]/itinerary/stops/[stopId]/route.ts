@@ -38,12 +38,16 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
 
   const body = await req.json();
   const { scheduledStart, duration, name, type, notes, address, locationName, coordinates, notificationLeadMins, reference, skipped, lateNight, myNotes, highlight } = body;
-  // A skip/unskip, a reminder change, your note or a colour alone needs no time — all-day items don't have one
-  if (!scheduledStart && skipped === undefined && notificationLeadMins === undefined && myNotes === undefined && highlight === undefined) {
+  // A skip/unskip, a reminder change, your note, a colour or a new type alone needs no time — all-day items don't have one
+  if (!scheduledStart && skipped === undefined && notificationLeadMins === undefined && myNotes === undefined
+    && highlight === undefined && type === undefined) {
     return NextResponse.json({ error: 'scheduledStart required' }, { status: 400 });
   }
   if (myNotes !== undefined && (typeof myNotes !== 'string' || myNotes.length > MAX_NOTE)) {
     return NextResponse.json({ error: 'Note too long' }, { status: 400 });
+  }
+  if (type !== undefined && (typeof type !== 'string' || !type.trim())) {
+    return NextResponse.json({ error: 'Invalid type' }, { status: 400 });
   }
   if (highlight !== undefined && highlight !== null && !isHighlight(highlight)) {
     return NextResponse.json({ error: 'Invalid colour' }, { status: 400 });

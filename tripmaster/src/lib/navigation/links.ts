@@ -18,6 +18,16 @@ export interface NavigationDestination {
   coordinates?: { lat: number; lng: number } | null;
 }
 
+/** A fixed starting point (your hotel) instead of where you are — the app shows the whole route. */
+export interface NavOrigin {
+  name:         string;
+  address?:     string;
+  coordinates?: { lat: number; lng: number } | null;
+}
+
+/** Waze only ever routes from where you are. */
+export const takesOrigin = (app: NavApp) => app !== 'waze';
+
 export const NAV_APP_LABEL: Record<NavApp, string> = {
   google_maps: 'Google Maps',
   apple_maps:  'Apple Maps',
@@ -66,16 +76,21 @@ export function navLink(
   mode:     NavMode,
   intent:   NavIntent,
   platform: Platform,
+  origin?:  NavOrigin | null,
 ): string {
   const ll    = latLng(dest);
   const query = encodeURIComponent(dest.address || dest.name || '');
   const where = ll ?? query;
   const ios   = platform === 'ios';
+  // Directions from a set place rather than from where you are
+  const from  = intent === 'directions' && origin
+    ? latLng(origin) ?? encodeURIComponent(origin.address || origin.name)
+    : null;
 
   if (app === 'apple_maps') {
     const base = ios ? 'maps://' : 'https://maps.apple.com/';
     if (intent === 'view') return ll ? `${base}?ll=${ll}&q=${encodeURIComponent(dest.name || dest.address || '')}` : `${base}?q=${query}`;
-    return `${base}?daddr=${where}&dirflg=${APPLE_DIRFLG[mode]}`;
+    return `${base}?${from ? `saddr=${from}&` : ''}daddr=${where}&dirflg=${APPLE_DIRFLG[mode]}`;
   }
 
   // Waze only drives, whatever mode is picked.
@@ -87,9 +102,11 @@ export function navLink(
   if (ios) {
     return intent === 'view'
       ? `comgooglemaps://?q=${where}`
-      : `comgooglemaps://?daddr=${where}&directionsmode=${mode}`;
+      : `comgooglemaps://?${from ? `saddr=${from}&` : ''}daddr=${where}&directionsmode=${mode}`;
   }
   if (intent === 'view') return `https://www.google.com/maps/search/?api=1&query=${where}`;
+  // From a set place: the route laid out to look over
+  if (from) return `https://www.google.com/maps/dir/?api=1&origin=${from}&destination=${where}&travelmode=${mode}`;
   // dir_action=navigate goes straight into turn-by-turn; Google has none for transit.
   return `https://www.google.com/maps/dir/?api=1&destination=${where}&travelmode=${mode}${mode === 'transit' ? '' : '&dir_action=navigate'}`;
 }

@@ -17,7 +17,7 @@ import {
 import type { Stop } from './Itinerary.config';
 import {
   stopStartMinutes, stopDuration, minutesToPx,
-  formatTime, snappedPreviewMinutes, canColour,
+  formatTime, snappedPreviewMinutes, canColour, timeRangeLabel,
 } from './Itinerary.helpers';
 import { HighlightDot } from './HighlightPicker';
 import { HIGHLIGHTS, type Highlight } from '@/lib/itinerary/highlight';
@@ -167,13 +167,23 @@ export function StopBlock({ stop, onDelete, onClick, onResize, pxPerMin, isMobil
     : startMin;
   const translateY = transform ? transform.y : 0;
 
-  // ── Tooltip ───────────────────────────────────────────────────────────────────
+  // ── Tooltip — a card over the stop, beside the pointer, never off screen ───────
   const tooltipLines = stop.notes ? stop.notes.split(' · ').filter(Boolean) : [];
   const tooltipTitle = tooltipLines.length > 0 ? (
-    <Box sx={{ py: 0.25 }}>
-      {tooltipLines.map((line, i) => (
-        <Typography key={i} variant="caption" display="block" sx={{ lineHeight: 1.7 }}>{line}</Typography>
-      ))}
+    <Box>
+      <Typography sx={{ fontFamily: D.display, fontSize: '0.9rem', lineHeight: 1.25, color: D.navy }}>
+        {displayName}
+      </Typography>
+      <Typography sx={{ fontFamily: D.display, fontSize: '0.75rem', color: cfg.color, fontVariantNumeric: 'tabular-nums', mt: 0.25 }}>
+        {timeRangeLabel(stop)}
+      </Typography>
+      <Box sx={{ borderTop: `1px solid ${D.rule}`, mt: 1, pt: 1 }}>
+        {tooltipLines.map((line, i) => (
+          <Typography key={i} sx={{ fontFamily: D.body, fontSize: '0.82rem', lineHeight: 1.5, color: alpha(D.navy, 0.8), '& + &': { mt: 0.5 } }}>
+            {line}
+          </Typography>
+        ))}
+      </Box>
     </Box>
   ) : '';
 
@@ -197,10 +207,19 @@ export function StopBlock({ stop, onDelete, onClick, onResize, pxPerMin, isMobil
     <>
     <Tooltip
       title={tooltipTitle}
-      placement="right"
-      arrow
+      placement="top"
+      followCursor
+      disableInteractive
       disableHoverListener={!stop.notes || isDragging || isResizing}
       enterDelay={300}
+      slotProps={{
+        tooltip: { sx: {
+          backgroundColor: '#ffffff', color: D.navy, borderRadius: '12px',
+          px: 1.75, py: 1.5, maxWidth: 380,
+          boxShadow: '0 12px 32px rgba(29,38,66,0.18), 0 0 0 1px rgba(29,38,66,0.06)',
+        } },
+        popper: { modifiers: [{ name: 'offset', options: { offset: [0, 14] } }] },
+      }}
     >
       <Box
         ref={setNodeRef}
