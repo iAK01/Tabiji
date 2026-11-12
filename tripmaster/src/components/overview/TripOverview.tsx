@@ -23,7 +23,8 @@ import { getLogisticsFacts } from '@/lib/logistics/facts';
 import { getTransportLabel } from '@/components/logistics/logistics.helpers';
 import { displayStatus, localYmd } from '@/lib/trips/onTrip';
 import { OnTripNow, OnTripGetAround } from '@/components/trips/OnTripScreen';
-import { summaryLine, wearHeadline, weatherHeadline, type WeatherResult } from '@/lib/weather-insights';
+import { summaryLine, thereDays, wearHeadline, weatherHeadline, type WeatherResult } from '@/lib/weather-insights';
+import { travelDaysLabel, type Presence } from '@/lib/trips/presence';
 import { packingCounts } from '@/lib/packing/counts';
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
@@ -63,6 +64,7 @@ interface Props {
     startDate:        string;
     endDate:          string;
     nights:           number;
+    presence?:        Presence | null;
     dismissedChecks?: string[];
     groundTransport?: {
       preDeparture?:  GroundTransportLeg;
@@ -248,12 +250,16 @@ export default function TripOverview({ trip, coverPhotoUrl, coverPhotoCredit, on
     packPct === 100 ? 'ok' :
     daysUntil <= 3 ? 'warn' : 'empty';
 
+  const there = trip.presence
+    ? { from: trip.presence.arrive, to: trip.presence.leave, nights: trip.presence.nights, travel: travelDaysLabel(trip.presence) }
+    : { from: trip.startDate, to: trip.endDate, nights: trip.nights, travel: null };
+
   // ── Weather ───────────────────────────────────────────────────────────────
   // Same reads as the Weather tab: now if fresh, else today's (or day one's) high.
   const weather       = trip.weather?.days?.length ? trip.weather : null;
   const weatherDay    = weatherHeadline(weather);
   const isHistorical  = weather?.mode === 'historical';
-  const weatherDays   = weather?.days ?? [];
+  const weatherDays   = thereDays(weather?.days ?? []);   // the days there, not travel days
   const weatherSpan   = (xs: number[]) => {
     const lo = Math.min(...xs), hi = Math.max(...xs);
     return lo === hi ? `${lo}` : `${lo}–${hi}`;
@@ -409,12 +415,14 @@ export default function TripOverview({ trip, coverPhotoUrl, coverPhotoCredit, on
                 color: 'rgba(255,255,255,0.55)', mt: 0.75,
                 textShadow: '0 1px 6px rgba(0,0,0,0.5)',
               }}>
+                {/* The days actually there; the drive to the airport and the night before are travel days */}
                 {trip.destination?.country}
                 {' · '}
-                {new Date(trip.startDate).toLocaleDateString('en-IE', { day: 'numeric', month: 'short' })}
+                {new Date(there.from).toLocaleDateString('en-IE', { day: 'numeric', month: 'short', timeZone: 'UTC' })}
                 {' → '}
-                {new Date(trip.endDate).toLocaleDateString('en-IE', { day: 'numeric', month: 'short', year: 'numeric' })}
-                {trip.nights > 0 && ` · ${trip.nights} night${trip.nights === 1 ? '' : 's'}`}
+                {new Date(there.to).toLocaleDateString('en-IE', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })}
+                {there.nights > 0 && ` · ${there.nights} night${there.nights === 1 ? '' : 's'}`}
+                {there.travel && ` · ${there.travel}`}
               </Typography>
             </Box>
           </Box>

@@ -192,8 +192,9 @@ export async function syncLogisticsToItinerary(tripId: string, logistics?: any) 
     // Harvest any user re-timings of derived logistics stops, and notes on any of
     // them, *before* wiping them, so a manual "check in at 13:00" survives the
     // regenerate-from-scratch below.
-    const overrides = new Map<string, any>();
-    const notes     = new Map<string, string>();
+    const overrides  = new Map<string, any>();
+    const notes      = new Map<string, string>();
+    const highlights = new Map<string, string>();
     for (const day of itinerary.days) {
       for (const s of day.stops ?? []) {
         const phase = s.metadata?.phase ?? (s.logisticsRef?.collection === 'venue' ? 'venue' : null);
@@ -201,6 +202,7 @@ export async function syncLogisticsToItinerary(tripId: string, logistics?: any) 
         const ref = refOf(s.logisticsRef);
         if (s.userOverride) overrides.set(overrideKey(s.logisticsRef.collection, ref, phase, day.date), s.userOverride);
         if (s.myNotes)      notes.set(noteKey(s.logisticsRef.collection, ref, phase, day.date), s.myNotes);
+        if (s.highlight)    highlights.set(noteKey(s.logisticsRef.collection, ref, phase, day.date), s.highlight);
       }
     }
 
@@ -521,13 +523,16 @@ export async function syncLogisticsToItinerary(tripId: string, logistics?: any) 
       });
     }
 
-    // ── Re-apply notes, and user re-timings to derived stops ──────────────────
-    if (overrides.size || notes.size) {
+    // ── Re-apply notes and colours, and user re-timings to derived stops ──────
+    if (overrides.size || notes.size || highlights.size) {
       for (const stop of newStops) {
         if (!stop.logisticsRef || !stop.metadata?.phase) continue;
         const ref  = refOf(stop.logisticsRef);
-        const note = notes.get(noteKey(stop.logisticsRef.collection, ref, stop.metadata.phase, stop.date));
+        const key  = noteKey(stop.logisticsRef.collection, ref, stop.metadata.phase, stop.date);
+        const note = notes.get(key);
         if (note) stop.myNotes = note;
+        const highlight = highlights.get(key);
+        if (highlight) stop.highlight = highlight;
         const ov = overrides.get(
           overrideKey(stop.logisticsRef.collection, ref, stop.metadata.phase, stop.date),
         );

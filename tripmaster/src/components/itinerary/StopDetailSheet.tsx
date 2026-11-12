@@ -22,7 +22,9 @@ import type { TravelOrigin } from '@/lib/navigation/useTravelTimes';
 import DocumentViewer, { type ViewableFile } from '@/components/files/DocumentViewer';
 import { STOP_CONFIG, D }   from './Itinerary.config';
 import type { Stop }        from './Itinerary.config';
-import { stopDuration, fmtDuration, timeRangeLabel, canSkip, canNote, skipLabel } from './Itinerary.helpers';
+import { stopDuration, fmtDuration, timeRangeLabel, canSkip, canNote, canColour, skipLabel } from './Itinerary.helpers';
+import { HighlightSwatches } from './HighlightPicker';
+import { HIGHLIGHTS, type Highlight } from '@/lib/itinerary/highlight';
 import { recordable, type LinkedItem } from './record';
 import { LinkedResources }  from './LinkedResources';
 import FlightLive from '@/components/flights/FlightLive';
@@ -53,6 +55,7 @@ interface Props {
   onSkip:      (stop: Stop, skipped: boolean) => void;
   onEdit:      (stop: Stop) => void;
   onEditNote:  (stop: Stop) => void;
+  onHighlight: (stop: Stop, h: Highlight | null) => void;
   onOpenLogistics: () => void;
   onFilterType:    (type: string) => void;   // "show me all the gigs"
   /** Where Navigate's times start when you're not near this stop yet */
@@ -71,7 +74,7 @@ const sectionLabelSx = {
 export function StopDetailSheet({
   stop, concurrent, isMobile, linkedFiles, resources = [], isStarted, reminder, flight,
   reminderSetting = null, reminderNotice = null, onReminderChange,
-  onClose, onSelect, onSkip, onEdit, onEditNote, onOpenLogistics, onFilterType, navFrom = null,
+  onClose, onSelect, onSkip, onEdit, onEditNote, onHighlight, onOpenLogistics, onFilterType, navFrom = null,
 }: Props) {
   const [viewerFile,     setViewerFile]     = useState<ViewableFile | null>(null);
   const [reminderOpen,   setReminderOpen]   = useState(false);
@@ -127,6 +130,12 @@ export function StopDetailSheet({
           <Typography sx={{ fontFamily: D.display, fontSize: '1.3rem', lineHeight: 1.2, color: D.navy, mb: 1 }}>
             {stop.name?.trim() || 'Unnamed stop'}
           </Typography>
+
+          {canColour(stop) && (
+            <Box sx={{ ml: -1, mt: -0.5, mb: 0.5 }}>
+              <HighlightSwatches value={stop.highlight} onChange={h => onHighlight(stop, h)} />
+            </Box>
+          )}
 
           <Box sx={{ display: 'flex', gap: 0.75, flexWrap: 'wrap', mb: 1.5 }}>
             <Chip
@@ -361,6 +370,9 @@ export function StopDetailSheet({
                         sx={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 1, py: 1.25, cursor: 'pointer' }}
                       >
                         <Box sx={{ width: 4, alignSelf: 'stretch', borderRadius: 2, backgroundColor: oc.color, flexShrink: 0 }} />
+                        {o.highlight && (
+                          <Box title={HIGHLIGHTS[o.highlight].label} sx={{ width: 10, height: 10, borderRadius: '50%', backgroundColor: HIGHLIGHTS[o.highlight].swatch, flexShrink: 0 }} />
+                        )}
                         <Typography sx={{ fontFamily: D.display, fontSize: '0.78rem', color: oc.color, fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>
                           {timeRangeLabel(o)}
                         </Typography>

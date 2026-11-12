@@ -4,6 +4,7 @@ import TripItinerary from '@/lib/mongodb/models/TripItinerary';
 import { insertByTime } from '@/lib/itinerary/nights';
 import { pinIfFound } from '@/lib/geo/pinAddress';
 import { tripAreas } from '@/lib/geo/tripAreas';
+import { isHighlight } from '@/lib/itinerary/highlight';
 
 const MAX_NOTE = 20_000;
 
@@ -36,13 +37,16 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   if (error) return error;
 
   const body = await req.json();
-  const { scheduledStart, duration, name, type, notes, address, locationName, coordinates, notificationLeadMins, reference, skipped, lateNight, myNotes } = body;
-  // A skip/unskip, a reminder change or your note alone needs no time — all-day items don't have one
-  if (!scheduledStart && skipped === undefined && notificationLeadMins === undefined && myNotes === undefined) {
+  const { scheduledStart, duration, name, type, notes, address, locationName, coordinates, notificationLeadMins, reference, skipped, lateNight, myNotes, highlight } = body;
+  // A skip/unskip, a reminder change, your note or a colour alone needs no time — all-day items don't have one
+  if (!scheduledStart && skipped === undefined && notificationLeadMins === undefined && myNotes === undefined && highlight === undefined) {
     return NextResponse.json({ error: 'scheduledStart required' }, { status: 400 });
   }
   if (myNotes !== undefined && (typeof myNotes !== 'string' || myNotes.length > MAX_NOTE)) {
     return NextResponse.json({ error: 'Note too long' }, { status: 400 });
+  }
+  if (highlight !== undefined && highlight !== null && !isHighlight(highlight)) {
+    return NextResponse.json({ error: 'Invalid colour' }, { status: 400 });
   }
   if (notificationLeadMins !== undefined && notificationLeadMins !== null
     && !(Number.isInteger(notificationLeadMins) && notificationLeadMins >= 0 && notificationLeadMins <= 24 * 60)) {
@@ -73,6 +77,9 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
         if (myNotes.trim()) stop.myNotes = myNotes;
         else delete stop.myNotes;
       }
+      // Your colour — null clears it; booking stops keep it across syncs like the note
+      if (highlight === null) delete stop.highlight;
+      else if (highlight !== undefined) stop.highlight = highlight;
       if (duration             !== undefined) stop.duration             = duration;
       if (name                 !== undefined) stop.name                 = name;
       if (type                 !== undefined) stop.type                 = type;

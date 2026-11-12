@@ -124,7 +124,7 @@ For each item:
 - trip: the trip ref ("T1") whose dates and places fit, or null when none fits or there are none.
 - existingId: the saved line it is about, from that trip's list (e.g. "s3"), else null. The same thing means the same booking, or the same event on the same day at about the same time — never just a shared venue, day or time slot.
 - title: a few words, e.g. "Opening reception" or "Flight to Lisbon".
-- why: one short sentence on what this email adds or says, e.g. "Registration confirmed; ticket attached."
+- why: one short sentence saying what it is, e.g. "Optional dinner after the conference — booking needed." or "Your 10:40 flight is cancelled."
 - attachments: the numbers of the attachments that go with it (the ticket, the confirmation PDF, the pass, the invoice). Leave out logos, icons, banners, signatures and app-store or social badges.
 - links: links worth keeping with it — the ticket, event page, manage-booking, check-in, map — copied exactly as they appear. Never unsubscribe, preferences, app stores, social media or tracking pixels.
 - documentType: what kind of document backs it.
@@ -132,17 +132,19 @@ For each item:
 
 Details:
 - Dates YYYY-MM-DD; times HH:MM, 24-hour.
-- scheduledStart, departureTime, arrivalTime: "YYYY-MM-DDTHH:MM:SS" in local time where it happens (the trip's time zone unless it happens elsewhere). Emails sometimes label times with a zone that isn't the place's own — convert to the place's local time when the email states the zone or offset plainly; when it's unclear which zone a time is in, say so in notes.
+- scheduledStart, departureTime, arrivalTime: "YYYY-MM-DDTHH:MM:SS" in local time where it happens (the trip's time zone unless it happens elsewhere). Emails sometimes label times with a zone that isn't the place's own — convert to the place's local time when the email states the zone or offset plainly; when it's unclear which zone a time is in, leave the time "" rather than guess.
 - An attached calendar invite states the exact time and zone — prefer it to the email text.
 - duration: minutes, from an end time when one is given, else 0.
 - address: a street address only when the email gives one, else "". building: for a room, hall, stage or stand inside a larger venue, that venue's name, else "".
 - searchQuery: for stops, venues and stays, the place's name with its town and country, e.g. "Sartory Hall, Cologne, Germany".
 - confirmationNumber: booking reference, order, registration or ticket number.
-- notes: what they'd need on the day that fits nowhere else — entry code, seat, gate, meeting point, dress code, what to bring. Short.
+- notes: only what they'd need on the day that fits nowhere else — entry code, seat, gate, meeting point, dress code, what to bring — written as a short note they'd write themselves, e.g. "Show the QR code at check-in." Never what the email is, how a time was worked out, or anything already in another field. "" when there's nothing.
 - type: stops — flight, meeting, meal, breakfast, activity, sightseeing, transport, transfer, work, gig, other; venues — concert, conference, restaurant, sports, attraction, business, other; transport — flight, train, bus, ferry, car, car_hire, taxi, private_transfer, parking; stays — hotel, apartment, hostel, guesthouse, other.
 - No check-in or check-out stops for a stay — just the stay.
 
-summary: one plain sentence for the traveller about the whole email.`;
+summary: one plain sentence for the traveller about the whole email.
+
+Everything you write is shown to the traveller as it is: plain and short. Never explain your reasoning, conversions or what you checked.`;
 }
 
 export async function readEmail(prepared: PreparedEmail, ctx: { today: string; received: string; trips: TripContext[] }): Promise<ReadResult> {

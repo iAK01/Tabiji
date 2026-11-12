@@ -11,6 +11,7 @@ import PushNotificationLog from '@/lib/mongodb/models/PushNotificationLog';
 import { deleteFile } from '@/lib/utils/storage';
 import User from '@/lib/mongodb/models/User';
 import { syncLogisticsToItinerary } from '@/lib/itinerary/syncLogistics';
+import { tripPresence } from '@/lib/trips/presence';
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -24,6 +25,9 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   if (!trip) return NextResponse.json({ error: 'Not found' }, { status: 404 });
   const tripObj = trip.toObject();
   if (!tripObj.companyName && user?.companyName) tripObj.companyName = user.companyName;
+  // The days actually there, and the travel days either side
+  const logistics = await TripLogistics.findOne({ tripId: id }, 'transportation accommodation').lean();
+  tripObj.presence = tripPresence(tripObj, logistics as any, user?.homeLocation);
   return NextResponse.json({ trip: tripObj });
 }
 
@@ -66,7 +70,10 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
     await syncLogisticsToItinerary(id);
   }
 
-  return NextResponse.json({ trip });
+  const tripObj = trip.toObject();
+  const logistics = await TripLogistics.findOne({ tripId: id }, 'transportation accommodation').lean();
+  tripObj.presence = tripPresence(tripObj, logistics as any, user?.homeLocation);
+  return NextResponse.json({ trip: tripObj });
 }
 
 export async function DELETE(

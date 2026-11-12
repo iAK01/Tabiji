@@ -17,8 +17,10 @@ import {
 import type { Stop } from './Itinerary.config';
 import {
   stopStartMinutes, stopDuration, minutesToPx,
-  formatTime, snappedPreviewMinutes,
+  formatTime, snappedPreviewMinutes, canColour,
 } from './Itinerary.helpers';
+import { HighlightDot } from './HighlightPicker';
+import { HIGHLIGHTS, type Highlight } from '@/lib/itinerary/highlight';
 import { TONE } from '@/components/flights/FlightLive';
 import type { Tone } from '@/lib/flights/status';
 
@@ -53,6 +55,8 @@ interface Props {
   navFrom?:     TravelOrigin | null;
   /** Earliest and latest start a drag or top-edge resize may give it, in page minutes */
   bounds?:      { min: number; max: number };
+  /** Your colour for the stop — set from the dot at the top of the card */
+  onHighlight?: (h: Highlight | null) => void;
 }
 
 // Bell + the time the notification goes out, beside the stop's name.
@@ -74,7 +78,7 @@ function ReminderMark({ reminder, size }: { reminder: { local: string; sent: boo
   );
 }
 
-export function StopBlock({ stop, onDelete, onClick, onResize, pxPerMin, isMobile, colIndex = 0, totalCols = 1, colSpan = 1, linkedFiles = [], startHour = DAY_START_HOUR, reminder = null, highlighted = false, editMode = false, live = null, navFrom = null, bounds }: Props) {
+export function StopBlock({ stop, onDelete, onClick, onResize, pxPerMin, isMobile, colIndex = 0, totalCols = 1, colSpan = 1, linkedFiles = [], startHour = DAY_START_HOUR, reminder = null, highlighted = false, editMode = false, live = null, navFrom = null, bounds, onHighlight }: Props) {
   const startMin = stopStartMinutes(stop);
   if (startMin === null) return null;
 
@@ -95,6 +99,7 @@ export function StopBlock({ stop, onDelete, onClick, onResize, pxPerMin, isMobil
   const hasNote     = !!stop.myNotes?.trim();
   const canMove     = editMode && !isFact;
   const limits      = bounds ?? { min: DAY_START_HOUR * 60, max: DAY_END_HOUR * 60 - duration };
+  const hl          = stop.highlight ? HIGHLIGHTS[stop.highlight] : null;
 
   const [viewerFile, setViewerFile] = useState<ViewableFile | null>(null);
 
@@ -172,6 +177,16 @@ export function StopBlock({ stop, onDelete, onClick, onResize, pxPerMin, isMobil
     </Box>
   ) : '';
 
+  const colourDot = onHighlight && canColour(stop) && !isDragging && !isResizing ? (
+    <HighlightDot
+      value={stop.highlight}
+      onChange={onHighlight}
+      size={isMobile ? 32 : 22}
+      dot={isMobile ? 14 : 12}
+      sx={{ my: isMobile ? -1 : -0.5, mr: isMobile ? -0.75 : -0.25 }}
+    />
+  ) : null;
+
   const timeLabel = isDragging
     ? `→ ${formatTime(previewMin)}`
     : isResizing
@@ -209,7 +224,7 @@ export function StopBlock({ stop, onDelete, onClick, onResize, pxPerMin, isMobil
           zIndex:     isDragging || isResizing ? 100 : 2,
 
           // ── Structured-style card ──
-          backgroundColor: '#ffffff',
+          backgroundColor: hl ? hl.tint : '#ffffff',
           borderRadius:    '10px',
           borderLeft:      `6px solid ${cfg.color}`,
           boxShadow: isDragging || isResizing
@@ -360,20 +375,26 @@ export function StopBlock({ stop, onDelete, onClick, onResize, pxPerMin, isMobil
               {reminder && <ReminderMark reminder={reminder} size={isMobile ? 10 : 9} />}
               {hasNote && <EditNoteIcon aria-label="Has notes" sx={{ fontSize: isMobile ? 13 : 12, color: alpha(D.navy, 0.5), flexShrink: 0 }} />}
               {isFact && <LockIcon sx={{ fontSize: 9, color: alpha(D.navy, 0.35), flexShrink: 0 }} />}
+              {colourDot}
             </Box>
           ) : (
             <>
-              {/* Time — leads */}
-              <Typography sx={{
-                fontFamily:         D.display,
-                fontSize:           isMobile ? '1rem' : '0.92rem',
-                lineHeight:         1,
-                color:              cfg.color,
-                fontVariantNumeric: 'tabular-nums',
-                whiteSpace:         'nowrap',
-              }}>
-                {timeLabel}
-              </Typography>
+              {/* Time — leads; your colour at the far end */}
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, minWidth: 0 }}>
+                <Typography sx={{
+                  fontFamily:         D.display,
+                  fontSize:           isMobile ? '1rem' : '0.92rem',
+                  lineHeight:         1,
+                  color:              cfg.color,
+                  fontVariantNumeric: 'tabular-nums',
+                  whiteSpace:         'nowrap',
+                  flex:               1,
+                  minWidth:           0,
+                }}>
+                  {timeLabel}
+                </Typography>
+                {colourDot}
+              </Box>
 
               {/* Name */}
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, minWidth: 0 }}>

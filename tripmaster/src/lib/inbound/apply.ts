@@ -118,14 +118,14 @@ const FIELDS: Record<EntryKind, FieldSpec[]> = {
     { field: 'confirmationNumber',   label: 'Booking reference', value: d => d.confirmationNumber, compare: 'ref' },
     { field: 'details.flightNumber', label: 'Flight number',     value: d => d.flightNumber,       compare: 'ref' },
     { field: 'details.operator',     label: 'Operator',          value: d => d.operator,           compare: 'fill' },
-    { field: 'departureLocation',    label: 'From',              value: d => d.departureLocation,  compare: 'fill' },
-    { field: 'arrivalLocation',      label: 'To',                value: d => d.arrivalLocation,    compare: 'fill' },
+    { field: 'departureLocation',    label: 'Departure point',   value: d => d.departureLocation,  compare: 'fill' },
+    { field: 'arrivalLocation',      label: 'Arrival point',     value: d => d.arrivalLocation,    compare: 'fill' },
     { field: 'notes',                label: 'Notes',             value: d => d.notes,              compare: 'notes' },
   ],
   stop: [
     { field: 'scheduledStart', label: 'Time',      value: startOf,                       compare: 'datetime' },
     { field: 'duration',       label: 'Length',    value: d => d.duration || undefined,  compare: 'fill' },
-    { field: 'reference',      label: 'Reference', value: d => d.confirmationNumber,     compare: 'ref' },
+    { field: 'reference',      label: 'Booking reference', value: d => d.confirmationNumber, compare: 'ref' },
     { field: 'notes',          label: 'Notes',     value: d => d.notes,                  compare: 'notes' },
   ],
 };
@@ -154,7 +154,8 @@ export function compareEntry(kind: EntryKind, entry: any, d: Details): { filled:
     if (empty(cur)) { filled.push({ field: f.field, label: f.label, from: undefined, to: next }); continue; }
     if (f.compare === 'fill') continue;
     if (f.compare === 'notes') {
-      if (!words(cur).includes(words(next))) changes.push({ field: f.field, label: 'Add to notes', from: cur, to: `${cur}\n${next}` });
+      // Notes only grow — what's new goes under what's there, nothing to approve.
+      if (!words(cur).includes(words(next))) filled.push({ field: f.field, label: f.label, from: cur, to: `${cur}\n${next}` });
       continue;
     }
     if (differs(f.compare, cur, next)) changes.push({ field: f.field, label: f.label, from: cur, to: next });
@@ -339,9 +340,13 @@ async function linkFor(tripId: string, target: Target | null) {
 }
 
 /** Puts the item's attachments and links into the trip's resources, on the entry they're for. */
-export async function attachFiles(item: InboundItem, emailId: string, files: StoredFile[], tripId: string, userId: string) {
+export async function attachFiles(
+  item: InboundItem, emailId: string, files: StoredFile[], tripId: string, userId: string,
+): Promise<{ files: StoredFile[]; links: number }> {
   const linkedTo = await linkFor(tripId, item.target);
   const fileIds: string[] = [];
+  const added: StoredFile[] = [];
+  let links = 0;
 
   for (const n of item.attachments) {
     const f = files.find(x => x.index === n);
@@ -366,6 +371,7 @@ export async function attachFiles(item: InboundItem, emailId: string, files: Sto
       ...(f.barcode ? { barcode: f.barcode, barcodeScannedAt: new Date() } : {}),
     });
     fileIds.push(String(doc._id));
+    added.push(f);
   }
 
   for (const l of item.links) {
@@ -381,9 +387,43 @@ export async function attachFiles(item: InboundItem, emailId: string, files: Sto
       fromEmail: emailId,
     });
     fileIds.push(String(doc._id));
+    links++;
   }
 
   item.fileIds = [...item.fileIds, ...fileIds];
+  return { files: added, links };
+}
+
+// ─── What happened, in a line ────────────────────────────────────────────────
+
+function fileWord(f: StoredFile): string {
+  if (f.mimeType === 'application/vnd.apple.pkpass') return 'Wallet pass';
+  if (f.mimeType === 'text/calendar') return 'calendar invite';
+  if (f.barcode) return 'ticket';
+  if (f.mimeType === 'application/pdf') return 'PDF';
+  if (f.mimeType.startsWith('image/')) return 'image';
+  return 'file';
+}
+
+function attachedWords(att: { files: StoredFile[]; links: number }): string[] {
+  const words = att.files.map(fileWord);
+  if (att.links) words.push(att.links === 1 ? '1 link' : `${att.links} links`);
+  return words;
+}
+
+/** "Added: booking reference, notes, Wallet pass, 3 links." — from the writes, so it's never more than what changed. */
+function outcome(item: InboundItem, att: { files: StoredFile[]; links: number }, tripName: string): string {
+  const attached = attachedWords(att);
+  if (item.created) {
+    return `Added to ${tripName}.${attached.length ? ` Attached: ${attached.join(', ')}.` : ''}`;
+  }
+  if (!item.target) {
+    return attached.length ? `Saved to Resources: ${attached.join(', ')}.` : 'Already in Resources — nothing new.';
+  }
+  const labels = [...new Set(item.filled.map(c => c.label))];
+  const fields = labels.filter(l => !(l === 'Map pin' && labels.includes('Address'))).map(l => l.toLowerCase());
+  const all = [...fields, ...attached];
+  return all.length ? `Added: ${all.join(', ')}.` : 'Already up to date — nothing new in this email.';
 }
 
 // ─── Placing an item in a trip ────────────────────────────────────────────────
@@ -419,7 +459,8 @@ export async function placeItem(
   item.changes = [];
 
   if (item.kind === 'document' || item.action === 'reference') {
-    await attachFiles(item, ctx.emailId, ctx.files, tripId, ctx.userId);
+    const att = await attachFiles(item, ctx.emailId, ctx.files, tripId, ctx.userId);
+    item.why   = outcome(item, att, bundle.trip.name);
     item.state = 'applied';
     return;
   }
@@ -446,7 +487,8 @@ export async function placeItem(
       if (res.ok) item.filled = filled;
     }
     item.changes = changes;
-    await attachFiles(item, ctx.emailId, ctx.files, tripId, ctx.userId);
+    const att = await attachFiles(item, ctx.emailId, ctx.files, tripId, ctx.userId);
+    item.why   = outcome(item, att, bundle.trip.name);
     item.state = 'applied';
     return;
   }
@@ -471,7 +513,8 @@ export async function placeItem(
   item.target  = made.target;
   item.created = true;
   if (item.action === 'optional') item.action = 'create';
-  await attachFiles(item, ctx.emailId, ctx.files, tripId, ctx.userId);
+  const att = await attachFiles(item, ctx.emailId, ctx.files, tripId, ctx.userId);
+  item.why   = outcome(item, att, bundle.trip.name);
   item.state = 'applied';
 }
 

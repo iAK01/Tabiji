@@ -9,8 +9,10 @@ import EditNoteIcon    from '@mui/icons-material/EditNote';
 import { STOP_CONFIG, D } from './Itinerary.config';
 import type { Stop }   from './Itinerary.config';
 import {
-  stopStartMinutes, stopDuration, formatTime, fmtDuration, overlapClusters, canSkip, skipLabel,
+  stopStartMinutes, stopDuration, formatTime, fmtDuration, overlapClusters, canSkip, skipLabel, canColour,
 } from './Itinerary.helpers';
+import { HighlightDot } from './HighlightPicker';
+import { HIGHLIGHTS, type Highlight } from '@/lib/itinerary/highlight';
 import { TONE } from '@/components/flights/FlightLive';
 import type { Tone } from '@/lib/flights/status';
 
@@ -24,11 +26,12 @@ interface Props {
   afterMidnightLabel?: string;
   /** Started stops are went / didn't go rather than going / not going */
   isStarted?: (stop: Stop) => boolean;
+  onHighlight?: (stop: Stop, h: Highlight | null) => void;
 }
 
 // The phone-first reading of a day: one full-width row per stop, full names,
 // clashes grouped under a bracket, a big ✕ to drop what you won't go to.
-export function ItineraryList({ stops, onOpen, onSkip, live, afterMidnightLabel, isStarted }: Props) {
+export function ItineraryList({ stops, onOpen, onSkip, live, afterMidnightLabel, isStarted, onHighlight }: Props) {
   const clusters = overlapClusters(stops);
   // The night runs on past midnight: one heading before the first stop from the next date
   const firstLate = clusters.findIndex(g => g.some(s => s.afterMidnight));
@@ -78,10 +81,12 @@ export function ItineraryList({ stops, onOpen, onSkip, live, afterMidnightLabel,
                 const sub   = [stop.locationName || stop.address, dur > 0 ? fmtDuration(dur) : null]
                   .filter(Boolean).join(' · ');
                 const note  = live?.(stop) ?? null;
+                const hl    = stop.highlight ? HIGHLIGHTS[stop.highlight] : null;
                 return (
                   <Box key={stop._id ?? i} sx={{
                     display: 'flex', alignItems: 'stretch',
                     opacity: stop.skipped ? 0.45 : 1,
+                    backgroundColor: hl?.tint,
                   }}>
                     <Box
                       data-stop-id={stop._id}
@@ -130,6 +135,15 @@ export function ItineraryList({ stops, onOpen, onSkip, live, afterMidnightLabel,
                         )}
                       </Box>
                     </Box>
+                    {onHighlight && canColour(stop) && (
+                      <HighlightDot
+                        value={stop.highlight}
+                        onChange={h => onHighlight(stop, h)}
+                        size={44}
+                        dot={16}
+                        sx={{ alignSelf: 'center' }}
+                      />
+                    )}
                     {canSkip(stop) && (
                       <IconButton
                         onClick={() => onSkip(stop, !stop.skipped)}

@@ -237,11 +237,6 @@ export default function EmailPage({ params }: { params: Promise<{ emailId: strin
                     {item.state === 'pending' && item.note && (
                       <Typography sx={{ fontSize: '0.85rem', fontFamily: D.body, color: D.terra, mt: 0.75, fontWeight: 600 }}>{item.note}</Typography>
                     )}
-                    {item.state === 'applied' && !item.created && item.filled.length > 0 && (
-                      <Typography sx={{ fontSize: '0.82rem', fontFamily: D.body, color: D.muted, mt: 0.75 }}>
-                        Filled in on “{item.target?.label}”: {[...new Set(item.filled.map(c => c.label))].join(', ')}
-                      </Typography>
-                    )}
 
                     {item.state === 'applied' && item.changes.length > 0 && (
                       <Box sx={{ mt: 1.5, p: 1.5, borderRadius: 1.5, border: `1px solid ${D.terra}` }}>
@@ -253,7 +248,7 @@ export default function EmailPage({ params }: { params: Promise<{ emailId: strin
                             <Box sx={{ flex: 1, minWidth: 180 }}>
                               <Typography sx={{ fontSize: '0.78rem', color: D.muted, fontFamily: D.body }}>{c.label}</Typography>
                               <Typography sx={{ fontSize: '0.85rem', fontFamily: D.body, whiteSpace: 'pre-line' }}>
-                                Saved: {shown(c.from)}{'\n'}Email: {c.field === 'notes' ? shown(String(c.to).slice(String(c.from ?? '').length).trim()) : shown(c.to)}
+                                Saved: {shown(c.from)}{'\n'}Email: {shown(c.to)}
                               </Typography>
                             </Box>
                             <Button
@@ -261,7 +256,7 @@ export default function EmailPage({ params }: { params: Promise<{ emailId: strin
                               onClick={() => act(item, 'accept', { fields: [c.field] })}
                               sx={{ minHeight: 44, borderColor: D.navy, color: D.navy }}
                             >
-                              {c.field === 'notes' ? 'Add it' : 'Use new'}
+                              Use new
                             </Button>
                           </Box>
                         ))}

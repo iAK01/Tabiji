@@ -21,6 +21,10 @@ const TripSchema = new Schema({
   startDate: Date,
   endDate:   Date,
   nights:    Number,
+  // The days actually at the destination, when set by hand (YYYY-MM-DD). Unset,
+  // they're worked out from the bookings — see lib/trips/presence.ts.
+  thereFrom: { type: String, default: null },
+  thereTo:   { type: String, default: null },
   tripType:  { type: String, enum: ['work', 'leisure', 'mixed'] },
   purpose:   String,
   // Real names for who's on the other end of a reimbursable expense on this trip —

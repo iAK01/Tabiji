@@ -227,7 +227,7 @@ export default function TripWeatherChart({
       if (!idx.length) return null;
       const x0 = x(idx[0]) - step / 2;
       const x1 = x(idx[idx.length - 1]) + step / 2;
-      return { k, x0, x1, mid: (x0 + x1) / 2, text: dayWidth >= 46 ? shortDay(d.date) : String(+d.date.slice(8)), show: k % every === 0 };
+      return { k, x0, x1, mid: (x0 + x1) / 2, text: dayWidth >= 46 ? shortDay(d.date) : String(+d.date.slice(8)), show: k % every === 0, travel: d.travel ? d.city : null };
     }).filter((m): m is NonNullable<typeof m> => !!m);
 
     // Temperature gradient stops across the plotted range.
@@ -455,6 +455,12 @@ export default function TripWeatherChart({
                   {val.tick(t)}
                 </text>
               </g>
+            ))}
+            {/* Travel days: the weather is where the journey starts from — say where */}
+            {layer.dayWidth >= 46 && layer.dayMarks.filter(m => m.travel).map(m => (
+              <text key={`travel-${m.k}`} x={m.mid} y={MARGIN.top + 12} textAnchor="middle" fontSize={10} fontWeight={700} fill={D.terra} fontFamily={FONT}>
+                {m.travel}
+              </text>
             ))}
             {layer.dayMarks.filter(m => m.show).map(m => (
               <text

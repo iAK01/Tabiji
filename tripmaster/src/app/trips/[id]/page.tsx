@@ -61,6 +61,7 @@ import { COUNTRY_LIST }    from '@/lib/data/countries';
 import AirportSearch       from '@/components/ui/AirportSearch';
 import { isOnTrip, displayStatus, showsNow } from '@/lib/trips/onTrip';
 import NotificationBell    from '@/components/notifications/NotificationBell';
+import { travelDaysLabel, type Presence } from '@/lib/trips/presence';
 import TravelSheet         from '@/components/notifications/TravelSheet';
 import { placeTz }         from '@/lib/push/timezones';
 import { TabActiveContext } from '@/lib/hooks/useTabActive';
@@ -134,6 +135,7 @@ interface Trip {
   startDate:      string;
   endDate:        string;
   nights:         number;
+  presence?:      Presence | null;   // the days actually there — lib/trips/presence
   coverPhotoUrl?:    string;
   coverPhotoThumb?:  string;
   coverPhotoCredit?: string;
@@ -282,6 +284,7 @@ function TripPageInner() {
     originCity: '', originCountry: '', originCountryCode: '', originIata: '',
     destinationCity: '', destinationCountry: '', destinationCountryCode: '', destinationIata: '',
     companyName: '', promoterName: '', clientName: '', thirdPartyName: '',
+    thereFrom: '', thereTo: '',
   });
 
   const [fabTrigger, setFabTrigger] = useState<FabTrigger | null>(null);
@@ -484,6 +487,9 @@ function TripPageInner() {
       promoterName:    trip.promoterName    ?? '',
       clientName:      trip.clientName      ?? '',
       thirdPartyName:  trip.thirdPartyName  ?? '',
+      // Prefilled with what the bookings say; changed, it's kept as set
+      thereFrom: trip.presence?.arrive ?? trip.startDate?.split('T')[0] ?? '',
+      thereTo:   trip.presence?.leave  ?? trip.endDate?.split('T')[0] ?? '',
     });
     setEditDays(null);
     fetch(`/api/trips/${trip._id}/itinerary`)
@@ -503,10 +509,15 @@ function TripPageInner() {
         : trip.nights;
     const { originCity, originCountry, originCountryCode, originIata,
             destinationCity, destinationCountry, destinationCountryCode, destinationIata,
-            ...rest } = editForm;
+            thereFrom, thereTo, ...rest } = editForm;
+    // Left as the bookings say, the days there keep following the bookings
+    const auto = trip.presence?.auto;
+    const followsBookings = !!auto && thereFrom === auto.arrive && thereTo === auto.leave;
     const payload = {
       ...rest,
       nights,
+      thereFrom: followsBookings || !thereFrom ? null : thereFrom,
+      thereTo:   followsBookings || !thereTo   ? null : thereTo,
       origin: {
         ...(trip.origin as any),
         city: originCity, country: originCountry,
@@ -634,6 +645,10 @@ function TripPageInner() {
   // Logistics show the real company name immediately — not just after someone has
   // opened Edit Trip and saved once.
   const tripWithDefaults = { ...trip, companyName: trip.companyName || profileCompanyName };
+
+  // Nights at the destination; the days either side are travel days
+  const nightsThere = trip.presence?.nights ?? trip.nights;
+  const travelLabel = travelDaysLabel(trip.presence);
 
   const daysUntil = trip.startDate
     ? Math.ceil((new Date(trip.startDate).getTime() - Date.now()) / 86400000)
@@ -780,7 +795,7 @@ function TripPageInner() {
               color: 'rgba(255,255,255,0.72)', overflow: 'hidden', textOverflow: 'ellipsis',
             }}>
               {[
-                `${trip.nights} night${trip.nights === 1 ? '' : 's'}`,
+                `${nightsThere} night${nightsThere === 1 ? '' : 's'}`,
                 localTime && homeDiffH ? `${localTime} local (${homeDiffH > 0 ? '+' : ''}${homeDiffH}h)` : '',
               ].filter(Boolean).join(' · ')}
             </Typography>
@@ -946,7 +961,7 @@ function TripPageInner() {
 
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
                 <Typography sx={{ fontFamily: D.body, fontSize: '0.7rem', fontWeight: 600, color: 'rgba(255,255,255,0.45)', letterSpacing: '0.04em' }}>
-                  {trip.nights} night{trip.nights === 1 ? '' : 's'}
+                  {nightsThere} night{nightsThere === 1 ? '' : 's'}{travelLabel ? ` · ${travelLabel}` : ''}
                 </Typography>
                 <Box sx={{ width: 3, height: 3, borderRadius: '50%', bgcolor: 'rgba(255,255,255,0.2)' }} />
                 <Typography sx={{ fontFamily: D.body, fontSize: '0.7rem', fontWeight: 600, color: 'rgba(255,255,255,0.45)', textTransform: 'capitalize', letterSpacing: '0.04em' }}>
@@ -1211,6 +1226,20 @@ function TripPageInner() {
                 />
                 <TextField label="Return date" type="date" value={editForm.endDate}
                   onChange={e => setEditForm(p => ({ ...p, endDate: e.target.value }))}
+                  fullWidth InputLabelProps={{ shrink: true, sx: { fontFamily: D.body } }}
+                  InputProps={{ sx: { fontFamily: D.body } }}
+                />
+              </Box>
+              <Box sx={{ display: 'flex', gap: 2, flexDirection: { xs: 'column', sm: 'row' } }}>
+                <TextField label={`Arrive in ${editForm.destinationCity || 'destination'}`} type="date" value={editForm.thereFrom}
+                  onChange={e => setEditForm(p => ({ ...p, thereFrom: e.target.value }))}
+                  inputProps={{ min: editForm.startDate || undefined, max: editForm.endDate || undefined }}
+                  fullWidth InputLabelProps={{ shrink: true, sx: { fontFamily: D.body } }}
+                  InputProps={{ sx: { fontFamily: D.body } }}
+                />
+                <TextField label={`Leave ${editForm.destinationCity || 'destination'}`} type="date" value={editForm.thereTo}
+                  onChange={e => setEditForm(p => ({ ...p, thereTo: e.target.value }))}
+                  inputProps={{ min: editForm.thereFrom || editForm.startDate || undefined, max: editForm.endDate || undefined }}
                   fullWidth InputLabelProps={{ shrink: true, sx: { fontFamily: D.body } }}
                   InputProps={{ sx: { fontFamily: D.body } }}
                 />

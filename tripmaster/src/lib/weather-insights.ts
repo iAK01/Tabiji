@@ -5,7 +5,7 @@
 // All pure functions over the stored WeatherResult, so changing a threshold or a
 // phrase applies to cached data without a refetch. Fetching lives in weather.ts.
 
-export const WEATHER_VERSION = 6;   // 6: home keeps first/last-day hours + its point
+export const WEATHER_VERSION = 7;   // 7: travel days — where you are, marked `travel`
 
 export type DaySource = 'forecast' | 'historical';
 
@@ -57,6 +57,8 @@ export interface DayWeather {
   nightMm?:      number | null;  // before 08:00 and after 22:00
   rainKind?:     'drizzle' | 'rain' | null;
   rainModels?:   number | null;  // forecast models that agreed on the read (1 = best match alone)
+  // v7 — a day before arriving or after leaving: the weather where the journey starts from
+  travel?:       boolean;
 }
 
 export interface CurrentWeather {
@@ -97,6 +99,12 @@ export interface WeatherResult {
     monthlyHighs: number[] | null; // Jan–Dec average daily high
   };
   homeUnset?: boolean;
+}
+
+/** The days at the destination — travel days either side left out (unless every day is one). */
+export function thereDays<T extends { travel?: boolean }>(days: T[]): T[] {
+  const there = days.filter(d => !d.travel);
+  return there.length ? there : days;
 }
 
 // ─── Small helpers ────────────────────────────────────────────────────────────
@@ -307,7 +315,7 @@ function seaText(t: number): string {
 }
 
 export function wearGuide(w: WeatherResult): WearRow[] {
-  const days = w.days ?? [];
+  const days = thereDays(w.days ?? []);
   if (!days.length) return [];
   const rows: WearRow[] = [];
   const tilde = isTypical(days) ? '~' : '';
@@ -428,10 +436,13 @@ function joinAnd(parts: string[]): string {
 
 export function homeCompare(w: WeatherResult): HomeCompare | null {
   const home = w.home;
-  const days = w.days ?? [];
+  const days = thereDays(w.days ?? []);
   if (!home?.days.length || !days.length) return null;
 
-  const hd = home.days;
+  // Home on the same dates as the days there
+  const there = new Set(days.map(d => d.date));
+  const same  = home.days.filter(d => there.has(d.date));
+  const hd    = same.length ? same : home.days;
   const cities   = [...new Set(days.map(d => d.city))];
   const destCity = cities.length === 1 ? cities[0] : 'Trip';
   const typical  = isTypical(days);
@@ -575,8 +586,9 @@ export function watchOuts(days: DayWeather[]): WatchItem[] {
 
 // ─── Summary + headline ───────────────────────────────────────────────────────
 
-export function summaryLine(days: DayWeather[]): string | null {
-  if (!days?.length) return null;
+export function summaryLine(all: DayWeather[]): string | null {
+  if (!all?.length) return null;
+  const days = thereDays(all);
   const band = feelsBand(median(days.map(feelsDay))).label;
   const wet  = wetDayCount(days) / days.length;
   const rain = wet === 0 ? 'dry' : wet <= 0.25 ? 'mostly dry' : wet < 0.6 ? 'some rain' : 'wet';
@@ -817,8 +829,9 @@ export type TripMetric = 'temp' | 'rain' | 'uv' | 'wind';
 export interface TripStat { label: string; value: string; sub?: string }
 
 /** Three headline numbers for the metric the chart is showing. */
-export function tripStats(days: DayWeather[], metric: TripMetric): TripStat[] {
-  if (!days.length) return [];
+export function tripStats(all: DayWeather[], metric: TripMetric): TripStat[] {
+  if (!all.length) return [];
+  const days = thereDays(all);
   const t = isTypical(days) ? '~' : '';
   const by = <T,>(xs: T[], f: (x: T) => number, dir: 1 | -1) =>
     xs.reduce((a, b) => (dir * (f(b) - f(a)) > 0 ? b : a));

@@ -75,7 +75,9 @@ import { haversineKm }          from '@/lib/geo/geocode';
 import { tripAreas }            from '@/lib/geo/tripAreas';
 import type { WeatherResult }   from '@/lib/weather-insights';
 import { pageHourWeather, type HourWeather } from './hourWeather';
+import { isTravelDay }          from '@/lib/trips/presence';
 import type { TravelOrigin }    from '@/lib/navigation/useTravelTimes';
+import type { Highlight }       from '@/lib/itinerary/highlight';
 
 const VIEW_MODES = ['timeline', 'list', 'recap'] as const;
 const VIEW_OPTIONS = [
@@ -853,6 +855,31 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
     }
   };
 
+  // Your colour on a stop — shown at once, undone with a toast if it can't be saved or queued
+  const setHighlight = async (stop: Stop, highlight: Highlight | null) => {
+    if (!stop._id) return;
+    const prevDays    = days;
+    const updatedDays = changeStop(days, stop._id, s => ({ ...s, highlight: highlight ?? undefined }));
+    setDays(updatedDays);
+    try {
+      await saveTripCache(tripId, { ...(await getTripCache(tripId)), itinerary: updatedDays });
+
+      const res = await sendOrQueue(
+        { type: 'RESCHEDULE_STOP', tripId, payload: { stopId: stop._id, highlight } },
+        () => fetch(`/api/trips/${tripId}/itinerary/stops/${stop._id}`, {
+          method:  'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ highlight }),
+        }),
+        savedDays(updatedDays),
+      );
+      if (res) setDays(await daysFrom(res));
+    } catch (err) {
+      await undoDays(prevDays);
+      reportSaveFailure(`the colour for ${quoted(stop)}`, err);
+    }
+  };
+
   // Your note on a stop. Resolves false when it couldn't be saved or queued, so the
   // editor stays open with what was typed.
   const saveNote = async (stop: Stop, text: string): Promise<boolean> => {
@@ -1036,6 +1063,8 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
   // Which accommodation covers the day being viewed — the persistent "you're
   // based here" anchor a business traveller wants without hunting through Logistics.
   const activeDayYmd = activeDay ? String(activeDay.date).split('T')[0] : '';
+  // Before arriving or after leaving the destination — getting there, getting home
+  const activeIsTravel = !!activeDayYmd && isTravelDay(trip?.presence, activeDayYmd);
   const basedAt = activeDayYmd
     ? accoms.find(a => a.checkIn <= activeDayYmd && activeDayYmd <= a.checkOut) ?? null
     : null;
@@ -1398,6 +1427,11 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
                 weekday: 'long', day: 'numeric', month: 'long',
               })}
             </Typography>
+            {activeIsTravel && (
+              <Typography sx={{ fontFamily: D.body, fontSize: '0.8rem', fontWeight: 700, color: D.terra, lineHeight: 1, whiteSpace: 'nowrap' }}>
+                Travel day
+              </Typography>
+            )}
           </Box>
 
           {/* Stat chips */}
@@ -1465,6 +1499,7 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
             </Typography>
             <Typography sx={{ fontFamily: D.body, fontSize: '0.76rem', fontWeight: 600, color: D.muted, lineHeight: 1.3, mt: 0.5 }}>
               {[
+                activeIsTravel ? 'Travel day' : '',
                 `${plannedCount} planned`,
                 freeLabel,
                 logisticsCount > 0 ? `${logisticsCount} from logistics` : '',
@@ -1842,6 +1877,7 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
               stops={timedStops}
               onOpen={s => setSheetKey(stopKey(s))}
               onSkip={skipStop}
+              onHighlight={setHighlight}
               live={liveFor}
               afterMidnightLabel={nextDay ? dayLabel(nextDay.date, { weekday: 'short', day: 'numeric' }) : undefined}
               isStarted={isStarted}
@@ -1961,6 +1997,7 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
                         editMode={editMode}
                         navFrom={navFromFor(stop)}
                         bounds={dragBounds(stop)}
+                        onHighlight={h => setHighlight(stop, h)}
                       />
                       <TravelConnector stop={stop} pxPerMin={pxPerMin} startHour={effectiveStartHour} />
                     </Box>
@@ -2025,6 +2062,7 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
           openDrawer(t !== null ? formatTime(t) : '09:00', s.type, s);
         }}
         onEditNote={s => setNoteKey(stopKey(s))}
+        onHighlight={setHighlight}
         onOpenLogistics={() => { setSheetKey(null); onSwitchToLogistics?.(); }}
         onFilterType={t => { setSheetKey(null); setTypeFilter([t]); }}
       />

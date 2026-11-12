@@ -8,6 +8,7 @@ import EventIcon                from '@mui/icons-material/Event';
 import FreeBreakfastIcon        from '@mui/icons-material/FreeBreakfast';
 import LuggageIcon              from '@mui/icons-material/Luggage';
 import ConnectingAirportsIcon   from '@mui/icons-material/ConnectingAirports';
+import type { Highlight }     from '@/lib/itinerary/highlight';
 
 
 // ─── Timeline constants ────────────────────────────────────────────────────────
@@ -76,6 +77,8 @@ export interface Stop {
   // Yours: what to bring up beforehand, what happened after. Survives logistics syncs
   // on booking stops (see syncLogistics), shown in the record and the stop's reminder.
   myNotes?: string;
+  // Your colour for it while planning — tints the card; kept like myNotes
+  highlight?: Highlight;
   completed?: boolean;
   // "Not going" — hidden from the plan, no reminders, out of calendar exports; reversible.
   // Once a stop has started it reads "Didn't go": every other started stop counts as went.

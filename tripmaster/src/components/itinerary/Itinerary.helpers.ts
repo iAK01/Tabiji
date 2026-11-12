@@ -203,6 +203,9 @@ export function canNote(stop: Stop): boolean {
   return stop.source !== 'logistics' || (!!stop.logisticsRef && !!stop.metadata?.phase);
 }
 
+// A colour is kept wherever a note is — booking stops re-find it after a sync the same way
+export const canColour = canNote;
+
 // Before a stop starts, "Not going"; after, "Didn't go" — the same flag
 export function skipLabel(stop: Stop, started: boolean): string {
   return started ? (stop.skipped ? 'I went' : 'Didn’t go') : (stop.skipped ? 'Going after all' : 'Not going');

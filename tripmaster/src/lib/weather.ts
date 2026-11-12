@@ -18,6 +18,7 @@ import Trip from '@/lib/mongodb/models/Trip';
 import User from '@/lib/mongodb/models/User';
 import TripLogistics from '@/lib/mongodb/models/TripLogistics';
 import { airportByIata, airports } from '@/lib/data/airports';
+import { tripPresence, addDays as addDay } from '@/lib/trips/presence';
 import {
   WEATHER_VERSION,
   type CurrentWeather, type DayHours, type DayWeather, type WeatherPlace, type WeatherResult,
@@ -721,7 +722,8 @@ async function homeMonthlyHighs(user: any, point: Point): Promise<number[] | nul
 interface StopInput {
   city: string; countryCode?: string; iataCode?: string;
   lat?: number; lng?: number;
-  from?: string; to?: string;   // additional destinations only
+  from?: string; to?: string;   // additional destinations and travel days only
+  travel?: boolean;             // travel days before arriving / after leaving
 }
 interface StayInput { name: string; lat: number; lng: number; checkIn?: string; checkOut?: string }
 interface HomeInput { city: string; countryCode?: string; lat?: number; lng?: number }
@@ -746,13 +748,39 @@ function stopInput(p: any): StopInput {
   };
 }
 
-export function weatherInputs(trip: any, accommodation: any[], homeLocation: any): WeatherInputs {
+/**
+ * Where you are on travel days — the days before arriving and after leaving:
+ * where the journey starts from (the trip's origin, e.g. a night in the van by
+ * the airport), else home. A stay booked there for those nights still wins,
+ * as it does anywhere (resolveStopPoint).
+ */
+function travelStops(trip: any, logistics: any, homeLocation: any): StopInput[] {
+  const presence = tripPresence(trip, logistics, homeLocation);
+  if (!presence) return [];
+  const from = trip.origin?.city ? trip.origin : homeLocation?.city ? homeLocation : null;
+  if (!from) return [];
+  const base = stopInput(from);
+  const out: StopInput[] = [];
+  if (presence.travelBefore.length) {
+    out.push({ ...base, from: presence.travelBefore[0], to: presence.arrive, travel: true });
+  }
+  if (presence.travelAfter.length) {
+    out.push({ ...base, from: presence.travelAfter[0], to: addDay(presence.travelAfter[presence.travelAfter.length - 1], 1), travel: true });
+  }
+  return out;
+}
+
+export function weatherInputs(trip: any, logistics: any, homeLocation: any): WeatherInputs {
+  const accommodation: any[] = logistics?.accommodation ?? [];
   return {
     start: ymdOf(trip.startDate)!,
     end:   ymdOf(trip.endDate)!,
-    stops: [trip.destination, ...(trip.additionalDestinations ?? [])]
-      .filter((p: any) => p?.city)
-      .map(stopInput),
+    stops: [
+      ...[trip.destination, ...(trip.additionalDestinations ?? [])]
+        .filter((p: any) => p?.city)
+        .map(stopInput),
+      ...(trip.destination?.city ? travelStops(trip, logistics, homeLocation) : []),
+    ],
     stays: (accommodation ?? [])
       .filter((a: any) => isNum(a?.coordinates?.lat) && isNum(a?.coordinates?.lng) && a.status !== 'cancelled')
       .map((a: any) => ({
@@ -858,11 +886,14 @@ export async function fetchTripWeather(inputs: WeatherInputs, user?: any): Promi
   const dates = start && end ? dateRange(start, end) : [];
   if (!dates.length) throw new Error('Trip has no valid dates');
 
-  // Day → stop: the additional destination whose dates cover it, else the main one.
+  // Day → stop: a travel day where the journey starts from, else the additional
+  // destination whose dates cover it, else the main one.
+  const covers = (s: StopInput, d: string) => !!s.from && d >= s.from && (!s.to || d < s.to);
   const stopOf = (d: string) => {
+    const travel = stops.findIndex(s => s.travel && covers(s, d));
+    if (travel > 0) return travel;
     for (let i = 1; i < stops.length; i++) {
-      const s = stops[i];
-      if (s.from && d >= s.from && (!s.to || d < s.to)) return i;
+      if (!stops[i].travel && covers(stops[i], d)) return i;
     }
     return 0;
   };
@@ -882,7 +913,9 @@ export async function fetchTripWeather(inputs: WeatherInputs, user?: any): Promi
     else runs.push({ stop: assign[k], from: d, to: d });
   });
 
-  const counts = used.map(i => ({ i, n: assign.filter(a => a === i).length })).sort((a, b) => b.n - a.n);
+  const counts = used
+    .filter(i => !stops[i].travel || used.every(j => stops[j].travel))
+    .map(i => ({ i, n: assign.filter(a => a === i).length })).sort((a, b) => b.n - a.n);
   const main   = points.get(counts[0].i)!;
   const today  = todayUtc();
   const nowAt  = today >= start && today <= end ? points.get(assign[dates.indexOf(today)]) ?? main : main;
@@ -898,7 +931,8 @@ export async function fetchTripWeather(inputs: WeatherInputs, user?: any): Promi
     homePoint ? homeMonthlyHighs(user, homePoint).catch(() => null) : null,
   ]);
 
-  const days = series.flatMap(s => s.days);
+  // Travel days are marked, so trip-wide reads (averages, what to pack) can leave them out.
+  const days = series.flatMap((s, k) => (stops[runs[k].stop].travel ? s.days.map(d => ({ ...d, travel: true })) : s.days));
   const sources = new Set(days.map(d => d.source));
   const places = runs
     .map(r => points.get(r.stop)!)
@@ -958,8 +992,8 @@ function isFresh(w: WeatherResult, inputs: WeatherInputs): boolean {
 export async function getTripWeather(
   trip: any, user: any, opts: { force?: boolean } = {},
 ): Promise<{ weather: WeatherResult; cached: boolean }> {
-  const logistics = await TripLogistics.findOne({ tripId: trip._id }).select('accommodation').lean() as any;
-  const inputs    = weatherInputs(trip, logistics?.accommodation ?? [], user?.homeLocation);
+  const logistics = await TripLogistics.findOne({ tripId: trip._id }).select('accommodation transportation').lean() as any;
+  const inputs    = weatherInputs(trip, logistics, user?.homeLocation);
   const cached    = trip.weather as WeatherResult | undefined;
 
   if (!opts.force && cached?.version === WEATHER_VERSION && cached.key === weatherKey(inputs) && isFresh(cached, inputs)) {

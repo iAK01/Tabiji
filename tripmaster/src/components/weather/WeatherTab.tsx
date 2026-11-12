@@ -107,7 +107,7 @@ function DayCard({ day, isToday, showCity, typicalSlot, onOpen }: {
       </Box>
       {showCity && (
         <Typography noWrap sx={{ fontSize: '0.75rem', color: D.muted, maxWidth: '100%', fontFamily: D.body }}>
-          {day.city}
+          {day.travel ? `Travel · ${day.city}` : day.city}
         </Typography>
       )}
 
