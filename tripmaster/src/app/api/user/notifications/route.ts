@@ -45,7 +45,7 @@ export async function GET() {
   const scanned = await PushNotificationLog.find(inboxFilter(uid)).sort({ sentAt: -1 }).limit(SCAN_SIZE).lean() as any[];
   const logs    = latestPerTag(scanned).slice(0, INBOX_SIZE);
 
-  const tripIds = [...new Set(logs.map(l => String(l.tripId)))];
+  const tripIds = [...new Set(logs.filter(l => l.tripId).map(l => String(l.tripId)))];
   const trips   = await Trip.find({ _id: { $in: tripIds } }, 'name').lean() as any[];
   const names   = new Map(trips.map(t => [String(t._id), t.name]));
 
@@ -53,12 +53,12 @@ export async function GET() {
     unread: logs.filter(l => !l.readAt).length,
     notifications: logs.map(l => ({
       id:       String(l._id),
-      tripId:   String(l.tripId),
-      tripName: names.get(String(l.tripId)) ?? null,
+      tripId:   l.tripId ? String(l.tripId) : null,
+      tripName: l.tripId ? names.get(String(l.tripId)) ?? null : null,
       category: l.category ?? null,
       title:    l.title,
       body:     l.body ?? '',
-      url:      l.url ?? `/trips/${l.tripId}`,
+      url:      l.url ?? (l.tripId ? `/trips/${l.tripId}` : '/dashboard'),
       sentAt:   l.sentAt,
       read:     !!l.readAt,
     })),

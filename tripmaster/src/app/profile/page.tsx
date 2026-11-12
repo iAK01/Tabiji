@@ -31,6 +31,7 @@ import { MY_APPS_CATALOG, TRANSPORT_SERVICES } from '@/lib/data/ground-transport
 import AirportSearch          from '@/components/ui/AirportSearch';
 import PushNotificationSetup  from '@/components/notifications/PushNotificationSetup';
 import NotificationSettings   from '@/components/notifications/NotificationSettings';
+import EmailForwarding        from '@/components/profile/EmailForwarding';
 import { Airport }            from '@/lib/data/airports';
 import { readSaved, assertSaved, reportSaveFailure } from '@/lib/offline/saveErrors';
 
@@ -496,6 +497,7 @@ export default function ProfilePage() {
 
             <PushNotificationSetup />
             <NotificationSettings />
+            <EmailForwarding />
 
             <SectionCard icon={HomeIcon} title="Home" ghost={HomeIcon}>
               {profile.homeLocation?.countryCode ? (

@@ -13,7 +13,8 @@ import mongoose, { Schema } from 'mongoose';
 
 const PushNotificationLogSchema = new Schema({
   userId:           { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
-  tripId:           { type: Schema.Types.ObjectId, ref: 'Trip', required: true, index: true },
+  // Absent only for a notice that belongs to no trip yet (a forwarded email that matched none)
+  tripId:           { type: Schema.Types.ObjectId, ref: 'Trip', index: true },
   key:              { type: String, required: true },   // stopId, "transport-{index}", "accom-{index}"
   notificationType: { type: String, required: true },   // "flight_leave", "landed", "todo_reminder" etc
   category:         String,                             // NotificationCategory — lib/push/prefs.ts

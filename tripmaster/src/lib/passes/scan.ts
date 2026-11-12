@@ -49,19 +49,31 @@ export async function scanTicket(image: Uint8Array): Promise<ScannedBarcode | nu
       .filter(r => r.isValid && r.text);
     // A boarding pass if there is one; otherwise the biggest code on the page.
     const pick = found.find(r => parseBcbp(r.text)) ?? found.sort((a, b) => area(b) - area(a))[0];
-    if (!pick || !isTicketFormat(pick.format)) return null;
-    const format = pick.format;
+    if (!pick) return null;
+    return await drawTicket(pick.text, pick.format);
+  } catch {
+    return null;   // not an image it can read (HEIC, corrupt) — no barcode
+  }
+}
 
-    const drawn = await writeBarcode(pick.text, { format, scale: 4 });
+/**
+ * Draws a ticket barcode from its payload — what a scanned image held, or what
+ * a Wallet pass states. Kept only when the drawing reads back identical.
+ */
+export async function drawTicket(text: string, format: string): Promise<ScannedBarcode | null> {
+  if (!text || !isTicketFormat(format)) return null;
+  try {
+    await prepare();
+    const drawn = await writeBarcode(text, { format, scale: 4 });
     if (drawn.error || !drawn.svg || !drawn.image) return null;
     const back = await readBarcodes(new Uint8Array(await drawn.image.arrayBuffer()), { formats: [format] });
-    if (back[0]?.text !== pick.text) return null;
+    if (back[0]?.text !== text) return null;
 
     const svg = scalable(drawn.svg);
     if (!svg) return null;
-    return { format, text: pick.text, svg, bcbp: parseBcbp(pick.text) };
+    return { format, text, svg, bcbp: parseBcbp(text) };
   } catch {
-    return null;   // not an image it can read (HEIC, corrupt) — no barcode
+    return null;
   }
 }
 

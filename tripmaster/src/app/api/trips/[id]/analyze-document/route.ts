@@ -1,100 +1,20 @@
 import { NextResponse }     from 'next/server';
 import { getServerSession }  from 'next-auth';
 import Anthropic             from '@anthropic-ai/sdk';
-import mammoth               from 'mammoth';
-import * as XLSX             from 'xlsx';
 import connectDB             from '@/lib/mongodb/connection';
 import Trip                  from '@/lib/mongodb/models/Trip';
 import User                  from '@/lib/mongodb/models/User';
 import TripFile              from '@/lib/mongodb/models/TripFile';
 import TripLogistics         from '@/lib/mongodb/models/TripLogistics';
 import TripItinerary         from '@/lib/mongodb/models/TripItinerary';
-import { locatePlace, localityWords, sameName } from '@/lib/geo/geocode';
+import { MAX_TEXT_CHARS, CLAUDE_IMAGE_TYPES, fetchBinary, toClaudeInput, type Resolved } from '@/lib/extract/sources';
+import { locateExtracted } from '@/lib/extract/locate';
 import { resolveCheckIn, checkInHint } from '@/lib/itinerary/checkInTiming';
 import { DOCUMENT_TYPE_VALUES, DOC_TYPE_EXTRACT } from '@/lib/files/documentTypes';
 import { buildExistingIndex, describeExisting, flagDuplicates } from '@/lib/extract/existingMatch';
 import { placeTz } from '@/lib/push/timezones';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-
-const MAX_TEXT_CHARS = 200_000;
-const CLAUDE_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp']);
-
-// ─── Source resolution ────────────────────────────────────────────────────────
-// The client can point us at anything: an uploaded file, a raw GCS url, a saved
-// note, or a blob of pasted text. Everything below normalises to either a
-// { kind: 'text' } or a { kind: 'binary' } shape that we can hand to Claude.
-
-type Resolved =
-  | { kind: 'text'; text: string; label: string }
-  | { kind: 'binary'; buffer: Buffer; mimeType: string; label: string };
-
-function mimeFromName(name: string): string | null {
-  const ext = name.toLowerCase().split('.').pop() ?? '';
-  const map: Record<string, string> = {
-    pdf:  'application/pdf',
-    jpg:  'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif',
-    heic: 'image/heic', heif: 'image/heif',
-    docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-    doc:  'application/msword',
-    xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    xls:  'application/vnd.ms-excel',
-    csv:  'text/csv',
-    txt:  'text/plain',
-    md:   'text/plain',
-  };
-  return map[ext] ?? null;
-}
-
-async function fetchBinary(url: string, mimeHint?: string, label = 'document'): Promise<Resolved> {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`Could not fetch the file (${res.status})`);
-  const buffer   = Buffer.from(await res.arrayBuffer());
-  const mimeType = mimeHint
-    ?? res.headers.get('content-type')?.split(';')[0]?.trim()
-    ?? mimeFromName(url)
-    ?? 'application/octet-stream';
-  return { kind: 'binary', buffer, mimeType, label };
-}
-
-// Turn a resolved binary into text where Claude can't read the format natively.
-async function toClaudeInput(r: Resolved): Promise<Resolved> {
-  if (r.kind === 'text') return r;
-
-  const { mimeType, buffer, label } = r;
-
-  if (mimeType === 'application/pdf' || CLAUDE_IMAGE_TYPES.has(mimeType)) return r;
-
-  if (mimeType === 'image/heic' || mimeType === 'image/heif') {
-    throw new Error('HEIC images can’t be read directly — take a screenshot or convert it to JPEG first.');
-  }
-
-  if (
-    mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
-    mimeType === 'application/msword'
-  ) {
-    const { value } = await mammoth.extractRawText({ buffer });
-    return { kind: 'text', text: value.slice(0, MAX_TEXT_CHARS), label };
-  }
-
-  if (
-    mimeType === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' ||
-    mimeType === 'application/vnd.ms-excel'
-  ) {
-    const wb = XLSX.read(buffer, { type: 'buffer' });
-    const text = wb.SheetNames
-      .map(name => `### Sheet: ${name}\n${XLSX.utils.sheet_to_csv(wb.Sheets[name])}`)
-      .join('\n\n')
-      .slice(0, MAX_TEXT_CHARS);
-    return { kind: 'text', text, label };
-  }
-
-  if (mimeType === 'text/csv' || mimeType.startsWith('text/')) {
-    return { kind: 'text', text: buffer.toString('utf-8').slice(0, MAX_TEXT_CHARS), label };
-  }
-
-  throw new Error(`Unsupported file type: ${mimeType}`);
-}
 
 // ─── Prompt ───────────────────────────────────────────────────────────────────
 
@@ -344,50 +264,11 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
     flagDuplicates(extracted, existing);
 
-    // ── Resolve real addresses + coordinates ─────────────────────────────────
-    // People walk to these pins. A place gets coordinates only when the lookup
-    // finds that exact place (see locatePlace); otherwise it's flagged, never guessed.
-    // A room/stage/stand is located by its building, and reuses a pin the trip
-    // already has for that building rather than looking it up again.
-    const dest = trip.destination?.coordinates;
-    if (dest?.lat && dest?.lng) {
-      const locality = [trip.destination?.city, trip.destination?.country].filter(Boolean).join(', ');
-      const area     = { center: { lat: dest.lat, lng: dest.lng }, locality, maxKm: 40 };
-      const words    = localityWords(locality);
-      const norm     = (s: string) => s.trim().toLowerCase();
-      const pinned   = [...(logistics?.venues ?? []), ...(logistics?.accommodation ?? [])]
-        .filter((k: any) => k?.name && k.coordinates?.lat);
-      // Dozens of sessions share a handful of rooms — one lookup per distinct place.
-      const lookups = new Map<string, ReturnType<typeof locatePlace>>();
-
-      const locate = async (item: any) => {
-        const building = String(item.building ?? '').trim();
-        const name     = building || String(item.name ?? '').trim();
-        const known    = pinned.find((k: any) => norm(k.name) === norm(name) || sameName(name, k.name, words));
-        const hit      = known
-          ? { address: known.address || item.address, lat: known.coordinates.lat, lng: known.coordinates.lng }
-          : await (() => {
-              const key = [name, item.searchQuery, item.address].map(v => norm(String(v ?? ''))).join('|');
-              if (!lookups.has(key)) lookups.set(key, locatePlace({ name, query: item.searchQuery, address: item.address }, area));
-              return lookups.get(key)!;
-            })();
-        if (hit) {
-          item.address     = hit.address;
-          item.coordinates = { lat: hit.lat, lng: hit.lng };
-        } else if (!item.address?.trim()) {
-          item.addressUnverified = true;
-        }
-        delete item.searchQuery;
-        delete item.building;
-        return item;
-      };
-
-      await Promise.all([
-        ...extracted.accommodation.map(locate),
-        ...extracted.venues.map(locate),
-        ...extracted.itineraryStops.map(locate),
-      ]);
-    }
+    // ── Resolve real addresses + coordinates (see locateExtracted) ───────────
+    await locateExtracted(
+      [...extracted.accommodation, ...extracted.venues, ...extracted.itineraryStops],
+      trip, logistics,
+    );
 
     // ── Preview the check-in time against the trip's inbound flights ──────────
     if (extracted.accommodation.length) {

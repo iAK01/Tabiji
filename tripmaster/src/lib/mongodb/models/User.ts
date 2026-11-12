@@ -52,6 +52,10 @@ const UserSchema = new Schema({
   },
   pushSubscriptions: [{ type: Schema.Types.Mixed }],
 
+  // Other addresses whose forwarded emails are accepted as this user's (lower case).
+  // The sign-in email always counts.
+  forwardFrom: { type: [String], default: [] },
+
   // Notification settings — shape and defaults in src/lib/push/prefs.ts. Kept
   // out of `preferences` because the profile save replaces that whole object.
   notificationPrefs: { type: Schema.Types.Mixed },

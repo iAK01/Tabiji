@@ -100,6 +100,9 @@ const TripFileSchema = new Schema({
     label:      { type: String },
   },
 
+  // ── Filed from a forwarded email (lib/inbound) ─────────
+  fromEmail: { type: Schema.Types.ObjectId, ref: 'InboundEmail' },
+
   // ── On-trip surfacing ───────────────────────────────────
   // Computed datetime at which this resource should surface in the on-trip feed.
   // Derived from linked entity's event time minus notification.minutesBefore.

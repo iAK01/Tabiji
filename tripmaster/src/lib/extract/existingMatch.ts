@@ -13,9 +13,9 @@ export interface DuplicateOf {
   time?: string;  // HH:MM
 }
 
-type Kind = 'transport' | 'accommodation' | 'venue' | 'stop';
+export type Kind = 'transport' | 'accommodation' | 'venue' | 'stop';
 
-interface Existing {
+export interface Existing {
   id:        string;          // short ref the AI sees: t0, a0, v0, s0
   kind:      Kind;
   label:     string;
@@ -159,6 +159,37 @@ export function buildExistingIndex(logistics: any, itinerary: any): ExistingInde
   return items;
 }
 
+export interface ResolvedExisting {
+  kind:   Kind;
+  index:  number;   // position in its logistics array; for a stop, within its day
+  entry:  any;      // the saved booking or stop
+  day?:   any;      // a stop's day
+}
+
+/** The saved booking or stop behind an id from buildExistingIndex (same walk, same numbering). */
+export function resolveExisting(id: string, logistics: any, itinerary: any): ResolvedExisting | null {
+  const m = String(id ?? '').match(/^([tavs])(\d+)$/);
+  if (!m) return null;
+  const n = Number(m[2]);
+  const at = (list: any[] | undefined, kind: Kind, ok: (x: any) => boolean): ResolvedExisting | null => {
+    const entry = list?.[n];
+    return entry && ok(entry) ? { kind, index: n, entry } : null;
+  };
+  if (m[1] === 't') return at(logistics?.transportation, 'transport', () => true);
+  if (m[1] === 'a') return at(logistics?.accommodation, 'accommodation', a => !!a?.name);
+  if (m[1] === 'v') return at(logistics?.venues, 'venue', v => !!v?.name);
+
+  let k = 0;
+  for (const day of itinerary?.days ?? []) {
+    const stops = day?.stops ?? [];
+    for (let i = 0; i < stops.length; i++) {
+      if (!stops[i]?.name) continue;
+      if (k++ === n) return { kind: 'stop', index: i, entry: stops[i], day };
+    }
+  }
+  return null;
+}
+
 const KIND_LABEL: Record<Kind, string> = {
   transport: 'transport', accommodation: 'stay', venue: 'venue', stop: 'schedule',
 };
@@ -234,6 +265,19 @@ function ruleMatch(kind: Kind, item: any, index: ExistingIndex): Existing | unde
       ));
     }
   }
+}
+
+/**
+ * The saved item an extracted one is about, or undefined. The AI's pick is used
+ * when the dates and times hold it up — or, with `trustAi`, whenever it names a
+ * real item (an email saying "your booking has changed" can move it a long way).
+ * Itinerary copies of bookings are never returned: their booking is the item.
+ */
+export function matchExisting(kind: Kind, item: any, index: ExistingIndex, aiId: string | null | undefined, trustAi = false): Existing | undefined {
+  const own = index.filter(e => !e.mirrored);
+  const ai  = aiId ? own.find(e => e.id === aiId.trim()) : undefined;
+  if (ai && (trustAi || confirmsAi(kind, item, ai))) return ai;
+  return ruleMatch(kind, item, own);
 }
 
 /**

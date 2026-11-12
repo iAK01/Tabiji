@@ -102,7 +102,7 @@ export function useNotificationPrefs() {
 
 export interface InboxItem {
   id:       string;
-  tripId:   string;
+  tripId:   string | null;   // null for a forwarded email that matched no trip
   tripName: string | null;
   category: string | null;
   title:    string;
