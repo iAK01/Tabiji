@@ -5,6 +5,9 @@ import Trip from "@/lib/mongodb/models/Trip";
 import TripLogistics from "@/lib/mongodb/models/TripLogistics";
 import User from "@/lib/mongodb/models/User";
 import { getLogisticsFacts } from "@/lib/logistics/facts";
+import { buildLegs } from "@/lib/push/journey";
+import { recipientOf } from "@/lib/push/context";
+import { ymd } from "@/lib/push/timezones";
 
 async function geocodeLocation(city: string, country: string): Promise<{ lat: number; lng: number } | null> {
   const token = process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN;
@@ -49,6 +52,12 @@ export async function GET() {
       accommodationConfirmed: facts.accommodation.allConfirmed,
       venueCount:             facts.venues.count,
     };
+    // When the traveller sets off: the first leg, if it leaves by the start date
+    // (the journey rule's "starts from home"), in the departure point's own offset.
+    const first = buildLegs(plain, log?.transportation ?? [], recipientOf(user, plain).home)[0];
+    plain.departsAt = first && (!plain.startDate || first.dep.toISODate()! <= ymd(plain.startDate))
+      ? first.dep.toISO()
+      : null;
     return plain;
   });
 

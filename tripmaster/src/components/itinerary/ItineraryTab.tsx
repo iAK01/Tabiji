@@ -186,6 +186,8 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
   const pxPerMin = basePxPerMin * zoom;
 
   const nowLineRef = useRef<HTMLDivElement>(null);
+  const dayStripRef    = useRef<HTMLDivElement>(null);
+  const stripTappedRef = useRef(false);   // glide once you've tapped; jump into place on open
 
   // What each day's page shows: a night that runs past midnight keeps its
   // early-hours stops (stored on the next date) at the end of its own page.
@@ -484,6 +486,17 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
       nowLineRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }, 100);
   }, [activeDayIdx, days]);
+
+  // ── Keep the chosen day centred in the day strip ─────────────────────────────
+  useEffect(() => {
+    const strip = dayStripRef.current;
+    const cell  = strip?.children[activeDayIdx] as HTMLElement | undefined;
+    if (!strip || !cell) return;
+    strip.scrollTo({
+      left:     cell.offsetLeft - (strip.clientWidth - cell.offsetWidth) / 2,
+      behavior: stripTappedRef.current ? 'smooth' : 'auto',
+    });
+  }, [activeDayIdx, days.length]);
 
   // ── Pinch (touch) / ctrl+wheel (trackpad pinch) zooms the timeline ─────────
   // Native listeners: React's touch handlers are passive and can't stop the
@@ -1057,6 +1070,7 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
 
   // Now, on this page's clock — today, or past 24:00 on last night's page
   const nowMins = activeDay ? minutesSince(activeDay.date, here()) : null;
+  const todayYmd = here().ymd;   // marks today in the day strip
 
   // The early-hours choice in the drawer: what's pre-selected for a time
   const nightDates = activeDay && nextDay
@@ -1173,13 +1187,18 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
 
       <ExportCalendarDialog tripId={tripId} open={exportOpen} onClose={() => setExportOpen(false)} />
 
-      {/* ── Day selector — full-width grid ── */}
-      <Box sx={{
+      {/* ── Day selector — fills the width; scrolls sideways once the days won't fit ── */}
+      <Box ref={dayStripRef} sx={{
         display: 'grid',
-        gridTemplateColumns: `repeat(${days.length}, 1fr)`,
+        gridAutoFlow: 'column',
+        gridAutoColumns: { xs: 'minmax(62px, 1fr)', sm: 'minmax(68px, 1fr)' },
+        position: 'relative',
         mb: 2,
         borderRadius: '12px',
-        overflow: 'hidden',
+        overflowX: 'auto',
+        overflowY: 'hidden',
+        scrollbarWidth: 'none',
+        '&::-webkit-scrollbar': { display: 'none' },
         border: `1px solid ${D.rule}`,
         backgroundColor: '#ffffff',
       }}>
@@ -1190,14 +1209,15 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
           const mon      = d.toLocaleDateString('en-IE', { month: 'short' });
           const hasStops = (pages[i]?.stops.length ?? 0) > 0;
           const active   = i === activeDayIdx;
+          const isToday  = ymdOf(day.date) === todayYmd;
 
           return (
             <Box
               key={day.date}
-              onClick={() => selectDay(i)}
+              onClick={() => { stripTappedRef.current = true; selectDay(i); }}
               sx={{
                 textAlign:       'center',
-                py:              1,
+                py:              1.25,
                 px:              0.5,
                 cursor:          'pointer',
                 backgroundColor: active ? D.navy : 'transparent',
@@ -1207,24 +1227,26 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
                 '&:active':      { opacity: 0.85 },
               }}
             >
-              {/* DOW */}
+              {/* DOW — or Today */}
               <Typography sx={{
-                fontSize:      '0.52rem',
+                fontSize:      '0.66rem',
                 fontWeight:    800,
                 letterSpacing: '0.1em',
                 textTransform: 'uppercase',
                 fontFamily:    D.body,
-                color:         active ? 'rgba(255,255,255,0.55)' : D.muted,
+                color:         isToday
+                  ? active ? '#ffffff' : D.terra
+                  : active ? 'rgba(255,255,255,0.55)' : D.muted,
                 lineHeight:    1,
                 mb:            0.5,
               }}>
-                {dow}
+                {isToday ? 'Today' : dow}
               </Typography>
 
               {/* Day number */}
               <Typography sx={{
                 fontFamily: D.display,
-                fontSize:   isMobile ? '1.4rem' : '1.6rem',
+                fontSize:   isMobile ? '1.6rem' : '1.7rem',
                 lineHeight: 1,
                 color:      active ? '#ffffff' : D.navy,
               }}>
@@ -1233,7 +1255,7 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
 
               {/* Month */}
               <Typography sx={{
-                fontSize:      '0.52rem',
+                fontSize:      '0.66rem',
                 fontWeight:    700,
                 letterSpacing: '0.08em',
                 fontFamily:    D.body,

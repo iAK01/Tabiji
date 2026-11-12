@@ -6,6 +6,7 @@ import TripLogistics from '@/lib/mongodb/models/TripLogistics';
 import TripPacking from '@/lib/mongodb/models/TripPacking';
 import MasterPackingItem from '@/lib/mongodb/models/MasterPackingItem';
 import { packingCounts } from '@/lib/packing/counts';
+import { catalogueQuantity } from '@/lib/packing/fromCatalogue';
 import User from '@/lib/mongodb/models/User';
 import { getCountryMeta } from '@/lib/data/countries';
 import {
@@ -119,13 +120,7 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
 
   // ── Build packing items from catalogue ───────────────────────────────────────
   const packingItems = selectedItems.map((item: any) => {
-    let quantity = item.quantity || 1;
-
-    if (item.quantityType === 'per_night') {
-      quantity = Math.round(item.quantity * nights);
-      if (item.quantityMin) quantity = Math.max(quantity, item.quantityMin);
-      if (item.quantityMax) quantity = Math.min(quantity, item.quantityMax);
-    }
+    const quantity = catalogueQuantity(item, nights);
 
     // Apply pre-travel suppression
     const suppressPreTravel = engineResult.suppressPreTravel.includes(item.name);

@@ -39,7 +39,7 @@ import { saveTripList, getTripList, clearOfflineData } from '@/lib/offline/db';
 import { useFlushQueueOnReconnect } from '@/lib/offline/useFlushQueue';
 import { warmTrips } from '@/lib/offline/warm';
 import TripReadinessPanel from '@/components/dashboard/TripReadinessPanel';
-import { isOnTrip, showsNow, nowHref } from '@/lib/trips/onTrip';
+import { isOnTrip, showsNow, nowHref, localYmd, displayStatus } from '@/lib/trips/onTrip';
 import NotificationBell from '@/components/notifications/NotificationBell';
 import NavigateButton from '@/components/ui/NavigateButton';
 
@@ -56,6 +56,7 @@ interface Trip {
   status: string;
   coverPhotoThumb?: string;
   coverPhotoUrl?: string;
+  departsAt?: string | null; // first leg's departure, in its own offset (from /api/trips)
   _pending?: boolean;   // created offline, not on the server yet
 }
 
@@ -175,6 +176,38 @@ function dayOfTrip(startDate: string): number {
   return Math.floor((today.getTime() - start.getTime()) / 86400000) + 1;
 }
 
+// Set off yet? The first leg's departure when there is one, else the start date.
+function hasLeft(trip: Trip, now: Date = new Date()): boolean {
+  if (trip.departsAt) return now.getTime() >= new Date(trip.departsAt).getTime();
+  return !!trip.startDate && localYmd(now) >= trip.startDate.slice(0, 10);
+}
+
+// The day you set off, as YYYY-MM-DD: the departure's own local date.
+function departureDay(trip: Trip): string | null {
+  return (trip.departsAt ?? trip.startDate)?.slice(0, 10) || null;
+}
+
+/** Calendar days from today to setting off (0 = today, negative = gone). */
+function daysToDeparture(trip: Trip, now: Date = new Date()): number | null {
+  const day = departureDay(trip);
+  if (!day) return null;
+  const [y, m, d]    = day.split('-').map(Number);
+  const [ty, tm, td] = localYmd(now).split('-').map(Number);
+  return Math.round((Date.UTC(y, m - 1, d) - Date.UTC(ty, tm - 1, td)) / 86400000);
+}
+
+function leavingWhen(trip: Trip): string {
+  const days = daysToDeparture(trip) ?? 0;
+  if (days <= 0) return 'today';
+  if (days === 1) return 'tomorrow';
+  if (days < 7) {
+    const weekday = new Date(`${departureDay(trip)}T00:00:00Z`)
+      .toLocaleDateString('en-IE', { weekday: 'long', timeZone: 'UTC' });
+    return `on ${weekday}`;
+  }
+  return `in ${days} days`;
+}
+
 function stopStartMinutes(stop: Stop): number | null {
   const timeStr = stop.scheduledStart
     ? stop.scheduledStart.includes('T')
@@ -261,12 +294,12 @@ function ActiveTripBanner({
           backgroundColor: D.green, borderRadius: 10, px: 1.5, py: 0.5 }}>
           <Typography sx={{ fontFamily: D.body, color: 'white', fontSize: '0.65rem',
             fontWeight: 800, letterSpacing: '0.14em', textTransform: 'uppercase' }}>
-            {isPast ? 'Recently on trip' : new Date(trip.startDate) <= new Date() ? 'On trip' : 'Departing soon'}
+            {isPast ? 'Recently on trip' : hasLeft(trip) ? 'On trip' : 'Departing soon'}
           </Typography>
         </Box>
 
         {/* Day counter (top-left on active trips) */}
-        {new Date(trip.startDate) <= new Date() && !isPast && (
+        {hasLeft(trip) && !isPast && (
           <Box sx={{ position: 'absolute', top: 14, left: 20 }}>
             <Typography sx={{
               fontFamily: D.display, color: 'white', lineHeight: 1,
@@ -580,9 +613,9 @@ export default function Dashboard() {
               {activeTrip
                 ? new Date(activeTrip.endDate) < new Date(new Date().setHours(0, 0, 0, 0))
                   ? `You've been in ${activeTrip.destination.city}`
-                  : new Date(activeTrip.startDate) <= new Date()
+                  : hasLeft(activeTrip)
                     ? `You're in ${activeTrip.destination.city}`
-                    : `Leaving for ${activeTrip.destination.city} tomorrow`
+                    : `Leaving for ${activeTrip.destination.city} ${leavingWhen(activeTrip)}`
                 : 'My Trips'}
             </Typography>
             {/* Terracotta accent rule */}
@@ -832,9 +865,7 @@ export default function Dashboard() {
                   {/* ── Trip cards ── */}
                   <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                     {monthTrips.map(trip => {
-                      const daysUntil = trip.startDate
-                        ? Math.ceil((new Date(trip.startDate).getTime() - Date.now()) / 86400000)
-                        : null;
+                      const daysUntil = daysToDeparture(trip);
 
                       return (
                         <Box
@@ -880,11 +911,11 @@ export default function Dashboard() {
                             }}>
                               <Box sx={{
                                 width: 6, height: 6, borderRadius: '50%',
-                                backgroundColor: trip._pending ? alpha('#fff', 0.5) : (STATUS_DOT[trip.status] ?? alpha('#fff', 0.5)),
+                                backgroundColor: trip._pending ? alpha('#fff', 0.5) : (STATUS_DOT[displayStatus(trip) ?? ''] ?? alpha('#fff', 0.5)),
                               }} />
                               <Typography sx={{ fontFamily: D.body, color: 'white', fontSize: '0.63rem',
                                 fontWeight: 800, textTransform: 'capitalize', letterSpacing: '0.05em' }}>
-                                {trip._pending ? 'Waiting to sync' : trip.status}
+                                {trip._pending ? 'Waiting to sync' : displayStatus(trip)}
                               </Typography>
                             </Box>
                           </Box>

@@ -160,6 +160,8 @@ const TAB_CONFIG = [
 const EXPENSES_TAB_INDEX = 8;
 const EXPENSES_TAB = { label: 'Expenses', Icon: ReceiptIcon };
 const isWorkTrip = (tripType?: string) => tripType === 'work' || tripType === 'mixed';
+// Order the tab bar shows them in — indices above stay fixed, this only reorders the bar.
+const TAB_DISPLAY_ORDER = [0, 1, 2, 5, 4, 3, 7, 6, EXPENSES_TAB_INDEX];
 
 // URL-facing tab identity. Index 0 (Overview) is the bare URL — no ?tab.
 // Order must line up with TAB_CONFIG; 'expenses' is the appended index 8.
@@ -526,6 +528,7 @@ function TripPageInner() {
 
   // Appended only for work/mixed trips — never renumbers tabs 0-7.
   const tabConfig = isWorkTrip(trip.tripType) ? [...TAB_CONFIG, EXPENSES_TAB] : TAB_CONFIG;
+  const tabBar = TAB_DISPLAY_ORDER.filter(i => tabConfig[i]).map(i => ({ ...tabConfig[i], i }));
 
   // Same profile fallback as the Edit Trip pre-fill, applied here too so Expenses/
   // Logistics show the real company name immediately — not just after someone has
@@ -816,8 +819,8 @@ function TripPageInner() {
                   },
                 }}
               >
-                {tabConfig.map(({ label, Icon }, i) => (
-                  <Tab key={label} label={label} icon={<Icon />} iconPosition="top" {...tabProps(i)} />
+                {tabBar.map(({ label, Icon, i }) => (
+                  <Tab key={label} value={i} label={label} icon={<Icon />} iconPosition="top" {...tabProps(i)} />
                 ))}
               </Tabs>
             </Container>
@@ -875,8 +878,8 @@ function TripPageInner() {
                           },
                         }}
                       >
-                        {tabConfig.map(({ label, Icon }, i) => (
-                          <Tab key={label} label={label} icon={<Icon />} iconPosition="top" {...tabProps(i)} />
+                        {tabBar.map(({ label, Icon, i }) => (
+                          <Tab key={label} value={i} label={label} icon={<Icon />} iconPosition="top" {...tabProps(i)} />
                         ))}
                       </Tabs>
                     </Container>

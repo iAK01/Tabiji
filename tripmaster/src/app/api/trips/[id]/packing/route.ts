@@ -1,10 +1,14 @@
 import { NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
+import { isValidObjectId } from 'mongoose';
 import connectDB from '@/lib/mongodb/connection';
 import TripPacking from '@/lib/mongodb/models/TripPacking';
+import MasterPackingItem from '@/lib/mongodb/models/MasterPackingItem';
 import Trip from '@/lib/mongodb/models/Trip';
 import User from '@/lib/mongodb/models/User';
 import { packingCounts } from '@/lib/packing/counts';
+import { sameName } from '@/lib/packing/search';
+import { tripItemFromCatalogue, type CatalogueSource } from '@/lib/packing/fromCatalogue';
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -84,22 +88,28 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   return NextResponse.json({ packing: await syncCounts(packing) });
 }
 
-// Add a manual item
+// Add an item by hand: a new one ({ name, category, quantity, advisoryNote }) or one
+// from the catalogue ({ masterItemId }). Refused if the list already has that name.
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const session = await getServerSession();
   if (!session?.user?.email) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
 
   await connectDB();
-  if (!await ownedTrip(id, session.user.email)) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  const trip = await ownedTrip(id, session.user.email);
+  if (!trip) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
   const body = await req.json();
-  const name = typeof body.name === 'string' ? body.name.trim() : '';
-  if (!name) return NextResponse.json({ error: 'Item name is required' }, { status: 400 });
-
-  const packing = await TripPacking.findOneAndUpdate(
-    { tripId: id },
-    { $push: { items: {
+  let item: { name: string } & Record<string, unknown>;
+  if (body.masterItemId !== undefined) {
+    if (!isValidObjectId(body.masterItemId)) return NextResponse.json({ error: 'Invalid item' }, { status: 400 });
+    const master = await MasterPackingItem.findById(body.masterItemId).lean<CatalogueSource>();
+    if (!master) return NextResponse.json({ error: 'That item is no longer in the catalogue' }, { status: 404 });
+    item = tripItemFromCatalogue(master, trip.nights || 1);
+  } else {
+    const name = typeof body.name === 'string' ? body.name.trim() : '';
+    if (!name) return NextResponse.json({ error: 'Item name is required' }, { status: 400 });
+    item = {
       name,
       category: body.category || 'Other',
       quantity: body.quantity || 1,
@@ -111,7 +121,17 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       preTravelNote: '',
       advisoryNote: body.advisoryNote || '',
       source: 'manual',
-    } } },
+    };
+  }
+
+  const current = await TripPacking.findOne({ tripId: id }, { 'items.name': 1 }).lean<{ items?: { name?: string }[] }>();
+  if (!current) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  const clash = sameName(item.name, current.items ?? []);
+  if (clash) return NextResponse.json({ error: `“${clash.name}” is already on this list` }, { status: 409 });
+
+  const packing = await TripPacking.findOneAndUpdate(
+    { tripId: id },
+    { $push: { items: item } },
     { new: true },
   );
   if (!packing) return NextResponse.json({ error: 'Not found' }, { status: 404 });

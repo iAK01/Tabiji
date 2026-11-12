@@ -9,8 +9,9 @@ import {
   DialogActions, Card, CardContent, CardActions, Tooltip, Modal,
   ToggleButton, ToggleButtonGroup, CircularProgress,
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
-  Divider,
+  Divider, InputAdornment,
 } from '@mui/material';
+import SearchIcon            from '@mui/icons-material/Search';
 import ArrowBackIcon         from '@mui/icons-material/ArrowBack';
 import AddIcon               from '@mui/icons-material/Add';
 import DeleteIcon            from '@mui/icons-material/Delete';
@@ -35,6 +36,7 @@ import CategoryIcon          from '@mui/icons-material/Category';
 import { PACKING_CATEGORIES } from '@/lib/data/packing-categories';
 import { CATEGORY_ICONS } from '@/components/packing/categoryIcons';
 import { readSaved, assertSaved, reportSaveFailure } from '@/lib/offline/saveErrors';
+import { searchItems, similarByName } from '@/lib/packing/search';
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 
@@ -93,6 +95,11 @@ interface PackingItem {
   serialNumber?:      string;
   purchaseValue?:     number;
 }
+
+const searchFields = (i: PackingItem) => ({
+  name: i.name,
+  also: [i.category, i.advisoryNote, i.preTravelNote, i.serialNumber],
+});
 
 const emptyForm = {
   name:               '',
@@ -230,6 +237,7 @@ export default function PackingCataloguePage() {
   const [selectedPhoto,   setSelectedPhoto]   = useState<File | null>(null);
   const [photoPreview,    setPhotoPreview]    = useState<string | null>(null);
   const [filterCategory,  setFilterCategory]  = useState('All');
+  const [query,           setQuery]           = useState('');
   const [viewMode,        setViewMode]        = useState<'grid' | 'list'>('grid');
   const [lightbox,        setLightbox]        = useState<{ src: string; name: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -257,9 +265,13 @@ export default function PackingCataloguePage() {
     return () => window.removeEventListener('keydown', handler);
   }, []);
 
-  const openAdd = () => {
+  // Starts in the category being viewed, if there is one.
+  const openAdd = (name = '') => {
     setEditTarget(null);
-    setForm({ ...emptyForm, transportTypes: [], accommodationTypes: [] });
+    setForm({
+      ...emptyForm, name, transportTypes: [], accommodationTypes: [],
+      category: filterCategory !== 'All' ? filterCategory : emptyForm.category,
+    });
     setPhotoPreview(null); setSelectedPhoto(null);
     setDialogOpen(true);
   };
@@ -298,7 +310,7 @@ export default function PackingCataloguePage() {
   // The dialog only closes and clears once the item is saved; on any failure (photo
   // included — never save with a lost photo) it stays open with what they entered.
   const handleSave = async () => {
-    if (saving || !form.name) return;
+    if (saving || !form.name.trim() || duplicate) return;
     setSaving(true);
     let photoUrl = editTarget?.photoUrl;
     try {
@@ -318,7 +330,7 @@ export default function PackingCataloguePage() {
           setUploading(false);
         }
       }
-      const payload = { ...form, photoUrl };
+      const payload = { ...form, name: form.name.trim(), photoUrl };
       if (editTarget) {
         const res  = await fetch(`/api/packing/catalogue/${editTarget._id}`, {
           method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
@@ -359,8 +371,19 @@ export default function PackingCataloguePage() {
     }
   };
 
-  const filtered   = filterCategory === 'All' ? items : items.filter(i => i.category === filterCategory);
-  const categories = ['All', ...CATEGORIES];
+  // Search runs across every category; the chips then narrow it.
+  const q                = query.trim();
+  const matches          = q ? searchItems(q, items, searchFields) : items;
+  const filtered         = filterCategory === 'All' ? matches : matches.filter(i => i.category === filterCategory);
+  const hiddenByCategory = matches.length - filtered.length;
+  const categories       = ['All', ...CATEGORIES];
+
+  // Same or similar names already in the catalogue, shown while typing a name; a same
+  // name can't be saved.
+  const similar   = dialogOpen && form.name.trim()
+    ? similarByName(form.name, items.filter(i => i._id !== editTarget?._id), i => i.name)
+    : [];
+  const duplicate = similar.find(s => s.exact)?.item ?? null;
 
   const qtyLabel = (item: PackingItem) =>
     item.quantityType === 'fixed'
@@ -393,7 +416,7 @@ export default function PackingCataloguePage() {
             {viewMode === 'grid' ? <ListIcon /> : <GridViewIcon />}
           </IconButton>
           <Button
-            variant="contained" startIcon={<AddIcon />} onClick={openAdd}
+            variant="contained" startIcon={<AddIcon />} onClick={() => openAdd()}
             sx={{ backgroundColor: D.terra, '&:hover': { backgroundColor: '#b5633e' }, fontWeight: 800, fontFamily: D.body }}
           >
             Add Item
@@ -421,8 +444,35 @@ export default function PackingCataloguePage() {
           ))}
         </Box>
 
+        {/* ── Search ── */}
+        <TextField
+          value={query}
+          onChange={e => setQuery(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Escape') setQuery(''); }}
+          placeholder="Search the catalogue"
+          fullWidth
+          autoComplete="off"
+          inputProps={{ 'aria-label': 'Search the catalogue', enterKeyHint: 'search' }}
+          InputProps={{
+            startAdornment: (
+              <InputAdornment position="start">
+                <SearchIcon sx={{ color: D.muted }} />
+              </InputAdornment>
+            ),
+            endAdornment: query ? (
+              <InputAdornment position="end">
+                <IconButton aria-label="Clear search" onClick={() => setQuery('')} edge="end">
+                  <CloseIcon />
+                </IconButton>
+              </InputAdornment>
+            ) : null,
+            sx: { backgroundColor: D.paper, fontFamily: D.body },
+          }}
+          sx={{ mb: 2 }}
+        />
+
         {/* ── Category filter ── */}
-        <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mb: 3 }}>
+        <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mb: q ? 1.5 : 3 }}>
           {categories.map(cat => {
             const Icon   = CATEGORY_ICONS[cat];
             const active = filterCategory === cat;
@@ -446,16 +496,35 @@ export default function PackingCataloguePage() {
           })}
         </Box>
 
+        {/* ── Search result count ── */}
+        {q && !loading && (
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', mb: 2 }}>
+            <Typography sx={{ fontSize: '0.85rem', color: D.muted, fontFamily: D.body }}>
+              {filtered.length} {filtered.length === 1 ? 'match' : 'matches'}
+              {filterCategory !== 'All' && ` in ${filterCategory}`}
+            </Typography>
+            {hiddenByCategory > 0 && (
+              <Button size="small" onClick={() => setFilterCategory('All')}
+                sx={{ fontFamily: D.body, fontWeight: 700, color: D.navy, minHeight: 36 }}>
+                Show {hiddenByCategory} more in other categories
+              </Button>
+            )}
+          </Box>
+        )}
+
         {/* ── Content ── */}
         {loading ? (
           <Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}>
             <CircularProgress sx={{ color: D.green }} />
           </Box>
         ) : filtered.length === 0 ? (
-          <Box sx={{ textAlign: 'center', py: 12 }}>
-            <Typography sx={{ fontFamily: D.display, fontSize: '1.5rem', color: D.muted }}>No items yet</Typography>
-            <Button variant="contained" startIcon={<AddIcon />} sx={{ mt: 2, backgroundColor: D.terra }} onClick={openAdd}>
-              Add your first item
+          <Box sx={{ textAlign: 'center', py: q ? 6 : 12 }}>
+            <Typography sx={{ fontFamily: D.display, fontSize: '1.5rem', color: D.muted }}>
+              {q ? `Nothing matches “${q}”` : items.length ? `Nothing in ${filterCategory} yet` : 'No items yet'}
+            </Typography>
+            <Button variant="contained" startIcon={<AddIcon />} sx={{ mt: 2, backgroundColor: D.terra }}
+              onClick={() => openAdd(q)}>
+              {q ? `Add “${q}”` : items.length ? 'Add item' : 'Add your first item'}
             </Button>
           </Box>
         ) : viewMode === 'grid' ? (
@@ -727,6 +796,37 @@ export default function PackingCataloguePage() {
               </FormControl>
             </Box>
 
+            {/* Same or similar names already in the catalogue */}
+            {similar.length > 0 && (
+              <Box sx={{ mt: -1 }}>
+                <Typography sx={{
+                  fontSize: '0.72rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em',
+                  color: duplicate ? D.terra : D.muted, mb: 0.5,
+                }}>
+                  {duplicate ? 'Already in the catalogue' : 'Similar items in the catalogue'}
+                </Typography>
+                {similar.map(({ item, exact }) => (
+                  <Box key={item._id} sx={{
+                    display: 'flex', alignItems: 'center', gap: 1, py: 0.5,
+                    borderBottom: `1px solid ${D.rule}`,
+                  }}>
+                    <Box sx={{ flex: 1, minWidth: 0 }}>
+                      <Typography sx={{ fontFamily: D.body, fontWeight: exact ? 700 : 500, fontSize: '0.9rem', color: D.navy }}>
+                        {item.name}
+                      </Typography>
+                      <Typography sx={{ fontSize: '0.75rem', color: D.muted }}>{item.category}</Typography>
+                    </Box>
+                    {!editTarget && (
+                      <Button size="small" onClick={() => openEdit(item)}
+                        sx={{ minHeight: 44, fontFamily: D.body, fontWeight: 700, color: D.navy }}>
+                        Edit
+                      </Button>
+                    )}
+                  </Box>
+                ))}
+              </Box>
+            )}
+
             <Divider />
 
             <Box>
@@ -842,7 +942,7 @@ export default function PackingCataloguePage() {
           }} sx={{ color: D.muted }}>
             Cancel
           </Button>
-          <Button variant="contained" onClick={handleSave} disabled={!form.name || saving}
+          <Button variant="contained" onClick={handleSave} disabled={!form.name.trim() || saving || !!duplicate}
             sx={{ backgroundColor: D.terra, '&:hover': { backgroundColor: '#b5633e' }, fontWeight: 800 }}>
             {uploading ? 'Uploading photo…' : saving ? 'Saving…' : editTarget ? 'Save Changes' : 'Save Item'}
           </Button>

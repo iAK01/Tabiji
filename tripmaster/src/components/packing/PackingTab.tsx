@@ -7,9 +7,11 @@ import {
   Collapse, Dialog, DialogTitle, DialogContent, DialogActions,
   TextField, Select, MenuItem, FormControl, InputLabel,
   IconButton, Divider, useTheme, useMediaQuery, Alert, Badge,
-  Switch, FormControlLabel, ToggleButton, ToggleButtonGroup,
+  Switch, FormControlLabel, ToggleButton, ToggleButtonGroup, InputAdornment,
 } from '@mui/material';
 import AddIcon           from '@mui/icons-material/Add';
+import SearchIcon        from '@mui/icons-material/Search';
+import CloseIcon         from '@mui/icons-material/Close';
 import RefreshIcon       from '@mui/icons-material/Refresh';
 import WarningAmberIcon  from '@mui/icons-material/WarningAmber';
 import CheckCircleIcon   from '@mui/icons-material/CheckCircle';
@@ -27,6 +29,8 @@ import { sendOrQueue } from '@/lib/offline/writes';
 import { readSaved, assertSaved, reportSaveFailure, reportCantSave } from '@/lib/offline/saveErrors';
 import { PACKING_CATEGORIES } from '@/lib/data/packing-categories';
 import { packingCounts } from '@/lib/packing/counts';
+import { searchItems, similarByName, nameKey } from '@/lib/packing/search';
+import { tripItemFromCatalogue, catalogueQuantity } from '@/lib/packing/fromCatalogue';
 import { useUrlParam } from '@/lib/hooks/useUrlParam';
 import { useWakeLock } from '@/lib/hooks/useWakeLock';
 import PackingCardDeck from './PackingCardDeck';
@@ -74,19 +78,46 @@ interface PackingItem {
 
 type IndexedItem = PackingItem & { _idx: number };
 
-// The list with a manually added item, shaped as the POST /packing route creates it —
-// shown straight away when the add is queued offline.
-function withManualItem(
-  list: PackingList,
-  item: { name: string; category: string; quantity: number; advisoryNote: string },
-): PackingList {
-  const added: PackingItem = {
-    name: item.name, category: item.category || 'Other', quantity: item.quantity || 1,
+interface CatalogueItem {
+  _id:              string;
+  name:             string;
+  category:         string;
+  essential:        boolean;
+  quantity:         number;
+  quantityType:     'fixed' | 'per_night';
+  quantityMin?:     number;
+  quantityMax?:     number;
+  preTravelAction:  boolean;
+  preTravelNote?:   string;
+  advisoryNote?:    string;
+  photoUrl?:        string;
+}
+
+const EMPTY_NEW_ITEM = { name: '', category: 'Other', quantity: 1, advisoryNote: '' };
+
+// A new item as the POST /packing route creates it — shown straight away when the add
+// is queued offline.
+function manualItem(item: typeof EMPTY_NEW_ITEM): PackingItem {
+  return {
+    name: item.name.trim(), category: item.category || 'Other', quantity: item.quantity || 1,
     quantityType: 'fixed', essential: false, packed: false, packedAt: null,
     preTravelAction: false, preTravelNote: '', advisoryNote: item.advisoryNote || '', source: 'manual',
   };
-  return { ...list, items: [...list.items, added], totalItems: list.items.length + 1 };
 }
+
+function withAddedItem(list: PackingList, item: PackingItem): PackingList {
+  return { ...list, items: [...list.items, item], totalItems: list.items.length + 1 };
+}
+
+const listSearchFields = (i: PackingItem) => ({ name: i.name, also: [i.category, i.advisoryNote, i.preTravelNote] });
+const catalogueSearchFields = (c: CatalogueItem) => ({ name: c.name, also: [c.category, c.advisoryNote] });
+
+const statusLabel = (i: PackingItem) => (i.packed ? 'Packed' : i.skipped ? 'Not bringing' : 'To pack');
+
+const sectionLabelSx = {
+  fontFamily: D.body, fontSize: '0.72rem', fontWeight: 700, textTransform: 'uppercase',
+  letterSpacing: '0.06em', color: 'text.secondary',
+} as const;
 
 interface PackingList {
   _id:              string;
@@ -207,7 +238,10 @@ export default function PackingTab({ tripId, tripType, nights, startDate, fabTri
   const [filterOpen,       setFilterOpen]       = useState(false);
   const [filter,           setFilter]           = useState<'all' | 'unpacked' | 'packed'>('all');
   const [expanded,         setExpanded]         = useState<Record<string, boolean>>({});
-  const [newItem,          setNewItem]          = useState({ name: '', category: 'Other', quantity: 1, advisoryNote: '' });
+  const [newItem,          setNewItem]          = useState(EMPTY_NEW_ITEM);
+  const [search,           setSearch]           = useState('');
+  const [catalogue,        setCatalogue]        = useState<CatalogueItem[] | null>(null);
+  const [catalogueFailed,  setCatalogueFailed]  = useState(false);
   const [catalogueEdit,    setCatalogueEdit]    = useState<CatalogueEditState | null>(null);
   const [catalogueSaving,  setCatalogueSaving]  = useState(false);
   const [adding,           setAdding]           = useState(false);
@@ -259,6 +293,14 @@ export default function PackingTab({ tripId, tripType, nights, startDate, fabTri
       .then(d => { setPacking(d.packing ?? null); setLoading(false); })
       .catch(() => setLoading(false));
   }, [tripId]);
+
+  // For search and the add dialog: what's in the catalogue but not on this list.
+  useEffect(() => {
+    fetch('/api/packing/catalogue')
+      .then(r => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
+      .then(d => setCatalogue(Array.isArray(d.items) ? d.items : []))
+      .catch(() => setCatalogueFailed(true));
+  }, []);
 
   // Optimistic packing list written into the saved copy when a change is queued offline.
   const savedPacking = (next: PackingList) => ({
@@ -415,36 +457,52 @@ export default function PackingTab({ tripId, tripType, nights, startDate, fabTri
     }
   };
 
-  // The dialog only closes and clears once the item is saved or safely queued; on any
-  // failure it stays open with what they typed, and the error toast says so.
-  const addItem = async () => {
-    const name = newItem.name.trim();
-    if (adding || !name) return;
+  // The add dialog only closes and clears once the item is saved or safely queued; on
+  // any failure it stays open with what they typed, and the error toast says so.
+  const submitAdd = async (payload: Record<string, unknown>, item: PackingItem, fromDialog: boolean) => {
+    if (adding) return;
     setAdding(true);
     try {
       const res = await sendOrQueue(
-        { type: 'ADD_PACKING_ITEM', tripId, payload: newItem },
+        { type: 'ADD_PACKING_ITEM', tripId, payload },
         () => fetch(`/api/trips/${tripId}/packing`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(newItem),
+          body: JSON.stringify(payload),
         }),
-        packing ? savedPacking(withManualItem(packing, newItem)) : undefined,
+        packing ? savedPacking(withAddedItem(packing, item)) : undefined,
       );
       if (res) {
         const data  = await readSaved(res);
-        const saved = data.packing?.items?.some((i: PackingItem) => i.source === 'manual' && i.name === name);
+        const saved = data.packing?.items?.some((i: PackingItem) => i.source === 'manual' && i.name === item.name);
         if (!saved) throw new Error('Saved list does not contain the new item');
         setPacking(data.packing);
       } else if (packing) {
-        setPacking(withManualItem(packing, newItem));
+        setPacking(withAddedItem(packing, item));
       }
-      setAddOpen(false);
-      setNewItem({ name: '', category: 'Other', quantity: 1, advisoryNote: '' });
+      if (fromDialog) {
+        setAddOpen(false);
+        setNewItem(EMPTY_NEW_ITEM);
+      }
     } catch (err) {
-      reportSaveFailure(`“${name}”`, err);
+      reportSaveFailure(`“${item.name}”`, err);
     } finally {
       setAdding(false);
     }
+  };
+
+  const addItem = () => {
+    const name = newItem.name.trim();
+    if (!name || packingRef.current?.items.some(i => nameKey(i.name) === nameKey(name))) return;
+    submitAdd({ ...newItem, name }, manualItem(newItem), true);
+  };
+
+  // With its catalogue defaults (quantity for these nights, notes, pre-travel action).
+  const addFromCatalogue = (c: CatalogueItem, fromDialog: boolean) =>
+    submitAdd({ masterItemId: c._id, name: c.name }, tripItemFromCatalogue(c, nights), fromDialog);
+
+  const openAddWith = (name: string) => {
+    setNewItem(p => ({ ...p, name }));
+    setAddOpen(true);
   };
 
   const createPackingAdvisory = async (items: IndexedItem[]) => {
@@ -565,6 +623,140 @@ export default function PackingTab({ tripId, tripType, nights, startDate, fabTri
   const extra = filtered.filter(i => !CATEGORIES.includes(i.category));
   if (extra.length) grouped['Other'] = sortGroup([...(grouped['Other'] ?? []), ...extra]);
 
+  // ── Search ──
+  // Covers the whole list whatever the status filter, so a packed or not-bringing item
+  // still shows up — then what's in the catalogue but not on this list.
+  const onListKeys    = new Set(packing.items.map(i => nameKey(i.name)));
+  const onListMasters = new Set(packing.items.map(i => i.masterItemId).filter(Boolean));
+  const offList       = (catalogue ?? []).filter(c => !onListKeys.has(nameKey(c.name)) && !onListMasters.has(c._id));
+
+  const query         = search.trim();
+  const queryKey      = nameKey(query);
+  const listHits      = query ? searchItems(query, indexedItems, listSearchFields) : [];
+  const catalogueHits = query ? searchItems(query, offList, catalogueSearchFields).slice(0, 8) : [];
+  const canAddQuery   = !!queryKey && !onListKeys.has(queryKey) && !offList.some(c => nameKey(c.name) === queryKey);
+
+  // Add dialog: same or similar names already on the list or in the catalogue.
+  const addName      = newItem.name.trim();
+  const listSimilar  = addOpen && addName ? similarByName(addName, indexedItems, i => i.name, 3) : [];
+  const catSimilar   = addOpen && addName ? similarByName(addName, offList, c => c.name, 4) : [];
+  const onListAlready = listSimilar.some(s => s.exact);
+
+  const renderItem = (item: IndexedItem, showCategory = false) => (
+    <Box key={item._idx}>
+      <Box sx={{
+        display: 'flex', alignItems: 'flex-start',
+        px: { xs: 2, sm: 2.5 }, py: { xs: 1.5, sm: 1.25 }, gap: 1.5,
+        opacity: isDone(item) ? 0.4 : 1, transition: 'opacity 0.2s',
+        '&:hover': { backgroundColor: 'rgba(44,62,80,0.025)' },
+        '&:hover .catalogue-tune': { opacity: 1 },
+        pointerEvents: pending.has(item._idx) ? 'none' : 'auto',
+      }}>
+        <Checkbox checked={item.packed}
+          onChange={() => setItemStatus(item._idx, item.packed ? 'todo' : 'packed')}
+          sx={{ p: 0, flexShrink: 0, mt: 0.25, color: D.green,
+            '&.Mui-checked': { color: D.green } }} />
+
+        <Box sx={{ flexGrow: 1, minWidth: 0 }}>
+          <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1.5, flexWrap: 'wrap' }}>
+            {/* Item name */}
+            <Typography sx={{
+              fontFamily: D.body,
+              fontWeight: item.essential ? 700 : 400,
+              fontSize: { xs: '0.95rem', sm: '0.9rem' },
+              textDecoration: item.packed ? 'line-through' : 'none',
+              color: D.navy,
+            }}>
+              {item.name}
+            </Typography>
+
+            {item.skipped && !item.packed && (
+              <Typography sx={{ fontFamily: D.body, fontSize: '0.72rem', fontWeight: 700, color: 'text.secondary' }}>
+                Not bringing
+              </Typography>
+            )}
+
+            {/* Quantity — Archivo Black, terracotta, jumps out */}
+            {item.quantity > 1 && (
+              <Typography sx={{
+                fontFamily: D.display,
+                fontSize: '0.82rem',
+                letterSpacing: '-0.01em',
+                color: item.packed ? 'text.disabled' : D.terra,
+                flexShrink: 0,
+              }}>
+                {qtyLabel(item)}
+              </Typography>
+            )}
+          </Box>
+
+          {showCategory && (
+            <Typography sx={{ fontFamily: D.body, fontSize: '0.72rem', color: 'text.secondary', mt: 0.25 }}>
+              {item.category}
+            </Typography>
+          )}
+
+          {item.advisoryNote && !isDone(item) && (
+            <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 0.5, mt: 0.5 }}>
+              <InfoOutlinedIcon sx={{ fontSize: 13, color: 'text.disabled', mt: 0.25, flexShrink: 0 }} />
+              <Typography sx={{ fontFamily: D.body, fontSize: '0.74rem',
+                color: 'text.disabled', lineHeight: 1.4 }}>
+                {item.advisoryNote}
+              </Typography>
+            </Box>
+          )}
+
+          {item.preTravelAction && !isDone(item) && (
+            <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 0.5, mt: 0.5 }}>
+              <WarningAmberIcon sx={{ fontSize: 13, color: 'warning.main', mt: 0.25, flexShrink: 0 }} />
+              <Typography sx={{ fontFamily: D.body, fontSize: '0.74rem',
+                color: 'warning.dark', lineHeight: 1.4 }}>
+                {item.preTravelNote || 'Pre-travel action required'}
+              </Typography>
+            </Box>
+          )}
+        </Box>
+
+        {item.masterItemId && !item.packed && (
+          <IconButton className="catalogue-tune" size="small"
+            onClick={e => { e.stopPropagation(); openCatalogueEdit(item); }}
+            aria-label={`Edit catalogue defaults for ${item.name}`}
+            sx={{ opacity: 0, transition: 'opacity 0.15s', flexShrink: 0,
+              alignSelf: 'center', color: 'text.disabled',
+              '&:hover': { color: D.green } }}>
+            <TuneIcon sx={{ fontSize: '1rem' }} />
+          </IconButton>
+        )}
+      </Box>
+      <Divider />
+    </Box>
+  );
+
+  // A catalogue item not on this list, with its Add button.
+  const renderCatalogueRow = (c: CatalogueItem, fromDialog: boolean) => (
+    <Box key={c._id} sx={{
+      display: 'flex', alignItems: 'center', gap: 1.5,
+      px: fromDialog ? 0 : { xs: 2, sm: 2.5 }, py: 0.75,
+      borderBottom: '1px solid rgba(44,62,80,0.08)',
+    }}>
+      <Box sx={{ flex: 1, minWidth: 0 }}>
+        <Typography sx={{ fontFamily: D.body, fontSize: '0.92rem', color: D.navy }}>{c.name}</Typography>
+        <Typography sx={{ fontFamily: D.body, fontSize: '0.72rem', color: 'text.secondary' }}>
+          {c.category}
+          {c.quantityType === 'per_night' && ` · ${catalogueQuantity(c, nights)} for ${nights} night${nights !== 1 ? 's' : ''}`}
+        </Typography>
+      </Box>
+      <Button size="small" variant="outlined" startIcon={<AddIcon />} disabled={adding}
+        onClick={() => addFromCatalogue(c, fromDialog)}
+        sx={{
+          fontFamily: D.body, fontWeight: 700, flexShrink: 0, minHeight: 44,
+          borderColor: 'rgba(44,62,80,0.18)', color: D.navy,
+        }}>
+        Add
+      </Button>
+    </Box>
+  );
+
   // ── Render ────────────────────────────────────────────────────────────────
 
   return (
@@ -607,6 +799,32 @@ export default function PackingTab({ tripId, tripType, nights, startDate, fabTri
             </Badge>
           </IconButton>
         </Box>
+
+        {/* Search */}
+        <TextField
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Escape') setSearch(''); }}
+          placeholder="Search list and catalogue"
+          size="small" fullWidth autoComplete="off"
+          inputProps={{ 'aria-label': 'Search list and catalogue', enterKeyHint: 'search' }}
+          InputProps={{
+            startAdornment: (
+              <InputAdornment position="start">
+                <SearchIcon sx={{ fontSize: 20, color: 'text.disabled' }} />
+              </InputAdornment>
+            ),
+            endAdornment: search ? (
+              <InputAdornment position="end">
+                <IconButton aria-label="Clear search" onClick={() => setSearch('')} edge="end">
+                  <CloseIcon fontSize="small" />
+                </IconButton>
+              </InputAdornment>
+            ) : null,
+            sx: { fontFamily: D.body, minHeight: 44, backgroundColor: '#fff' },
+          }}
+          sx={{ mb: 1.25 }}
+        />
 
         {/* Cards + screen */}
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.25, flexWrap: 'wrap' }}>
@@ -692,8 +910,58 @@ export default function PackingTab({ tripId, tripType, nights, startDate, fabTri
         awake={{ supported: wake.supported, on: keepAwake, toggle: toggleAwake }}
       />
 
-      {/* ── Category sections ── */}
-      {Object.entries(grouped).map(([category, catItems]) => {
+      {/* ── Category sections, or search results ── */}
+      {query ? (
+        <>
+          {/* ── Search: on this list ── */}
+          <Paper elevation={0} sx={{
+            mb: 1.5, backgroundColor: D.paper, overflow: 'hidden',
+            border: `1.5px solid rgba(44,62,80,0.08)`, borderRadius: 2,
+          }}>
+            <Typography sx={{ ...sectionLabelSx, px: { xs: 2, sm: 2.5 }, pt: 1.5, pb: 1 }}>
+              On this list · {listHits.length}
+            </Typography>
+            <Divider />
+            {listHits.length
+              ? listHits.map(item => renderItem(item, true))
+              : (
+                <Typography sx={{ fontFamily: D.body, fontSize: '0.88rem', color: 'text.secondary', px: { xs: 2, sm: 2.5 }, py: 1.5 }}>
+                  Nothing on this list matches “{query}”.
+                </Typography>
+              )}
+          </Paper>
+
+          {/* ── Search: in the catalogue, not on this list ── */}
+          {(catalogueHits.length > 0 || catalogueFailed) && (
+            <Paper elevation={0} sx={{
+              mb: 1.5, backgroundColor: D.paper, overflow: 'hidden',
+              border: `1.5px solid rgba(44,62,80,0.08)`, borderRadius: 2,
+            }}>
+              <Typography sx={{ ...sectionLabelSx, px: { xs: 2, sm: 2.5 }, pt: 1.5, pb: 1 }}>
+                In your catalogue
+              </Typography>
+              <Divider />
+              {catalogueFailed
+                ? (
+                  <Typography sx={{ fontFamily: D.body, fontSize: '0.88rem', color: 'text.secondary', px: { xs: 2, sm: 2.5 }, py: 1.5 }}>
+                    Couldn’t load the catalogue.
+                  </Typography>
+                )
+                : catalogueHits.map(c => renderCatalogueRow(c, false))}
+            </Paper>
+          )}
+
+          {canAddQuery && (
+            <Button variant="outlined" startIcon={<AddIcon />} fullWidth onClick={() => openAddWith(query)}
+              sx={{
+                fontFamily: D.body, fontWeight: 700, textTransform: 'none', minHeight: 48, mb: 1.5,
+                borderColor: 'rgba(44,62,80,0.18)', color: D.navy, justifyContent: 'flex-start', px: 2,
+              }}>
+              Add “{query}” as a new item
+            </Button>
+          )}
+        </>
+      ) : Object.entries(grouped).map(([category, catItems]) => {
         const packedCount  = catItems.filter(i => i.packed).length;
         const bringing     = catItems.filter(i => !i.skipped).length;
         const allCatPacked = catItems.every(isDone);
@@ -749,89 +1017,7 @@ export default function PackingTab({ tripId, tripType, nights, startDate, fabTri
 
             <Collapse in={isOpen}>
               <Divider />
-              {catItems.map(item => (
-                <Box key={item._idx}>
-                  <Box sx={{
-                    display: 'flex', alignItems: 'flex-start',
-                    px: { xs: 2, sm: 2.5 }, py: { xs: 1.5, sm: 1.25 }, gap: 1.5,
-                    opacity: isDone(item) ? 0.4 : 1, transition: 'opacity 0.2s',
-                    '&:hover': { backgroundColor: 'rgba(44,62,80,0.025)' },
-                    '&:hover .catalogue-tune': { opacity: 1 },
-                    pointerEvents: pending.has(item._idx) ? 'none' : 'auto',
-                  }}>
-                    <Checkbox checked={item.packed}
-                      onChange={() => setItemStatus(item._idx, item.packed ? 'todo' : 'packed')}
-                      sx={{ p: 0, flexShrink: 0, mt: 0.25, color: D.green,
-                        '&.Mui-checked': { color: D.green } }} />
-
-                    <Box sx={{ flexGrow: 1, minWidth: 0 }}>
-                      <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1.5, flexWrap: 'wrap' }}>
-                        {/* Item name */}
-                        <Typography sx={{
-                          fontFamily: D.body,
-                          fontWeight: item.essential ? 700 : 400,
-                          fontSize: { xs: '0.95rem', sm: '0.9rem' },
-                          textDecoration: item.packed ? 'line-through' : 'none',
-                          color: D.navy,
-                        }}>
-                          {item.name}
-                        </Typography>
-
-                        {item.skipped && !item.packed && (
-                          <Typography sx={{ fontFamily: D.body, fontSize: '0.72rem', fontWeight: 700, color: 'text.secondary' }}>
-                            Not bringing
-                          </Typography>
-                        )}
-
-                        {/* Quantity — Archivo Black, terracotta, jumps out */}
-                        {item.quantity > 1 && (
-                          <Typography sx={{
-                            fontFamily: D.display,
-                            fontSize: '0.82rem',
-                            letterSpacing: '-0.01em',
-                            color: item.packed ? 'text.disabled' : D.terra,
-                            flexShrink: 0,
-                          }}>
-                            {qtyLabel(item)}
-                          </Typography>
-                        )}
-                      </Box>
-
-                      {item.advisoryNote && !isDone(item) && (
-                        <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 0.5, mt: 0.5 }}>
-                          <InfoOutlinedIcon sx={{ fontSize: 13, color: 'text.disabled', mt: 0.25, flexShrink: 0 }} />
-                          <Typography sx={{ fontFamily: D.body, fontSize: '0.74rem',
-                            color: 'text.disabled', lineHeight: 1.4 }}>
-                            {item.advisoryNote}
-                          </Typography>
-                        </Box>
-                      )}
-
-                      {item.preTravelAction && !isDone(item) && (
-                        <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 0.5, mt: 0.5 }}>
-                          <WarningAmberIcon sx={{ fontSize: 13, color: 'warning.main', mt: 0.25, flexShrink: 0 }} />
-                          <Typography sx={{ fontFamily: D.body, fontSize: '0.74rem',
-                            color: 'warning.dark', lineHeight: 1.4 }}>
-                            {item.preTravelNote || 'Pre-travel action required'}
-                          </Typography>
-                        </Box>
-                      )}
-                    </Box>
-
-                    {item.source === 'auto' && item.masterItemId && !item.packed && (
-                      <IconButton className="catalogue-tune" size="small"
-                        onClick={e => { e.stopPropagation(); openCatalogueEdit(item); }}
-                        aria-label={`Edit catalogue defaults for ${item.name}`}
-                        sx={{ opacity: 0, transition: 'opacity 0.15s', flexShrink: 0,
-                          alignSelf: 'center', color: 'text.disabled',
-                          '&:hover': { color: D.green } }}>
-                        <TuneIcon sx={{ fontSize: '1rem' }} />
-                      </IconButton>
-                    )}
-                  </Box>
-                  <Divider />
-                </Box>
-              ))}
+              {catItems.map(item => renderItem(item))}
             </Collapse>
           </Paper>
         );
@@ -929,10 +1115,56 @@ export default function PackingTab({ tripId, tripType, nights, startDate, fabTri
         </DialogTitle>
         <DialogContent>
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, pt: 1 }}>
-            <TextField label="Item name" value={newItem.name} autoFocus fullWidth
+            <TextField label="Item name" value={newItem.name} autoFocus fullWidth autoComplete="off"
               onChange={e => setNewItem(p => ({ ...p, name: e.target.value }))}
               InputProps={{ sx: { fontFamily: D.body } }}
               InputLabelProps={{ sx: { fontFamily: D.body } }} />
+
+            {/* Same or similar names already on this list */}
+            {listSimilar.length > 0 && (
+              <Box sx={{ mt: -1 }}>
+                <Typography sx={{ ...sectionLabelSx, color: onListAlready ? D.terra : 'text.secondary', mb: 0.5 }}>
+                  {onListAlready ? 'Already on this list' : 'Similar on this list'}
+                </Typography>
+                {listSimilar.map(({ item, exact }) => (
+                  <Box key={item._idx} sx={{
+                    display: 'flex', alignItems: 'center', gap: 1.5, py: 0.75,
+                    borderBottom: '1px solid rgba(44,62,80,0.08)',
+                  }}>
+                    <Box sx={{ flex: 1, minWidth: 0 }}>
+                      <Typography sx={{ fontFamily: D.body, fontSize: '0.92rem', fontWeight: exact ? 700 : 400, color: D.navy }}>
+                        {item.name}
+                      </Typography>
+                      <Typography sx={{ fontFamily: D.body, fontSize: '0.72rem', color: 'text.secondary' }}>
+                        {item.category} · {statusLabel(item)}
+                      </Typography>
+                    </Box>
+                    {item.skipped && !item.packed && (
+                      <Button size="small" variant="outlined" disabled={pending.has(item._idx)}
+                        onClick={() => {
+                          setItemStatus(item._idx, 'todo');
+                          setAddOpen(false);
+                          setNewItem(EMPTY_NEW_ITEM);
+                        }}
+                        sx={{
+                          fontFamily: D.body, fontWeight: 700, flexShrink: 0, minHeight: 44,
+                          borderColor: 'rgba(44,62,80,0.18)', color: D.navy,
+                        }}>
+                        Bring it
+                      </Button>
+                    )}
+                  </Box>
+                ))}
+              </Box>
+            )}
+
+            {/* In the catalogue but not on this list — added with its catalogue defaults */}
+            {catSimilar.length > 0 && (
+              <Box sx={{ mt: listSimilar.length ? 0 : -1 }}>
+                <Typography sx={{ ...sectionLabelSx, mb: 0.5 }}>In your catalogue</Typography>
+                {catSimilar.map(({ item }) => renderCatalogueRow(item, true))}
+              </Box>
+            )}
             <FormControl fullWidth>
               <InputLabel sx={{ fontFamily: D.body }}>Category</InputLabel>
               <Select value={newItem.category} label="Category"
@@ -955,7 +1187,7 @@ export default function PackingTab({ tripId, tripType, nights, startDate, fabTri
         <DialogActions sx={{ px: 3, pb: 3, gap: 1, flexDirection: { xs: 'column-reverse', sm: 'row' } }}>
           <Button onClick={() => setAddOpen(false)} fullWidth={mobile} size="large"
             sx={{ fontFamily: D.body, fontWeight: 600 }}>Cancel</Button>
-          <Button variant="contained" onClick={addItem} disabled={!newItem.name.trim() || adding}
+          <Button variant="contained" onClick={addItem} disabled={!addName || adding || onListAlready}
             fullWidth={mobile} size="large"
             sx={{
               fontFamily: D.display, letterSpacing: '-0.01em',
