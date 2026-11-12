@@ -14,13 +14,15 @@ import type { HourWeather } from './hourWeather';
 import { weatherIcon, warmth } from '@/components/weather/weatherUi';
 
 // ─── Hour ruler ────────────────────────────────────────────────────────────────
-export function HourRuler({ pxPerMin, startHour = DAY_START_HOUR, endHour = DAY_END_HOUR, nextDayLabel, weather, onWeatherTap }: {
+export function HourRuler({ pxPerMin, startHour = DAY_START_HOUR, endHour = DAY_END_HOUR, nextDayLabel, weather, onWeatherTap, compact }: {
   pxPerMin: number; startHour?: number; endHour?: number;
   /** Under the midnight mark when the night runs on past it: "Fri" */
   nextDayLabel?: string;
   /** Page hour → that hour's weather, drawn between its mark and the next */
   weather?: Map<number, HourWeather> | null;
   onWeatherTap?: (w: HourWeather) => void;
+  /** Phone: weather sits right under its hour mark, "feels" only when it differs */
+  compact?: boolean;
 }) {
   const hourH = 60 * pxPerMin;
   const hours = Array.from(
@@ -58,8 +60,11 @@ export function HourRuler({ pxPerMin, startHour = DAY_START_HOUR, endHour = DAY_
       ))}
       {weather && [...weather].map(([h, w]) => (
         <HourWeatherGlyph
-          key={`wx-${h}`} w={w} hour={h}
-          top={(h - startHour) * hourH + hourH / 2 - GLYPH_H / 2}
+          key={`wx-${h}`} w={w} hour={h} compact={compact}
+          top={compact
+            // Clear of the hour mark, and of the day name under midnight
+            ? (h - startHour) * hourH + 4 + (h === 24 && nextDayLabel ? 10 : 0)
+            : (h - startHour) * hourH + hourH / 2 - GLYPH_H / 2}
           onTap={onWeatherTap}
         />
       ))}
@@ -69,11 +74,15 @@ export function HourRuler({ pxPerMin, startHour = DAY_START_HOUR, endHour = DAY_
 
 const GLYPH_H = 44;
 
-function HourWeatherGlyph({ w, hour, top, onTap }: {
-  w: HourWeather; hour: number; top: number; onTap?: (w: HourWeather) => void;
+// Phone: "feels" earns its line only when it's this far from the air temperature
+const FEELS_DIFF_SHOWN = 3;
+
+function HourWeatherGlyph({ w, hour, top, onTap, compact }: {
+  w: HourWeather; hour: number; top: number; onTap?: (w: HourWeather) => void; compact?: boolean;
 }) {
   const { Icon, color } = weatherIcon(w.code, '', w.isDay);
   const time = `${String(hour % 24).padStart(2, '0')}:00`;
+  const showFeels = w.feels != null && (!compact || Math.abs(w.feels - w.temp) >= FEELS_DIFF_SHOWN);
   return (
     <ButtonBase
       onClick={() => onTap?.(w)}
@@ -81,7 +90,8 @@ function HourWeatherGlyph({ w, hour, top, onTap }: {
       sx={{
         position: 'absolute', top, right: 6, width: 50, height: GLYPH_H,
         borderRadius: '8px', pr: 0.75,
-        display: 'flex', flexDirection: 'column', alignItems: 'flex-end', justifyContent: 'center',
+        display: 'flex', flexDirection: 'column', alignItems: 'flex-end',
+        justifyContent: compact ? 'flex-start' : 'center', pt: compact ? 0.5 : 0,
         '&:hover': { backgroundColor: alpha(D.navy, 0.04) },
       }}
     >
@@ -94,7 +104,7 @@ function HourWeatherGlyph({ w, hour, top, onTap }: {
           {w.temp}°
         </Typography>
       </Box>
-      {w.feels != null && (
+      {showFeels && (
         <Typography sx={{
           fontFamily: D.body, fontSize: '0.56rem', fontWeight: 600, lineHeight: 1, mt: 0.4,
           fontVariantNumeric: 'tabular-nums', color: alpha(D.navy, 0.45), whiteSpace: 'nowrap',

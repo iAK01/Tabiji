@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback, Fragment } from 'react';
 import { useSearchParams, usePathname } from 'next/navigation';
 import {
   DndContext, DragEndEvent,
@@ -10,8 +10,8 @@ import {
 import { restrictToVerticalAxis } from '@dnd-kit/modifiers';
 import {
   Box, Typography, Paper, Button,
-  IconButton, Chip, CircularProgress, Tooltip, Menu, MenuItem,
-  ToggleButton, ToggleButtonGroup,
+  IconButton, Chip, CircularProgress, Menu, MenuItem,
+  ToggleButton, ToggleButtonGroup, ButtonBase, ListItemIcon,
   Dialog, DialogTitle, DialogContent, DialogActions,
 } from '@mui/material';
 import { alpha }              from '@mui/material/styles';
@@ -32,6 +32,10 @@ import CloseIcon          from '@mui/icons-material/Close';
 import NightsStayIcon     from '@mui/icons-material/NightsStay';
 import ChevronRightIcon   from '@mui/icons-material/ChevronRight';
 import AutoStoriesIcon    from '@mui/icons-material/AutoStories';
+import ArrowDropDownIcon  from '@mui/icons-material/ArrowDropDown';
+import MoreVertIcon       from '@mui/icons-material/MoreVert';
+import VisibilityIcon     from '@mui/icons-material/Visibility';
+import VisibilityOffIcon  from '@mui/icons-material/VisibilityOff';
 import NavigateButton     from '@/components/ui/NavigateButton';
 import ExportCalendarDialog from '@/components/calendar/ExportCalendarDialog';
 import { saveTripCache, getTripCache } from '@/lib/offline/db';
@@ -73,6 +77,11 @@ import { pageHourWeather, type HourWeather } from './hourWeather';
 import type { TravelOrigin }    from '@/lib/navigation/useTravelTimes';
 
 const VIEW_MODES = ['timeline', 'list', 'recap'] as const;
+const VIEW_OPTIONS = [
+  { value: 'timeline', label: 'Timeline', Icon: ViewDayIcon },
+  { value: 'list',     label: 'List',     Icon: ViewAgendaIcon },
+  { value: 'recap',    label: 'Recap',    Icon: AutoStoriesIcon },
+] as const;
 const MIN_ZOOM   = 1;
 const MAX_ZOOM   = 3;
 const clampZoom  = (z: number) => Math.round(Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z)) * 20) / 20;
@@ -141,6 +150,13 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
   const [activeDayIdx,   setActiveDayIdx]   = useState(0);
   const [calculating,    setCalculating]    = useState(false);
   const [quickAddAnchor, setQuickAddAnchor] = useState<HTMLElement | null>(null);
+  // Phone: the add button's type picker opens just above it
+  const [typePickerAt,   setTypePickerAt]   = useState<{ top: number; left: number } | null>(null);
+  // Phone: the day row's view and overflow menus
+  const [viewMenuAnchor, setViewMenuAnchor] = useState<HTMLElement | null>(null);
+  const [moreAnchor,     setMoreAnchor]     = useState<HTMLElement | null>(null);
+  // Phone: an empty morning folds into one line until you ask for it
+  const [showEarly,      setShowEarly]      = useState(false);
   const [showAllDay,     setShowAllDay]     = useState(false);
   const [knownLocations, setKnownLocations] = useState<KnownLocation[]>([]);
   const areas = useMemo(() => tripAreas(trip), [trip]);
@@ -490,13 +506,17 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
   // ── Keep the chosen day centred in the day strip ─────────────────────────────
   useEffect(() => {
     const strip = dayStripRef.current;
-    const cell  = strip?.children[activeDayIdx] as HTMLElement | undefined;
+    // By day index, not child index — the phone strip has month labels between days
+    const cell  = strip?.querySelector<HTMLElement>(`[data-day-idx="${activeDayIdx}"]`);
     if (!strip || !cell) return;
     strip.scrollTo({
       left:     cell.offsetLeft - (strip.clientWidth - cell.offsetWidth) / 2,
       behavior: stripTappedRef.current ? 'smooth' : 'auto',
     });
   }, [activeDayIdx, days.length]);
+
+  // Each day opens with its empty morning folded again
+  useEffect(() => { setShowEarly(false); }, [activeDayIdx]);
 
   // ── Pinch (touch) / ctrl+wheel (trackpad pinch) zooms the timeline ─────────
   // Native listeners: React's touch handlers are passive and can't stop the
@@ -627,8 +647,11 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
   };
 
   useEffect(() => {
-    if (!fabTrigger) return;
-    if (fabTrigger.action === 'stop') openDrawer('09:00', 'activity');
+    if (!fabTrigger || fabTrigger.action !== 'stop') return;
+    // Phone: the one add button — pick a type first, as Quick add does on desktop.
+    // Opens just above the button (bottom 24 + 56 tall, right 16).
+    if (isMobile) setTypePickerAt({ top: window.innerHeight - 88, left: window.innerWidth - 16 });
+    else openDrawer('09:00', 'activity');
   }, [fabTrigger]);
 
   // ── Where a time on this page is stored ──────────────────────────────────────
@@ -1035,9 +1058,24 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
   const stopMins = activeStops
     .map(s => stopStartMinutes(s))
     .filter((m): m is number => m !== null);
-  const effectiveStartHour = stopMins.length
+  const fullStartHour = stopMins.length
     ? Math.min(DAY_START_HOUR, Math.floor(Math.min(...stopMins) / 60))
     : DAY_START_HOUR;
+
+  // Now, on this page's clock — today, or past 24:00 on last night's page
+  const nowMins = activeDay ? minutesSince(activeDay.date, here()) : null;
+
+  // Phone: hours before the first stop fold into one "Free until" line — or before
+  // now, when now comes first. Nothing is ever hidden: skipped and filtered-out stops
+  // count, and Edit mode always shows the whole day.
+  const firstMin = stopMins.length ? Math.min(...stopMins) : null;
+  const foldHour = firstMin === null ? null : Math.floor(
+    (nowMins !== null && nowMins >= fullStartHour * 60 && nowMins < firstMin ? nowMins : firstMin) / 60,
+  );
+  const morningFolded = isMobile && viewMode === 'timeline' && !editMode && !showEarly
+    && foldHour !== null && foldHour - fullStartHour >= 2;
+  const effectiveStartHour = morningFolded && foldHour !== null ? foldHour : fullStartHour;
+
   const effectiveEndHour = activeStops.length
     ? Math.max(DAY_END_HOUR, ...activeStops.map(s => {
         const m = stopStartMinutes(s);
@@ -1068,8 +1106,6 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
     return { min: effectiveStartHour * 60, max: endHour * 60 - stopDuration(stop) };
   };
 
-  // Now, on this page's clock — today, or past 24:00 on last night's page
-  const nowMins = activeDay ? minutesSince(activeDay.date, here()) : null;
   const todayYmd = here().ymd;   // marks today in the day strip
 
   // The early-hours choice in the drawer: what's pre-selected for a time
@@ -1100,42 +1136,68 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
     setTimeout(() => setHighlightStop(cur => (cur === first ? null : cur)), 4000);
   };
 
+  // Day header numbers — the desktop chips and the phone's stats line
+  const plannedCount   = committed.filter(s => s.source !== 'logistics').length;
+  const logisticsCount = activeStops.filter(s => s.source === 'logistics').length;
+  const currentView    = VIEW_OPTIONS.find(o => o.value === viewMode) ?? VIEW_OPTIONS[0];
+  const dayRowBtnSx    = {
+    flexShrink: 0, minHeight: 44, minWidth: 44,
+    fontFamily: D.body, fontWeight: 700, borderRadius: 1.5,
+  } as const;
+
+  // Type filter — on desktop in the view row, on a phone its own line
+  const typeFilterChips = typesToday.length > 1 && viewMode !== 'recap' ? (
+    <>
+      <Chip
+        label="All"
+        onClick={() => setTypeFilter([])}
+        sx={{
+          flexShrink: 0, height: 32, fontFamily: D.body, fontWeight: 700, fontSize: '0.72rem',
+          border: `1.5px solid ${typeFilter.length === 0 ? D.navy : alpha(D.navy, 0.2)}`,
+          backgroundColor: typeFilter.length === 0 ? D.navy : 'transparent',
+          color: typeFilter.length === 0 ? '#fff' : D.navy,
+          '&:hover': { backgroundColor: typeFilter.length === 0 ? D.navy : alpha(D.navy, 0.06) },
+        }}
+      />
+      {typesToday.map(t => {
+        const c  = STOP_CONFIG[t];
+        const on = typeFilter.includes(t);
+        return (
+          <Chip
+            key={t}
+            label={c.label.replace(/^\S+\s*/, '') || c.label}
+            onClick={() => setTypeFilter(f => (on ? f.filter(x => x !== t) : [...f, t]))}
+            sx={{
+              flexShrink: 0, height: 32, fontFamily: D.body, fontWeight: 700, fontSize: '0.72rem',
+              border: `1.5px solid ${on ? c.color : alpha(c.color, 0.3)}`,
+              backgroundColor: on ? alpha(c.color, 0.14) : 'transparent',
+              color: c.color,
+            }}
+          />
+        );
+      })}
+    </>
+  ) : null;
+
   // ── Render ────────────────────────────────────────────────────────────────────
   return (
     <Box>
 
-      {/* ── Page header ── */}
-      <Box sx={{
-        display: 'flex', justifyContent: 'space-between',
-        alignItems: 'center', mb: 2.5, gap: 1,
-      }}>
-        <Typography sx={{
-          fontFamily: D.display,
-          fontSize:   { xs: '1.1rem', sm: '1.25rem' },
-          color:      D.navy, lineHeight: 1,
+      {/* ── Page header — desktop. On a phone its actions live in the day row's
+           overflow menu, and adding is the one floating button. ── */}
+      {!isMobile && (
+        <Box sx={{
+          display: 'flex', justifyContent: 'space-between',
+          alignItems: 'center', mb: 2.5, gap: 1,
         }}>
-          Itinerary
-        </Typography>
+          <Typography sx={{
+            fontFamily: D.display, fontSize: '1.25rem',
+            color:      D.navy, lineHeight: 1,
+          }}>
+            Itinerary
+          </Typography>
 
-        <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-          {isMobile ? (
-            <Tooltip title="Calculate A-to-B travel times">
-              <span>
-                <IconButton
-                  onClick={calculateTravel}
-                  disabled={calculating}
-                  size="medium"
-                  sx={{
-                    border: `1.5px solid ${D.rule}`,
-                    borderRadius: 1.5, minWidth: 44, minHeight: 44,
-                    color: D.muted,
-                  }}
-                >
-                  {calculating ? <CircularProgress size={18} /> : <RouteIcon fontSize="small" />}
-                </IconButton>
-              </span>
-            </Tooltip>
-          ) : (
+          <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
             <Button
               variant="outlined" size="small"
               onClick={calculateTravel}
@@ -1145,20 +1207,6 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
             >
               {calculating ? 'Calculating…' : 'Calculate A-to-B'}
             </Button>
-          )}
-          {isMobile ? (
-            <Tooltip title="Export to calendar">
-              <span>
-                <IconButton
-                  onClick={() => setExportOpen(true)}
-                  size="medium"
-                  sx={{ border: `1.5px solid ${D.rule}`, borderRadius: 1.5, minWidth: 44, minHeight: 44, color: D.muted }}
-                >
-                  <CalendarMonthIcon fontSize="small" />
-                </IconButton>
-              </span>
-            </Tooltip>
-          ) : (
             <Button
               variant="outlined" size="small"
               onClick={() => setExportOpen(true)}
@@ -1167,33 +1215,28 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
             >
               Export
             </Button>
-          )}
-          <Button
-            variant="contained"
-            size={isMobile ? 'medium' : 'small'}
-            startIcon={<AddIcon />}
-            onClick={() => openDrawer('09:00', 'activity')}
-            sx={{
-              fontFamily: D.display,
-              fontSize:   '0.78rem',
-              letterSpacing: '0.04em',
-              ...(isMobile && { minHeight: 44, px: 2 }),
-            }}
-          >
-            Add
-          </Button>
+            <Button
+              variant="contained" size="small"
+              startIcon={<AddIcon />}
+              onClick={() => openDrawer('09:00', 'activity')}
+              sx={{ fontFamily: D.display, fontSize: '0.78rem', letterSpacing: '0.04em' }}
+            >
+              Add
+            </Button>
+          </Box>
         </Box>
-      </Box>
+      )}
 
       <ExportCalendarDialog tripId={tripId} open={exportOpen} onClose={() => setExportOpen(false)} />
 
-      {/* ── Day selector — fills the width; scrolls sideways once the days won't fit ── */}
+      {/* ── Day selector — fills the width; scrolls sideways once the days won't fit.
+           Phone: one line per day, the month named once where it starts. ── */}
       <Box ref={dayStripRef} sx={{
-        display: 'grid',
-        gridAutoFlow: 'column',
-        gridAutoColumns: { xs: 'minmax(62px, 1fr)', sm: 'minmax(68px, 1fr)' },
+        ...(isMobile
+          ? { display: 'flex' }
+          : { display: 'grid', gridAutoFlow: 'column', gridAutoColumns: 'minmax(68px, 1fr)' }),
         position: 'relative',
-        mb: 2,
+        mb: isMobile ? 1.5 : 2,
         borderRadius: '12px',
         overflowX: 'auto',
         overflowY: 'hidden',
@@ -1210,10 +1253,69 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
           const hasStops = (pages[i]?.stops.length ?? 0) > 0;
           const active   = i === activeDayIdx;
           const isToday  = ymdOf(day.date) === todayYmd;
+          const monthStarts = i === 0
+            || new Date(days[i - 1].date).toLocaleDateString('en-IE', { month: 'short' }) !== mon;
+          const dowColor = isToday
+            ? active ? '#ffffff' : D.terra
+            : active ? 'rgba(255,255,255,0.55)' : D.muted;
+          const stopDot = hasStops
+            ? active ? 'rgba(255,255,255,0.5)' : D.terra
+            : 'transparent';
+
+          if (isMobile) return (
+            <Fragment key={day.date}>
+              {monthStarts && (
+                <Box aria-hidden sx={{
+                  flexShrink: 0, display: 'flex', alignItems: 'center', px: 1,
+                  borderRight: `1px solid ${D.rule}`,
+                  fontFamily: D.body, fontSize: '0.6rem', fontWeight: 800,
+                  letterSpacing: '0.1em', textTransform: 'uppercase', color: D.terra,
+                }}>
+                  {mon}
+                </Box>
+              )}
+              <Box
+                data-day-idx={i}
+                role="button"
+                aria-label={d.toLocaleDateString('en-IE', { weekday: 'long', day: 'numeric', month: 'long' })}
+                aria-pressed={active}
+                onClick={() => { stripTappedRef.current = true; selectDay(i); }}
+                sx={{
+                  position: 'relative', flex: '1 0 auto', minWidth: 64, minHeight: 44,
+                  display: 'flex', alignItems: 'baseline', justifyContent: 'center', gap: 0.6,
+                  px: 1, pt: 1.4,
+                  cursor: 'pointer',
+                  backgroundColor: active ? D.navy : 'transparent',
+                  borderRight: i < days.length - 1 ? `1px solid ${D.rule}` : 'none',
+                  transition: 'background-color 0.15s',
+                  '&:active': { opacity: 0.85 },
+                }}
+              >
+                <Typography component="span" sx={{
+                  fontSize: '0.6rem', fontWeight: 800, letterSpacing: '0.1em', textTransform: 'uppercase',
+                  fontFamily: D.body, color: dowColor, lineHeight: 1,
+                }}>
+                  {isToday ? 'Today' : dow}
+                </Typography>
+                <Typography component="span" sx={{
+                  fontFamily: D.display, fontSize: '1.1rem', lineHeight: 1,
+                  color: active ? '#ffffff' : D.navy,
+                }}>
+                  {dayNum}
+                </Typography>
+                {/* Stop dot — on the bottom edge, so it costs no height */}
+                <Box sx={{
+                  position: 'absolute', bottom: 4, left: '50%', transform: 'translateX(-50%)',
+                  width: 4, height: 4, borderRadius: '50%', backgroundColor: stopDot,
+                }} />
+              </Box>
+            </Fragment>
+          );
 
           return (
             <Box
               key={day.date}
+              data-day-idx={i}
               onClick={() => { stripTappedRef.current = true; selectDay(i); }}
               sx={{
                 textAlign:       'center',
@@ -1234,9 +1336,7 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
                 letterSpacing: '0.1em',
                 textTransform: 'uppercase',
                 fontFamily:    D.body,
-                color:         isToday
-                  ? active ? '#ffffff' : D.terra
-                  : active ? 'rgba(255,255,255,0.55)' : D.muted,
+                color:         dowColor,
                 lineHeight:    1,
                 mb:            0.5,
               }}>
@@ -1246,7 +1346,7 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
               {/* Day number */}
               <Typography sx={{
                 fontFamily: D.display,
-                fontSize:   isMobile ? '1.6rem' : '1.7rem',
+                fontSize:   '1.7rem',
                 lineHeight: 1,
                 color:      active ? '#ffffff' : D.navy,
               }}>
@@ -1269,9 +1369,7 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
               {/* Stop dot */}
               <Box sx={{
                 width: 4, height: 4, borderRadius: '50%', mx: 'auto', mt: 0.75,
-                backgroundColor: hasStops
-                  ? active ? 'rgba(255,255,255,0.5)' : D.terra
-                  : 'transparent',
+                backgroundColor: stopDot,
               }} />
             </Box>
           );
@@ -1279,21 +1377,21 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
       </Box>
 
       {/* ── Day header — one line, so the timeline starts near the top ── */}
-      {activeDay && (
+      {activeDay && !isMobile && (
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5, flexWrap: 'wrap' }}>
           <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1, minWidth: 0 }}>
             <Typography sx={{
-              fontFamily: D.display, fontSize: { xs: '1.3rem', sm: '1.5rem' },
+              fontFamily: D.display, fontSize: '1.5rem',
               lineHeight: 1, color: D.navy, whiteSpace: 'nowrap',
             }}>
               Day {activeDay.dayNumber}
             </Typography>
             <Typography sx={{
-              fontFamily: D.body, fontSize: { xs: '0.8rem', sm: '0.9rem' }, fontWeight: 600,
+              fontFamily: D.body, fontSize: '0.9rem', fontWeight: 600,
               color: D.muted, lineHeight: 1, whiteSpace: 'nowrap',
             }}>
               {new Date(activeDay.date).toLocaleDateString('en-IE', {
-                weekday: isMobile ? 'short' : 'long', day: 'numeric', month: isMobile ? 'short' : 'long',
+                weekday: 'long', day: 'numeric', month: 'long',
               })}
             </Typography>
           </Box>
@@ -1302,7 +1400,7 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
           <Box sx={{ display: 'flex', gap: 0.75, flexWrap: 'wrap', flex: 1, minWidth: 0 }}>
             <Chip
               size="small"
-              label={`${committed.filter(s => s.source !== 'logistics').length} planned`}
+              label={`${plannedCount} planned`}
               sx={{
                 backgroundColor: alpha(D.green, 0.12),
                 color: D.green, fontWeight: 700,
@@ -1327,11 +1425,11 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
                 sx={{ fontWeight: 700, fontFamily: D.body, fontSize: '0.7rem', color: D.navy, borderColor: alpha(D.navy, 0.2) }}
               />
             )}
-            {activeStops.filter(s => s.source === 'logistics').length > 0 && (
+            {logisticsCount > 0 && (
               <Chip
                 size="small"
                 icon={<LockIcon sx={{ fontSize: '11px !important' }} />}
-                label={`${activeStops.filter(s => s.source === 'logistics').length} from logistics`}
+                label={`${logisticsCount} from logistics`}
                 sx={{
                   backgroundColor: alpha(D.terra, 0.10),
                   color: D.terra, fontWeight: 700,
@@ -1347,33 +1445,157 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
             variant="outlined" size="small"
             startIcon={<AddIcon />}
             onClick={e => setQuickAddAnchor(e.currentTarget)}
-            sx={{ flexShrink: 0, fontFamily: D.body, fontWeight: 700, ...(isMobile && { minHeight: 36 }) }}
+            sx={{ flexShrink: 0, fontFamily: D.body, fontWeight: 700 }}
           >
             Quick add
           </Button>
+        </Box>
+      )}
+
+      {/* ── Day row — phone: the day and its stats, then view, Edit and the rest ── */}
+      {activeDay && isMobile && (
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5 }}>
+          <Box sx={{ flex: 1, minWidth: 0 }}>
+            <Typography sx={{ fontFamily: D.display, fontSize: '1.35rem', lineHeight: 1, color: D.navy, whiteSpace: 'nowrap' }}>
+              Day {activeDay.dayNumber}
+            </Typography>
+            <Typography sx={{ fontFamily: D.body, fontSize: '0.76rem', fontWeight: 600, color: D.muted, lineHeight: 1.3, mt: 0.5 }}>
+              {[
+                `${plannedCount} planned`,
+                freeLabel,
+                logisticsCount > 0 ? `${logisticsCount} from logistics` : '',
+                skippedCount > 0 ? `${skippedCount} not going` : '',
+              ].filter(Boolean).join(' · ')}
+            </Typography>
+          </Box>
+
+          {viewMode === 'timeline' && zoom > 1 && (
+            <Chip
+              size="small" label={`${zoom.toFixed(zoom % 1 ? 1 : 0)}×`}
+              onClick={() => setZoom(1)}
+              title="Reset zoom"
+              sx={{ flexShrink: 0, height: 32, fontFamily: D.body, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}
+            />
+          )}
+
+          <Button
+            variant="outlined"
+            onClick={e => setViewMenuAnchor(e.currentTarget)}
+            aria-label={`View: ${currentView.label}`}
+            aria-haspopup="menu"
+            sx={{ ...dayRowBtnSx, px: 0.75 }}
+          >
+            <currentView.Icon sx={{ fontSize: 20 }} />
+            <ArrowDropDownIcon sx={{ fontSize: 20, ml: -0.25 }} />
+          </Button>
+
+          {viewMode === 'timeline' && (
+            <Button
+              variant={editMode ? 'contained' : 'outlined'}
+              startIcon={editMode ? <CheckIcon /> : <EditIcon />}
+              onClick={() => setEditMode(v => !v)}
+              sx={{
+                ...dayRowBtnSx, px: 1.25,
+                ...(editMode && { backgroundColor: D.terra, '&:hover': { backgroundColor: D.terra } }),
+              }}
+            >
+              {editMode ? 'Done' : 'Edit'}
+            </Button>
+          )}
+
+          <IconButton
+            onClick={e => setMoreAnchor(e.currentTarget)}
+            aria-label="More: travel times, export, not going"
+            aria-haspopup="menu"
+            sx={{ width: 44, height: 44, flexShrink: 0, border: `1.5px solid ${D.rule}`, borderRadius: 1.5, color: D.navy }}
+          >
+            {calculating ? <CircularProgress size={18} /> : <MoreVertIcon fontSize="small" />}
+          </IconButton>
+
           <Menu
-            anchorEl={quickAddAnchor}
-            open={!!quickAddAnchor}
-            onClose={() => setQuickAddAnchor(null)}
+            anchorEl={viewMenuAnchor}
+            open={!!viewMenuAnchor}
+            onClose={() => setViewMenuAnchor(null)}
             anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
             transformOrigin={{ vertical: 'top', horizontal: 'right' }}
           >
-            {QUICK_ADD_TYPES.map(t => {
-              const c = STOP_CONFIG[t];
-              return (
-                <MenuItem
-                  key={t}
-                  onClick={() => { setQuickAddAnchor(null); openDrawer('09:00', t); }}
-                  sx={{ fontFamily: D.body, fontWeight: 600, fontSize: '0.88rem', color: c.color, gap: 1 }}
-                >
-                  <c.Icon sx={{ fontSize: 18 }} />
-                  {c.label.replace(/^\S+\s*/, '') || c.label}
-                </MenuItem>
-              );
-            })}
+            {VIEW_OPTIONS.map(({ value, label, Icon }) => (
+              <MenuItem
+                key={value}
+                selected={viewMode === value}
+                onClick={() => {
+                  setViewMenuAnchor(null);
+                  setViewMode(value);
+                  if (value !== 'timeline') setEditMode(false);
+                }}
+                sx={{ fontFamily: D.body, fontWeight: 600, fontSize: '0.9rem', color: D.navy }}
+              >
+                <ListItemIcon><Icon fontSize="small" /></ListItemIcon>
+                {label}
+              </MenuItem>
+            ))}
+          </Menu>
+
+          <Menu
+            anchorEl={moreAnchor}
+            open={!!moreAnchor}
+            onClose={() => setMoreAnchor(null)}
+            anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+            transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+          >
+            <MenuItem
+              disabled={calculating}
+              onClick={() => { setMoreAnchor(null); calculateTravel(); }}
+              sx={{ fontFamily: D.body, fontWeight: 600, fontSize: '0.9rem', color: D.navy }}
+            >
+              <ListItemIcon><RouteIcon fontSize="small" /></ListItemIcon>
+              {calculating ? 'Calculating…' : 'Calculate A-to-B times'}
+            </MenuItem>
+            <MenuItem
+              onClick={() => { setMoreAnchor(null); setExportOpen(true); }}
+              sx={{ fontFamily: D.body, fontWeight: 600, fontSize: '0.9rem', color: D.navy }}
+            >
+              <ListItemIcon><CalendarMonthIcon fontSize="small" /></ListItemIcon>
+              Export to calendar
+            </MenuItem>
+            {skippedCount > 0 && (
+              <MenuItem
+                onClick={() => { setMoreAnchor(null); setShowSkipped(v => !v); }}
+                sx={{ fontFamily: D.body, fontWeight: 600, fontSize: '0.9rem', color: D.navy }}
+              >
+                <ListItemIcon>{showSkipped ? <VisibilityOffIcon fontSize="small" /> : <VisibilityIcon fontSize="small" />}</ListItemIcon>
+                {showSkipped ? `Hide ${skippedCount} not going` : `Show ${skippedCount} not going`}
+              </MenuItem>
+            )}
           </Menu>
         </Box>
       )}
+
+      {/* Quick add's type list — from the desktop button, or above the phone's
+          floating add button. The drawer opens pre-set to the type picked. */}
+      <Menu
+        anchorEl={quickAddAnchor}
+        anchorReference={typePickerAt ? 'anchorPosition' : 'anchorEl'}
+        anchorPosition={typePickerAt ?? undefined}
+        open={!!quickAddAnchor || !!typePickerAt}
+        onClose={() => { setQuickAddAnchor(null); setTypePickerAt(null); }}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+        transformOrigin={{ vertical: typePickerAt ? 'bottom' : 'top', horizontal: 'right' }}
+      >
+        {QUICK_ADD_TYPES.map(t => {
+          const c = STOP_CONFIG[t];
+          return (
+            <MenuItem
+              key={t}
+              onClick={() => { setQuickAddAnchor(null); setTypePickerAt(null); openDrawer('09:00', t); }}
+              sx={{ fontFamily: D.body, fontWeight: 600, fontSize: '0.88rem', color: c.color, gap: 1 }}
+            >
+              <c.Icon sx={{ fontSize: 18 }} />
+              {c.label.replace(/^\S+\s*/, '') || c.label}
+            </MenuItem>
+          );
+        })}
+      </Menu>
 
       {/* ── "Based at" — one slim line: the hotel for the day being viewed ── */}
       {basedAt && (
@@ -1404,16 +1626,16 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
       )}
 
       {/* ── View controls — one slim row ── */}
-      {activeDay && (
+      {activeDay && !isMobile && (
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.25 }}>
           <ToggleButtonGroup
             size="small" exclusive value={viewMode}
             onChange={(_, v) => { if (v) { setViewMode(v); if (v !== 'timeline') setEditMode(false); } }}
             sx={{ flexShrink: 0, '& .MuiToggleButton-root': { px: 1.25, gap: 0.5, fontFamily: D.body, fontWeight: 700, fontSize: '0.72rem', minHeight: 36 } }}
           >
-            <ToggleButton value="timeline" aria-label="Timeline"><ViewDayIcon sx={{ fontSize: 18 }} />{!isMobile && 'Timeline'}</ToggleButton>
-            <ToggleButton value="list" aria-label="List"><ViewAgendaIcon sx={{ fontSize: 18 }} />{!isMobile && 'List'}</ToggleButton>
-            <ToggleButton value="recap" aria-label="Recap"><AutoStoriesIcon sx={{ fontSize: 18 }} />{!isMobile && 'Recap'}</ToggleButton>
+            {VIEW_OPTIONS.map(({ value, label, Icon }) => (
+              <ToggleButton key={value} value={value} aria-label={label}><Icon sx={{ fontSize: 18 }} />{label}</ToggleButton>
+            ))}
           </ToggleButtonGroup>
 
           {/* Type filter — one scrolling line */}
@@ -1421,58 +1643,23 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
             flex: 1, minWidth: 0, display: 'flex', gap: 0.5, overflowX: 'auto',
             scrollbarWidth: 'none', '&::-webkit-scrollbar': { display: 'none' },
           }}>
-            {typesToday.length > 1 && viewMode !== 'recap' && (
-              <Chip
-                label="All"
-                onClick={() => setTypeFilter([])}
-                sx={{
-                  flexShrink: 0, height: 32, fontFamily: D.body, fontWeight: 700, fontSize: '0.72rem',
-                  border: `1.5px solid ${typeFilter.length === 0 ? D.navy : alpha(D.navy, 0.2)}`,
-                  backgroundColor: typeFilter.length === 0 ? D.navy : 'transparent',
-                  color: typeFilter.length === 0 ? '#fff' : D.navy,
-                  '&:hover': { backgroundColor: typeFilter.length === 0 ? D.navy : alpha(D.navy, 0.06) },
-                }}
-              />
-            )}
-            {typesToday.length > 1 && viewMode !== 'recap' && typesToday.map(t => {
-              const c  = STOP_CONFIG[t];
-              const on = typeFilter.includes(t);
-              return (
-                <Chip
-                  key={t}
-                  label={c.label.replace(/^\S+\s*/, '') || c.label}
-                  onClick={() => setTypeFilter(f => (on ? f.filter(x => x !== t) : [...f, t]))}
-                  sx={{
-                    flexShrink: 0, height: 32, fontFamily: D.body, fontWeight: 700, fontSize: '0.72rem',
-                    border: `1.5px solid ${on ? c.color : alpha(c.color, 0.3)}`,
-                    backgroundColor: on ? alpha(c.color, 0.14) : 'transparent',
-                    color: c.color,
-                  }}
-                />
-              );
-            })}
+            {typeFilterChips}
           </Box>
 
           {viewMode === 'timeline' && (
             <>
-              {!isMobile && (
-                <IconButton size="small" onClick={() => setZoom(z => clampZoom(z - 0.5))} disabled={zoom <= MIN_ZOOM} aria-label="Zoom out">
-                  <ZoomOutIcon fontSize="small" />
-                </IconButton>
-              )}
-              {(zoom > 1 || !isMobile) && (
-                <Chip
-                  size="small" label={`${zoom.toFixed(zoom % 1 ? 1 : 0)}×`}
-                  onClick={zoom > 1 ? () => setZoom(1) : undefined}
-                  title={zoom > 1 ? 'Reset zoom' : 'Pinch or ctrl-scroll to zoom'}
-                  sx={{ flexShrink: 0, fontFamily: D.body, fontWeight: 700, fontVariantNumeric: 'tabular-nums', minWidth: 44 }}
-                />
-              )}
-              {!isMobile && (
-                <IconButton size="small" onClick={() => setZoom(z => clampZoom(z + 0.5))} disabled={zoom >= MAX_ZOOM} aria-label="Zoom in">
-                  <ZoomInIcon fontSize="small" />
-                </IconButton>
-              )}
+              <IconButton size="small" onClick={() => setZoom(z => clampZoom(z - 0.5))} disabled={zoom <= MIN_ZOOM} aria-label="Zoom out">
+                <ZoomOutIcon fontSize="small" />
+              </IconButton>
+              <Chip
+                size="small" label={`${zoom.toFixed(zoom % 1 ? 1 : 0)}×`}
+                onClick={zoom > 1 ? () => setZoom(1) : undefined}
+                title={zoom > 1 ? 'Reset zoom' : 'Pinch or ctrl-scroll to zoom'}
+                sx={{ flexShrink: 0, fontFamily: D.body, fontWeight: 700, fontVariantNumeric: 'tabular-nums', minWidth: 44 }}
+              />
+              <IconButton size="small" onClick={() => setZoom(z => clampZoom(z + 0.5))} disabled={zoom >= MAX_ZOOM} aria-label="Zoom in">
+                <ZoomInIcon fontSize="small" />
+              </IconButton>
               <Button
                 size="small"
                 variant={editMode ? 'contained' : 'outlined'}
@@ -1487,6 +1674,16 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
               </Button>
             </>
           )}
+        </Box>
+      )}
+
+      {/* ── Type filter — phone, its own scrolling line when the day has more than one type ── */}
+      {activeDay && isMobile && typeFilterChips && (
+        <Box sx={{
+          display: 'flex', gap: 0.5, overflowX: 'auto', mb: 1.25,
+          scrollbarWidth: 'none', '&::-webkit-scrollbar': { display: 'none' },
+        }}>
+          {typeFilterChips}
         </Box>
       )}
 
@@ -1598,6 +1795,44 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
             </Box>
           )}
 
+          {/* ── Phone: the empty morning, folded — tap to open it ── */}
+          {morningFolded && foldHour !== null && (
+            <ButtonBase
+              onClick={() => setShowEarly(true)}
+              aria-label={`Free until ${formatTime(foldHour * 60)}. Show the early hours`}
+              sx={{
+                width: '100%', display: 'flex', alignItems: 'stretch', justifyContent: 'flex-start',
+                minHeight: 44, borderBottom: `1px solid ${D.rule}`, textAlign: 'left',
+              }}
+            >
+              <Box sx={{
+                width: 58, flexShrink: 0, borderRight: `1px solid ${D.rule}`,
+                display: 'flex', alignItems: 'center', justifyContent: 'flex-end', pr: 1.5,
+              }}>
+                <Typography sx={{
+                  fontFamily: D.display, fontSize: '0.68rem', lineHeight: 1,
+                  color: alpha(D.navy, 0.28), fontVariantNumeric: 'tabular-nums',
+                }}>
+                  {formatTime(fullStartHour * 60)}
+                </Typography>
+              </Box>
+              <Box sx={{
+                flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1, px: 1.5,
+                background: `repeating-linear-gradient(135deg, ${alpha(D.navy, 0.035)} 0 6px, transparent 6px 12px)`,
+              }}>
+                <Typography sx={{ fontFamily: D.body, fontSize: '0.8rem', fontWeight: 700, color: D.muted }}>
+                  Free until {formatTime(foldHour * 60)} · {foldHour - fullStartHour}h
+                </Typography>
+                <Typography sx={{
+                  fontFamily: D.body, fontSize: '0.72rem', fontWeight: 800,
+                  letterSpacing: '0.06em', textTransform: 'uppercase', color: D.green,
+                }}>
+                  Show
+                </Typography>
+              </Box>
+            </ButtonBase>
+          )}
+
           {viewMode === 'list' ? (
             <ItineraryList
               stops={timedStops}
@@ -1624,6 +1859,7 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
                   pxPerMin={pxPerMin} startHour={effectiveStartHour} endHour={effectiveEndHour}
                   nextDayLabel={nextDay ? dayLabel(nextDay.date, { weekday: 'short' }) : undefined}
                   weather={hourWeather} onWeatherTap={openWeatherDay}
+                  compact={isMobile}
                 />
               </Box>
 
@@ -1680,7 +1916,11 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
                 })()}
 
                 {(() => {
-                  const slots      = freeSlots(committed);
+                  // A folded morning: only the part of each gap that's on screen
+                  const top        = effectiveStartHour * 60;
+                  const slots      = freeSlots(committed)
+                    .filter(s => s.end > top)
+                    .map(s => (s.start >= top ? s : { ...s, start: top, mins: s.end - top }));
                   const largestIdx = slots.reduce((best, s, i) => s.mins > (slots[best]?.mins ?? 0) ? i : best, 0);
                   return slots.map((slot, i) => (
                     <FreeGap
@@ -1734,7 +1974,7 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
                     <Typography sx={{
                       fontFamily: D.body, fontSize: '0.88rem', color: D.muted,
                     }}>
-                      {isMobile ? 'Tap Add to start planning your day' : 'Click anywhere to add a stop'}
+                      {isMobile ? 'Nothing planned yet' : 'Click anywhere to add a stop'}
                     </Typography>
                     {isMobile && (
                       <Box sx={{ pointerEvents: 'auto' }}>

@@ -571,16 +571,17 @@ function TripPageInner() {
 
   const destTz   = destZone ?? '';
   const originTz = placeTz(trip.origin) ?? '';
-  const heroTimeDiffLabel = (() => {
-    if (!destTz) return 'Local time';
-    if (!originTz || originTz === destTz) return 'Local time';
+  // Hours the destination is ahead of home — null when either zone is unknown
+  const homeDiffH = (() => {
+    if (!destTz || !originTz || originTz === destTz) return null;
     const now  = new Date();
     const dest = new Date(now.toLocaleString('en-US', { timeZone: destTz }));
     const orig = new Date(now.toLocaleString('en-US', { timeZone: originTz }));
-    const diffH = Math.round((dest.getTime() - orig.getTime()) / 3_600_000);
-    if (diffH === 0) return 'Same as home';
-    return `${diffH > 0 ? '+' : ''}${diffH}h from home`;
+    return Math.round((dest.getTime() - orig.getTime()) / 3_600_000);
   })();
+  const heroTimeDiffLabel = homeDiffH === null ? 'Local time'
+    : homeDiffH === 0 ? 'Same as home'
+    : `${homeDiffH > 0 ? '+' : ''}${homeDiffH}h from home`;
 
   // Shared utility-row controls — rendered over the cover photo on every tab.
   const utilityRow = (
@@ -631,6 +632,131 @@ function TripPageInner() {
     </>
   );
 
+  // Phone, every tab but Overview: one slim bar — trip name as the title, the cover
+  // photo tinted behind it. Weather lives on the Weather tab; the clock shows only
+  // when it differs from home.
+  const mobileHeader = (
+    <Box sx={{ position: 'relative', overflow: 'hidden', bgcolor: D.navy }}>
+      {trip.coverPhotoUrl && (
+        <Box sx={{
+          position: 'absolute', inset: 0,
+          backgroundImage: `url(${trip.coverPhotoUrl})`,
+          backgroundSize: 'cover',
+          backgroundPosition: 'center 38%',
+        }} />
+      )}
+      <Box sx={{
+        position: 'absolute', inset: 0,
+        background: trip.coverPhotoUrl
+          ? 'linear-gradient(90deg, rgba(10,16,44,0.84) 0%, rgba(10,16,44,0.58) 62%, rgba(10,16,44,0.42) 100%)'
+          : `linear-gradient(135deg, ${D.navy} 0%, #2a3558 100%)`,
+      }} />
+      <Toolbar disableGutters sx={{ position: 'relative', zIndex: 2, minHeight: 64, gap: 0.5, px: 0.5 }}>
+        <IconButton color="inherit" onClick={() => router.push('/dashboard')} aria-label="Back to trips" sx={{ width: 44, height: 44, flexShrink: 0 }}>
+          <ArrowBackIcon />
+        </IconButton>
+        <Box sx={{ flex: 1, minWidth: 0 }}>
+          <Typography sx={{
+            fontFamily: D.display, fontSize: '1.05rem', lineHeight: 1.15, color: 'white',
+            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+            textShadow: '0 1px 6px rgba(0,0,0,0.5)',
+          }}>
+            {trip.name}{trip.destination?.city ? ` · ${trip.destination.city}` : ''}
+          </Typography>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, mt: 0.4, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden' }}>
+            {isActive ? (
+              <Box sx={{ bgcolor: D.green, borderRadius: 10, px: 0.9, py: 0.15, flexShrink: 0 }}>
+                <Typography sx={{ fontFamily: D.body, color: 'white', fontSize: '0.58rem', fontWeight: 800, letterSpacing: '0.12em', textTransform: 'uppercase' }}>
+                  On trip
+                </Typography>
+              </Box>
+            ) : daysUntil !== null && daysUntil > 0 && (
+              <Typography sx={{ fontFamily: D.display, color: D.terra, fontSize: '0.76rem', lineHeight: 1.2, flexShrink: 0 }}>
+                {daysUntil === 1 ? 'Tomorrow' : `${daysUntil} days away`}
+              </Typography>
+            )}
+            <Typography sx={{
+              fontFamily: D.body, fontSize: '0.72rem', fontWeight: 600, lineHeight: 1.2,
+              color: 'rgba(255,255,255,0.72)', overflow: 'hidden', textOverflow: 'ellipsis',
+            }}>
+              {[
+                `${trip.nights} night${trip.nights === 1 ? '' : 's'}`,
+                localTime && homeDiffH ? `${localTime} local (${homeDiffH > 0 ? '+' : ''}${homeDiffH}h)` : '',
+              ].filter(Boolean).join(' · ')}
+            </Typography>
+          </Box>
+        </Box>
+        <NotificationBell tripId={trip._id} tripName={trip.name} />
+        <IconButton color="inherit" onClick={openEdit} aria-label="Edit trip" sx={{ width: 44, height: 44, flexShrink: 0 }}>
+          <EditIcon fontSize="small" />
+        </IconButton>
+      </Toolbar>
+    </Box>
+  );
+
+  const onTabChange = (_: unknown, val: number) => {
+    setActiveTab(val);
+    if (isActive) {
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        tabContentRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }));
+    }
+  };
+
+  // The tab row — under the cover on most tabs, inside Overview's own hero there.
+  // Phone: labels only, and a fade at the edge to say the row scrolls.
+  const tabsBar = (
+    <Box sx={{
+      backgroundColor: D.navy,
+      borderBottom: `1px solid ${alpha('#fff', 0.08)}`,
+      position: 'sticky',
+      top: 0,
+      zIndex: 100,
+      boxShadow: `0 4px 20px ${alpha(D.navy, 0.35)}`,
+      ...(isMobile && {
+        '&::after': {
+          content: '""', position: 'absolute', top: 0, right: 0, bottom: 0, width: 36,
+          pointerEvents: 'none',
+          background: `linear-gradient(90deg, ${alpha(D.navy, 0)} 0%, ${D.navy} 85%)`,
+        },
+      }),
+    }}>
+      <Container maxWidth="lg" disableGutters>
+        <Tabs
+          value={activeTab}
+          onChange={onTabChange}
+          textColor="inherit"
+          variant={isMobile ? 'scrollable' : 'fullWidth'}
+          scrollButtons={false}
+          TabIndicatorProps={{ style: { backgroundColor: D.terra, height: 3, borderRadius: '3px 3px 0 0' } }}
+          sx={{
+            ...(isMobile && { minHeight: 46, '& .MuiTabs-flexContainer': { pr: 4 } }),
+            '& .MuiTab-root': {
+              fontFamily: D.body, minHeight: { xs: 46, sm: 58 }, minWidth: { xs: 0, sm: 100 },
+              px: { xs: 1.75, sm: 2 },
+              flexDirection: 'column', gap: 0.6,
+              fontSize: { xs: '0.7rem', sm: '0.8rem' }, fontWeight: 700,
+              textTransform: 'uppercase', letterSpacing: '0.1em',
+              color: alpha('#fff', 0.35), transition: 'color 0.15s',
+              '&:hover': { color: alpha('#fff', 0.8) },
+              '&.Mui-selected': { color: 'white', fontWeight: 800 },
+              '& svg': { fontSize: { xs: '1.3rem', sm: '1.5rem' }, transition: 'color 0.15s' },
+              '&.Mui-selected svg': { color: D.terra },
+            },
+          }}
+        >
+          {tabBar.map(({ label, Icon, i }) => (
+            <Tab
+              key={label} value={i} label={label}
+              {...(!isMobile && { icon: <Icon />, iconPosition: 'top' as const })}
+              {...tabProps(i)}
+            />
+          ))}
+        </Tabs>
+      </Container>
+    </Box>
+  );
+
   return (
     <>
       <style>{`
@@ -660,8 +786,10 @@ function TripPageInner() {
             </Toolbar>
           )}
 
+          {activeTab !== 0 && isMobile && mobileHeader}
+
           {/* Every other tab — full-bleed cover photo, utility row sitting on top of it */}
-          {activeTab !== 0 && <Box sx={{ position: 'relative', height: { xs: 150, sm: 170, md: 180 }, overflow: 'hidden', bgcolor: D.navy }}>
+          {activeTab !== 0 && !isMobile && <Box sx={{ position: 'relative', height: { sm: 170, md: 180 }, overflow: 'hidden', bgcolor: D.navy }}>
 
             {/* Photo background */}
             {trip.coverPhotoUrl && (
@@ -781,58 +909,14 @@ function TripPageInner() {
         </AppBar>
 
         {/* ── Tabs — shown above content on all tabs except overview ── */}
-        {activeTab !== 0 && (
-          <Box sx={{
-            backgroundColor: D.navy,
-            borderBottom: `1px solid ${alpha('#fff', 0.08)}`,
-            position: 'sticky',
-            top: 0,
-            zIndex: 100,
-            boxShadow: `0 4px 20px ${alpha(D.navy, 0.35)}`,
-          }}>
-            <Container maxWidth="lg" disableGutters>
-              <Tabs
-                value={activeTab}
-                onChange={(_, val) => {
-                  setActiveTab(val);
-                  if (isActive) {
-                    requestAnimationFrame(() => requestAnimationFrame(() => {
-                      tabContentRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                    }));
-                  }
-                }}
-                textColor="inherit"
-                variant={isMobile ? 'scrollable' : 'fullWidth'}
-                scrollButtons={false}
-                TabIndicatorProps={{ style: { backgroundColor: D.terra, height: 3, borderRadius: '3px 3px 0 0' } }}
-                sx={{
-                  '& .MuiTab-root': {
-                    fontFamily: D.body, minHeight: 58, minWidth: { xs: 72, sm: 100 },
-                    flexDirection: 'column', gap: 0.6,
-                    fontSize: { xs: '0.7rem', sm: '0.8rem' }, fontWeight: 700,
-                    textTransform: 'uppercase', letterSpacing: '0.1em',
-                    color: alpha('#fff', 0.35), transition: 'color 0.15s',
-                    '&:hover': { color: alpha('#fff', 0.8) },
-                    '&.Mui-selected': { color: 'white', fontWeight: 800 },
-                    '& svg': { fontSize: { xs: '1.3rem', sm: '1.5rem' }, transition: 'color 0.15s' },
-                    '&.Mui-selected svg': { color: D.terra },
-                  },
-                }}
-              >
-                {tabBar.map(({ label, Icon, i }) => (
-                  <Tab key={label} value={i} label={label} icon={<Icon />} iconPosition="top" {...tabProps(i)} />
-                ))}
-              </Tabs>
-            </Container>
-          </Box>
-        )}
+        {activeTab !== 0 && tabsBar}
 
         {/* ── Tab content ── */}
         {activeTab === 0 ? (
           <>
             <Box
               ref={isActive ? tabContentRef : undefined}
-              sx={{ scrollMarginTop: '66px' }}
+              sx={{ scrollMarginTop: { xs: '54px', sm: '66px' } }}
             >
               <TripOverview
                 trip={trip}
@@ -840,51 +924,7 @@ function TripPageInner() {
                 coverPhotoUrl={trip.coverPhotoUrl}
                 coverPhotoCredit={trip.coverPhotoCredit}
                 onRefreshPhoto={refreshPhoto}
-                tabsSlot={
-                  <Box sx={{
-                    backgroundColor: D.navy,
-                    borderBottom: `1px solid ${alpha('#fff', 0.08)}`,
-                    position: 'sticky',
-                    top: 0,
-                    zIndex: 100,
-                    boxShadow: `0 4px 20px ${alpha(D.navy, 0.35)}`,
-                  }}>
-                    <Container maxWidth="lg" disableGutters>
-                      <Tabs
-                        value={activeTab}
-                        onChange={(_, val) => {
-                          setActiveTab(val);
-                          if (isActive) {
-                            requestAnimationFrame(() => requestAnimationFrame(() => {
-                              tabContentRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                            }));
-                          }
-                        }}
-                        textColor="inherit"
-                        variant={isMobile ? 'scrollable' : 'fullWidth'}
-                        scrollButtons={false}
-                        TabIndicatorProps={{ style: { backgroundColor: D.terra, height: 3, borderRadius: '3px 3px 0 0' } }}
-                        sx={{
-                          '& .MuiTab-root': {
-                            fontFamily: D.body, minHeight: 58, minWidth: { xs: 72, sm: 100 },
-                            flexDirection: 'column', gap: 0.6,
-                            fontSize: { xs: '0.7rem', sm: '0.8rem' }, fontWeight: 700,
-                            textTransform: 'uppercase', letterSpacing: '0.1em',
-                            color: alpha('#fff', 0.35), transition: 'color 0.15s',
-                            '&:hover': { color: alpha('#fff', 0.8) },
-                            '&.Mui-selected': { color: 'white', fontWeight: 800 },
-                            '& svg': { fontSize: { xs: '1.3rem', sm: '1.5rem' }, transition: 'color 0.15s' },
-                            '&.Mui-selected svg': { color: D.terra },
-                          },
-                        }}
-                      >
-                        {tabBar.map(({ label, Icon, i }) => (
-                          <Tab key={label} value={i} label={label} icon={<Icon />} iconPosition="top" {...tabProps(i)} />
-                        ))}
-                      </Tabs>
-                    </Container>
-                  </Box>
-                }
+                tabsSlot={tabsBar}
               />
             </Box>
           </>
@@ -892,7 +932,7 @@ function TripPageInner() {
           <Container maxWidth="lg" sx={{ py: { xs: 3, sm: 4 }, px: { xs: 2, sm: 3 } }}>
             <Box
               ref={isActive ? tabContentRef : undefined}
-              sx={{ scrollMarginTop: '66px' }}
+              sx={{ scrollMarginTop: { xs: '54px', sm: '66px' } }}
             >
               {activeTab === 1 && <LogisticsTab tripId={trip._id} trip={tripWithDefaults} fabTrigger={fabTrigger} />}
               {activeTab === 2 && (
