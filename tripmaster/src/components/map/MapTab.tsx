@@ -1,23 +1,33 @@
 'use client';
 
-import { useEffect, useRef, useState, useCallback } from 'react';
-import { Box, Typography, CircularProgress } from '@mui/material';
-import FlightIcon         from '@mui/icons-material/Flight';
-import TrainIcon          from '@mui/icons-material/Train';
-import DirectionsBusIcon  from '@mui/icons-material/DirectionsBus';
-import DirectionsCarIcon  from '@mui/icons-material/DirectionsCar';
-import EventIcon          from '@mui/icons-material/Event';
-import MapIcon            from '@mui/icons-material/Map';
-import FullscreenIcon     from '@mui/icons-material/Fullscreen';
-import FullscreenExitIcon from '@mui/icons-material/FullscreenExit';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Box, Typography, CircularProgress, ButtonBase, Button } from '@mui/material';
+import { alpha }              from '@mui/material/styles';
+import HelpOutlineIcon        from '@mui/icons-material/HelpOutline';
+import MapIcon                from '@mui/icons-material/Map';
+import FullscreenIcon         from '@mui/icons-material/Fullscreen';
+import FullscreenExitIcon     from '@mui/icons-material/FullscreenExit';
+import type { Map as MapboxMap, Marker, Popup, GeoJSONSource, MapMouseEvent } from 'mapbox-gl';
 import { airports as AIRPORT_DB } from '@/lib/data/airports';
-import { useTabActive } from '@/lib/hooks/useTabActive';
+import { useTabActive }       from '@/lib/hooks/useTabActive';
+import { useTripRoutes }      from '@/lib/itinerary/useTripRoutes';
+import { saveGapSorted }      from '@/lib/itinerary/gaps';
+import { reportSaveFailure }  from '@/lib/offline/saveErrors';
+import {
+  legTravel, gapKey, isJourney, staysFrom, namedFrom, distanceKm, isPinned, pageStart, pointKey, SAME_PLACE_KM,
+  type Leg, type LatLng, type Travel,
+} from '@/lib/itinerary/dayPlan';
+import {
+  loadMapbox, pinElement, legLine, legCollection, addLegLayers, legsAt, fitPoints, MAP_STYLE, MAP_COLORS,
+} from '@/components/maps/mapKit';
+import { TravelIcon, travelText } from '@/components/itinerary/LegRow';
+import { formatTime }         from '@/components/itinerary/Itinerary.helpers';
+import type { Stop }          from '@/components/itinerary/Itinerary.config';
 
 const D = {
   navy:    '#1D2642',
   green:   '#6B7C5C',
   terra:   '#C4714A',
-  bg:      '#F5F0E8',
   paper:   '#FDFAF5',
   muted:   'rgba(29,38,66,0.45)',
   rule:    'rgba(29,38,66,0.10)',
@@ -25,258 +35,9 @@ const D = {
   body:    '"Archivo", "Inter", sans-serif',
 };
 
-interface Coordinates { lat: number; lng: number; }
-interface TripLocation { city: string; country: string; coordinates?: Coordinates; }
-interface Trip {
-  _id: string; name: string;
-  origin: TripLocation; destination: TripLocation;
-  additionalDestinations?: (TripLocation & { arrivalDate?: string; departureDate?: string })[];
-  startDate: string; endDate: string;
-}
-interface TransportEntry {
-  type: string; status: string;
-  departureLocation?: string; arrivalLocation?: string;
-  departureTime?: string; arrivalTime?: string;
-  confirmationNumber?: string; cost?: string;
-  details?: { flightNumber?: string; airline?: string; airlineIata?: string; seat?: string; operator?: string; };
-}
-interface AccomEntry {
-  name: string; type: string; status: string;
-  address?: string; coordinates?: Coordinates; checkIn?: string; checkOut?: string;
-}
-interface VenueEntry {
-  name: string; type: string; status: string;
-  address?: string; coordinates?: Coordinates; date?: string; time?: string;
-}
-interface ItineraryStop { name: string; type: string; address?: string; coordinates?: Coordinates; }
-interface ItineraryDay { date: string; dayNumber: number; stops: ItineraryStop[]; }
-interface MapTabProps { tripId: string; trip: Trip; }
-
-interface TransportLeg {
-  kind: 'transport'; entry: TransportEntry;
-  fromCoords: Coordinates; toCoords: Coordinates;
-  fromLabel: string; toLabel: string;
-}
-interface GapLeg {
-  kind: 'gap'; fromLabel: string; toLabel: string;
-  fromCoords: Coordinates; toCoords: Coordinates; distanceKm: number;
-}
-type JourneyLeg = TransportLeg | GapLeg;
-
-function haversineKm(a: Coordinates, b: Coordinates): number {
-  const R = 6371, dLat = (b.lat - a.lat) * Math.PI / 180, dLng = (b.lng - a.lng) * Math.PI / 180;
-  const h = Math.sin(dLat/2)**2 + Math.cos(a.lat*Math.PI/180)*Math.cos(b.lat*Math.PI/180)*Math.sin(dLng/2)**2;
-  return R * 2 * Math.asin(Math.sqrt(h));
-}
-
-function estimateDriveTime(km: number): string {
-  const speed = km > 30 ? 80 : 40;
-  const mins  = Math.round(km / speed * 60 / 5) * 5;
-  if (mins < 60) return `~${mins} min`;
-  const h = Math.floor(mins / 60), m = mins % 60;
-  return m === 0 ? `~${h}h` : `~${h}h ${m}min`;
-}
-
-// bbox covering Europe + North Africa — hard constraint, no US false positives
-const EUROPE_BBOX = '-25,30,50,75';
-
-function isInEurope(c?: Coordinates): boolean {
-  if (!c) return false;
-  return c.lng >= -25 && c.lng <= 50 && c.lat >= 30 && c.lat <= 75;
-}
-
-async function geocode(query: string, token: string, proximity?: Coordinates): Promise<Coordinates | null> {
-  if (!query?.trim()) return null;
-  try {
-    const prox = proximity ? `&proximity=${proximity.lng},${proximity.lat}` : '';
-    const bbox = isInEurope(proximity) ? `&bbox=${EUROPE_BBOX}` : '';
-    const res  = await fetch(`https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?limit=1&access_token=${token}${prox}${bbox}`);
-    const data = await res.json();
-    const [lng, lat] = data?.features?.[0]?.center ?? [];
-    return lng == null ? null : { lat, lng };
-  } catch { return null; }
-}
-
-async function geocodeTransportLocation(loc: string, token: string, proximity?: Coordinates): Promise<Coordinates | null> {
-  if (!loc?.trim()) return null;
-  const parts = loc.split(' — '), code = parts[0].trim(), city = parts[1]?.trim() ?? '';
-  if (/^[A-Z]{3}$/.test(code)) {
-    const airport = AIRPORT_DB.find(a => a.iata === code);
-    if (airport) return { lat: airport.lat, lng: airport.lng };
-    if (city) return await geocode(`${city} airport`, token, proximity);
-  }
-  return await geocode(city || loc, token, proximity);
-}
-
-function iataCode(loc: string): string { return loc ? loc.split(' — ')[0].trim() : ''; }
-function cityLabel(loc: string): string {
-  if (!loc || !loc.includes(' — ')) return loc;
-  const code = loc.split(' — ')[0].trim(), city = loc.split(' — ')[1].trim();
-  return /^[A-Z]{3}$/.test(code) ? `${city} Airport` : city;
-}
-
-async function fetchDirections(
-  from: Coordinates, to: Coordinates, token: string, cache?: Map<string, number[][]>,
-): Promise<number[][] | null> {
-  const key = `${from.lng.toFixed(3)},${from.lat.toFixed(3)};${to.lng.toFixed(3)},${to.lat.toFixed(3)}`;
-  if (cache?.has(key)) return cache.get(key)!;
-  try {
-    const url = `https://api.mapbox.com/directions/v5/mapbox/driving/${from.lng},${from.lat};${to.lng},${to.lat}?geometries=geojson&overview=full&access_token=${token}`;
-    const data = await fetch(url).then(r => r.json());
-    const coords = data.routes?.[0]?.geometry?.coordinates ?? null;
-    if (coords && cache) cache.set(key, coords);
-    return coords;
-  } catch { return null; }
-}
-
-function flightArc(from: Coordinates, to: Coordinates, steps = 80): number[][] {
-  return Array.from({ length: steps + 1 }, (_, i) => {
-    const t = i / steps;
-    return [
-      from.lng + (to.lng - from.lng) * t,
-      from.lat + (to.lat - from.lat) * t + Math.sin(Math.PI * t) * 1.5,
-    ];
-  });
-}
-
-async function buildJourneyLegs(
-  transportation: TransportEntry[], accommodation: AccomEntry[], token: string, proximity?: Coordinates,
-): Promise<JourneyLeg[]> {
-  const sorted = [...transportation].sort((a, b) =>
-    new Date(a.departureTime ?? 0).getTime() - new Date(b.departureTime ?? 0).getTime());
-  if (!sorted.length) return [];
-
-  const resolved = await Promise.all(sorted.map(async entry => ({
-    entry,
-    fromCoords: await geocodeTransportLocation(entry.departureLocation ?? '', token, proximity),
-    toCoords:   await geocodeTransportLocation(entry.arrivalLocation   ?? '', token, proximity),
-  })));
-
-  const valid = resolved.filter(l => l.fromCoords && l.toCoords) as { entry: TransportEntry; fromCoords: Coordinates; toCoords: Coordinates; }[];
-  if (!valid.length) return [];
-
-  const hotelCoords = accommodation[0]?.coordinates ?? null;
-  const hotelName   = accommodation[0]?.name ?? 'Hotel';
-  const result: JourneyLeg[] = [];
-  let currentCoords: Coordinates | null = null, currentLabel = '';
-
-  for (let i = 0; i < valid.length; i++) {
-    const { entry, fromCoords, toCoords } = valid[i];
-    const isLast = i === valid.length - 1;
-
-    if (currentCoords && haversineKm(currentCoords, fromCoords) > 2) {
-      result.push({ kind: 'gap', fromLabel: currentLabel, toLabel: entry.departureLocation ?? '',
-        fromCoords: currentCoords, toCoords: fromCoords, distanceKm: haversineKm(currentCoords, fromCoords) });
-    }
-
-    result.push({ kind: 'transport', entry, fromCoords, toCoords,
-      fromLabel: entry.departureLocation ?? '', toLabel: entry.arrivalLocation ?? '' });
-
-    if (!isLast && hotelCoords) {
-      const d = haversineKm(toCoords, hotelCoords);
-      if (d > 2) result.push({ kind: 'gap', fromLabel: entry.arrivalLocation ?? '', toLabel: hotelName,
-        fromCoords: toCoords, toCoords: hotelCoords, distanceKm: d });
-      currentCoords = hotelCoords; currentLabel = hotelName;
-    } else {
-      currentCoords = toCoords; currentLabel = entry.arrivalLocation ?? '';
-    }
-  }
-  return result;
-}
-
-const STATUS_IS_CONFIRMED = (s: string) => s === 'confirmed' || s === 'booked';
-function fmtTime(dt?: string) { return dt ? new Date(dt).toLocaleTimeString('en-IE', { hour: '2-digit', minute: '2-digit', hour12: false }) : '—'; }
-function fmtDate(dt?: string) { return dt ? new Date(dt).toLocaleDateString('en-IE', { weekday: 'short', day: 'numeric', month: 'short' }) : ''; }
-
-function TIcon({ type, size = 15 }: { type: string; size?: number }) {
-  const sx = { fontSize: size, opacity: 0.55 };
-  if (type === 'flight') return <FlightIcon sx={sx} />;
-  if (type === 'train')  return <TrainIcon sx={sx} />;
-  if (type === 'bus')    return <DirectionsBusIcon sx={sx} />;
-  if (type === 'car' || type === 'car_hire') return <DirectionsCarIcon sx={sx} />;
-  return <EventIcon sx={sx} />;
-}
-
-function TransportLegCard({ leg, selected, onSelect }: { leg: TransportLeg; selected: boolean; onSelect: () => void }) {
-  const { entry } = leg;
-  const confirmed = STATUS_IS_CONFIRMED(entry.status);
-  return (
-    <Box
-      onClick={onSelect}
-      sx={{
-        borderLeft: `3px solid ${confirmed ? D.green : D.terra}`,
-        backgroundColor: selected ? 'rgba(29,38,66,0.06)' : D.paper,
-        borderRadius: '0 8px 8px 0',
-        px: 2.5, py: 2,
-        cursor: 'pointer',
-        outline: selected ? `2px solid ${D.navy}` : '2px solid transparent',
-        outlineOffset: -2,
-        transition: 'background 0.15s, outline 0.15s',
-        '&:hover': { backgroundColor: 'rgba(29,38,66,0.04)' },
-      }}
-    >
-      <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1.5, mb: 0.75 }}>
-        <Typography sx={{ fontFamily: D.display, fontSize: { xs: '1.75rem', sm: '2rem' }, color: D.navy, lineHeight: 1, letterSpacing: '-0.03em' }}>
-          {fmtTime(entry.departureTime)}
-        </Typography>
-        <Typography sx={{ color: D.muted, fontSize: '1rem', fontWeight: 700, lineHeight: 1 }}>→</Typography>
-        <Typography sx={{ fontFamily: D.display, fontSize: { xs: '1.75rem', sm: '2rem' }, color: D.navy, lineHeight: 1, letterSpacing: '-0.03em' }}>
-          {fmtTime(entry.arrivalTime)}
-        </Typography>
-        <Box sx={{ ml: 'auto', display: 'flex', alignItems: 'center', gap: 1, flexShrink: 0 }}>
-          <TIcon type={entry.type} />
-          <Box sx={{ px: 1, py: 0.3, borderRadius: 0.75, backgroundColor: confirmed ? 'rgba(107,124,92,0.12)' : 'rgba(196,113,74,0.10)', fontSize: '0.68rem', fontWeight: 800, letterSpacing: '0.07em', textTransform: 'uppercase', color: confirmed ? D.green : D.terra }}>
-            {confirmed ? 'Booked' : entry.status}
-          </Box>
-        </Box>
-      </Box>
-      <Typography sx={{ fontFamily: D.display, fontSize: { xs: '1.2rem', sm: '1.4rem' }, color: D.navy, lineHeight: 1, letterSpacing: '-0.02em', mb: 1 }}>
-        {iataCode(leg.fromLabel)} → {iataCode(leg.toLabel)}
-      </Typography>
-      <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
-        {entry.details?.airline && <Typography sx={{ fontSize: '0.8rem', color: D.muted }}>{entry.details.airline}</Typography>}
-        {entry.details?.flightNumber && <Typography sx={{ fontSize: '0.8rem', color: D.muted, fontWeight: 700 }}>{entry.details.flightNumber}</Typography>}
-        {entry.details?.seat && <Typography sx={{ fontSize: '0.8rem', color: D.muted }}>Seat {entry.details.seat}</Typography>}
-        {entry.confirmationNumber && <Typography sx={{ fontSize: '0.78rem', color: D.muted, fontFamily: 'monospace', letterSpacing: '0.1em' }}>{entry.confirmationNumber}</Typography>}
-      </Box>
-      <Typography sx={{ fontSize: '0.73rem', color: D.muted, mt: 0.5 }}>{fmtDate(entry.departureTime)}</Typography>
-    </Box>
-  );
-}
-
-function GapLegCard({ leg, selected, onSelect }: { leg: GapLeg; selected: boolean; onSelect: () => void }) {
-  return (
-    <Box
-      onClick={onSelect}
-      sx={{
-        borderLeft: `3px dashed ${D.terra}`,
-        backgroundColor: selected ? 'rgba(196,113,74,0.10)' : 'rgba(196,113,74,0.05)',
-        borderRadius: '0 8px 8px 0',
-        px: 2.5, py: 2,
-        cursor: 'pointer',
-        outline: selected ? `2px solid ${D.terra}` : '2px solid transparent',
-        outlineOffset: -2,
-        transition: 'background 0.15s, outline 0.15s',
-        '&:hover': { backgroundColor: 'rgba(196,113,74,0.08)' },
-      }}
-    >
-      <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1.5, mb: 0.75 }}>
-        <Typography sx={{ fontFamily: D.display, fontSize: { xs: '1.75rem', sm: '2rem' }, color: D.terra, lineHeight: 1, letterSpacing: '-0.03em' }}>?</Typography>
-        <Box sx={{ ml: 'auto', flexShrink: 0 }}>
-          <Box sx={{ px: 1, py: 0.3, borderRadius: 0.75, backgroundColor: 'rgba(196,113,74,0.12)', fontSize: '0.68rem', fontWeight: 800, letterSpacing: '0.07em', textTransform: 'uppercase', color: D.terra }}>
-            Not booked
-          </Box>
-        </Box>
-      </Box>
-      <Typography sx={{ fontFamily: D.display, fontSize: { xs: '1rem', sm: '1.15rem' }, color: D.navy, lineHeight: 1.2, letterSpacing: '-0.02em', mb: 0.75 }}>
-        {cityLabel(leg.fromLabel)} → {cityLabel(leg.toLabel)}
-      </Typography>
-      <Typography sx={{ fontSize: '0.82rem', color: D.muted, fontStyle: 'italic' }}>
-        no transfer booked · {estimateDriveTime(leg.distanceKm)} · {Math.round(leg.distanceKm)} km
-      </Typography>
-    </Box>
-  );
-}
+/** Each day's places in its own colour on the whole-trip map */
+const DAY_COLORS = ['#1D2642', '#C4714A', '#6B7C5C', '#5c35a0', '#0369a1', '#b45309', '#be185d', '#0f766e'];
+const dayColor = (i: number) => DAY_COLORS[i % DAY_COLORS.length];
 
 type Layer = 'all' | 'transport' | 'stays' | 'venues' | 'itinerary';
 const LAYERS: { value: Layer; label: string }[] = [
@@ -285,306 +46,354 @@ const LAYERS: { value: Layer; label: string }[] = [
   { value: 'itinerary', label: 'Itinerary' },
 ];
 
-const STOP_COLOUR: Record<string, string> = {
-  flight: '#C9521B', hotel: '#5c35a0', meeting: '#1D2642', meal: '#b45309', breakfast: '#b45309',
-  activity: '#55702C', sightseeing: '#55702C', transport: '#0369a1', work: '#1D2642', other: '#6b7280',
-};
-const VENUE_EMOJI: Record<string, string> = {
-  concert: '🎵', conference: '🏛️', restaurant: '🍽️', sports: '🏟️', attraction: '🏛️', business: '💼', other: '📍',
-};
+const SOURCE = 'trip-legs';
+const TRIP_PARAMS = ['day', 'section', 'view', 'stop', 'leg', 'file', 'todo', 'expense', 'proof', 'sheet', 'i'];
+const STATUS_IS_CONFIRMED = (s?: string) => s === 'confirmed' || s === 'booked';
 
+interface Coordinates { lat: number; lng: number }
+interface TripLocation { city: string; country: string; coordinates?: Coordinates }
+interface Trip { _id: string; name: string; origin: TripLocation; destination: TripLocation; startDate: string; endDate: string }
+interface Day { date: string; dayNumber: number; stops: Stop[] }
+interface MapTabProps { tripId: string; trip: Trip }
+
+interface Item { dayIdx: number; leg: Leg<Stop>; travel: Travel; gap: 'open' | 'sorted' | null; id: string }
+
+const dayLabel = (date: string) =>
+  new Date(`${String(date).slice(0, 10)}T12:00:00`).toLocaleDateString('en-IE', { weekday: 'short', day: 'numeric', month: 'short' });
+
+/** The airport at a pin (the booking's own coordinates), for its code */
+function airportAt(c: LatLng): string | null {
+  let best: { iata: string; km: number } | null = null;
+  for (const a of AIRPORT_DB) {
+    if (Math.abs(a.lat - c.lat) > 0.1 || Math.abs(a.lng - c.lng) > 0.15) continue;
+    const km = distanceKm(c, a);
+    if (km <= 5 && (!best || km < best.km)) best = { iata: a.iata, km };
+  }
+  return best?.iata ?? null;
+}
+
+// The whole trip door to door: home to the airport, the flights between the
+// airports booked, each transfer (asking how you're getting there when nothing's
+// planned), and every day's places — a day opens on its own map in the itinerary.
+// Built from the same day plans as the itinerary (lib/itinerary/dayPlan).
 export default function MapTab({ tripId, trip }: MapTabProps) {
-  const mapContainer = useRef<HTMLDivElement>(null);
-  const mapRef       = useRef<any>(null);
-  const mapboxglRef  = useRef<any>(null);
-  const markersRef   = useRef<any[]>([]);
-  const roadsCache   = useRef(new Map<string, number[][]>());
+  const active     = useTabActive();
+  const boxRef     = useRef<HTMLDivElement>(null);
+  const mapRef     = useRef<MapboxMap | null>(null);
+  const glRef      = useRef<typeof import('mapbox-gl').default | null>(null);
+  const markersRef = useRef<Marker[]>([]);
+  const popupRef   = useRef<Popup | null>(null);
+  const fittedRef  = useRef('');
+  const clickRef   = useRef<(e: MapMouseEvent) => void>(() => {});
 
-  const [loading,        setLoading]        = useState(true);
-  const [mapReady,       setMapReady]       = useState(false);
-  const [logistics,      setLogistics]      = useState<any>(null);
-  const [itinerary,      setItinerary]      = useState<ItineraryDay[]>([]);
-  const [layer,          setLayer]          = useState<Layer>('all');
-  const [journeyLegs,    setJourneyLegs]    = useState<JourneyLeg[]>([]);
-  const [tokenError,     setTokenError]     = useState(false);
-  const [selectedLegIdx, setSelectedLegIdx] = useState<number | null>(null);
-  const [mapExpanded,    setMapExpanded]    = useState(false);
-  const [itineraryDay,   setItineraryDay]   = useState(0); // 0 = all days
-
-  const token = process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN ?? '';
-
-  // Reset day filter when leaving itinerary-related layers
-  useEffect(() => {
-    if (layer !== 'itinerary' && layer !== 'all') setItineraryDay(0);
-  }, [layer]);
-
-  // Notify Mapbox of container resize after expand/collapse animation
-  useEffect(() => {
-    const t = setTimeout(() => mapRef.current?.resize(), 320);
-    return () => clearTimeout(t);
-  }, [mapExpanded]);
-
-  // Back on screen after being hidden behind another tab (the window may have
-  // changed size meanwhile): fit the map to its box again
-  const active = useTabActive();
-  useEffect(() => { if (active) mapRef.current?.resize(); }, [active]);
+  const [loading,     setLoading]     = useState(true);
+  const [days,        setDays]        = useState<Day[]>([]);
+  const [dismissed,   setDismissed]   = useState<Set<string>>(new Set());
+  const [logistics,   setLogistics]   = useState<any>(null);
+  const [ready,       setReady]       = useState(false);
+  const [unavailable, setUnavailable] = useState(false);
+  const [layer,       setLayer]       = useState<Layer>('all');
+  const [dayIdx,      setDayIdx]      = useState(-1);   // -1 = the whole trip
+  const [selected,    setSelected]    = useState<string | null>(null);
+  const [expanded,    setExpanded]    = useState(false);
 
   useEffect(() => {
     Promise.all([
-      fetch(`/api/trips/${tripId}/logistics`).then(r => r.json()),
-      fetch(`/api/trips/${tripId}/itinerary`).then(r => r.json()),
-    ]).then(([l, it]) => { setLogistics(l.logistics); setItinerary(it.days ?? []); setLoading(false); })
-      .catch(() => setLoading(false));
+      fetch(`/api/trips/${tripId}/itinerary`).then(r => r.json()).catch(() => null),
+      fetch(`/api/trips/${tripId}/logistics`).then(r => r.json()).catch(() => null),
+    ]).then(([it, l]) => {
+      setDays(it?.days ?? []);
+      setDismissed(new Set(it?.dismissedGaps ?? []));
+      setLogistics(l?.logistics ?? null);
+    }).finally(() => setLoading(false));
   }, [tripId]);
 
+  const stays  = useMemo(() => staysFrom(logistics?.accommodation), [logistics]);
+  const venues = useMemo(() => namedFrom(logistics?.venues), [logistics]);
+  const { plans, routes } = useTripRoutes(tripId, days, stays, venues);
+
+  const itemFor = (i: number, leg: Leg<Stop>): Item => {
+    const travel = legTravel(leg, routes);
+    const gap = travel.needsPlan ? (dismissed.has(gapKey(plans[i].date, leg)) ? 'sorted' : 'open') : null;
+    return { dayIdx: i, leg, travel, gap, id: `${i}:${leg.id}` };
+  };
+  // Door to door across the trip, or every leg of the day picked
+  const items = useMemo(
+    () => (dayIdx === -1
+      ? plans.flatMap((p, i) => p.legs.filter(isJourney).map(l => itemFor(i, l)))
+      : (plans[dayIdx]?.legs ?? []).map(l => itemFor(dayIdx, l))),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [plans, routes, dismissed, dayIdx],
+  );
+  const openGaps = useMemo(
+    () => plans.reduce((n, p, i) => n + p.legs.filter(l => itemFor(i, l).gap === 'open').length, 0),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [plans, routes, dismissed],
+  );
+  const daysWithPlaces = plans.map((p, i) => ({ i, n: p.groups.filter(g => g.places.length).length })).filter(d => d.n > 0);
+
+  // Every itinerary place, once — with the days it's on
+  const places = useMemo(() => {
+    const byKey = new Map<string, { coordinates: LatLng; name: string; days: number[]; n: number[] }>();
+    const list  = dayIdx === -1 ? plans.map((p, i) => ({ p, i })) : plans[dayIdx] ? [{ p: plans[dayIdx], i: dayIdx }] : [];
+    for (const { p, i } of list) {
+      for (const g of p.groups) {
+        for (const pl of g.places) {
+          const near = [...byKey.values()].find(v => distanceKm(v.coordinates, pl.coordinates) <= SAME_PLACE_KM);
+          const v = near ?? { coordinates: pl.coordinates, name: pl.name, days: [], n: [] };
+          if (!near) byKey.set(pointKey(pl.coordinates), v);
+          if (!v.days.includes(i)) v.days.push(i);
+          if (!v.n.includes(g.n)) v.n.push(g.n);
+        }
+      }
+    }
+    return [...byKey.values()];
+  }, [plans, dayIdx]);
+
+  // ── The map ──
   useEffect(() => {
-    if (!logistics || !token) return;
-    void (async () => {
-      let proximity: Coordinates | undefined = trip.destination?.coordinates ?? undefined;
-      if (!proximity && trip.destination?.city) {
-        proximity = await geocode(`${trip.destination.city}, ${trip.destination.country}`, token) ?? undefined;
+    let cancelled = false;
+    let made: MapboxMap | null = null;
+    (async () => {
+      const gl = await loadMapbox();
+      if (cancelled) return;
+      if (!gl || !boxRef.current) { setUnavailable(true); return; }
+      glRef.current = gl;
+      const centre = trip.destination?.coordinates;
+      try {
+        made = new gl.Map({
+          container: boxRef.current, style: MAP_STYLE, attributionControl: false,
+          center: centre ? [centre.lng, centre.lat] : [10, 50], zoom: centre ? 5 : 3,
+        });
+      } catch {
+        setUnavailable(true);
+        return;
       }
-      if (!proximity && trip.origin?.city) {
-        proximity = await geocode(`${trip.origin.city}, ${trip.origin.country}`, token) ?? undefined;
-      }
-      const legs = await buildJourneyLegs(logistics.transportation ?? [], logistics.accommodation ?? [], token, proximity);
-      setJourneyLegs(legs);
+      made.addControl(new gl.AttributionControl({ compact: true }), 'bottom-right');
+      made.addControl(new gl.NavigationControl({ showCompass: false }), 'top-right');
+      made.addControl(new gl.GeolocateControl({ positionOptions: { enableHighAccuracy: true }, trackUserLocation: true }), 'top-right');
+      made.on('error', e => console.error('[MapTab]', (e as any)?.error ?? e));
+      made.on('click', e => clickRef.current(e));
+      made.on('load', () => {
+        if (cancelled || !made) return;
+        addLegLayers(made, SOURCE);
+        mapRef.current = made;
+        setReady(true);
+      });
     })();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [logistics, token]);
+    return () => {
+      cancelled = true;
+      popupRef.current?.remove();
+      markersRef.current.forEach(m => m.remove());
+      markersRef.current = [];
+      made?.remove();
+      mapRef.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- one map for the tab's life
+  }, []);
 
+  useEffect(() => { if (active) mapRef.current?.resize(); }, [active]);
   useEffect(() => {
-    if (!mapContainer.current || mapRef.current) return;
-    if (!token) { setTokenError(true); setMapReady(true); return; }
+    const t = setTimeout(() => mapRef.current?.resize(), 320);
+    return () => clearTimeout(t);
+  }, [expanded]);
 
-    import('mapbox-gl').then(async ({ default: mapboxgl }) => {
-      mapboxglRef.current  = mapboxgl;
-      mapboxgl.accessToken = token;
+  // Into the itinerary: that day's map, a leg in view if one's given
+  const openDay = (i: number, legId?: string) => {
+    const day = days[i];
+    if (!day) return;
+    const params = new URLSearchParams(window.location.search);
+    for (const k of TRIP_PARAMS) params.delete(k);
+    params.set('tab', 'itinerary');
+    params.set('day', String(day.dayNumber));
+    params.set('view', 'map');
+    if (legId) params.set('leg', legId);
+    window.history.pushState(null, '', `?${params.toString()}`);
+  };
 
-      let originCoords = trip.origin?.coordinates;
-      let destCoords   = trip.destination?.coordinates;
-      if (!originCoords && trip.origin?.city) originCoords = await geocode(`${trip.origin.city}, ${trip.origin.country}`, token) ?? undefined;
-      if (!destCoords && trip.destination?.city) destCoords = await geocode(`${trip.destination.city}, ${trip.destination.country}`, token) ?? undefined;
+  const setSorted = async (item: Item, sorted: boolean) => {
+    const gap  = gapKey(plans[item.dayIdx].date, item.leg);
+    const prev = dismissed;
+    const next = new Set(prev);
+    if (sorted) next.add(gap); else next.delete(gap);
+    setDismissed(next);
+    try {
+      setDismissed(await saveGapSorted(tripId, gap, sorted, next));
+    } catch (err) {
+      setDismissed(prev);
+      reportSaveFailure(sorted ? '“I’ve sorted this”' : 'asking about this journey again', err);
+    }
+  };
 
-      const centre: [number, number] = originCoords && destCoords
-        ? [(originCoords.lng + destCoords.lng) / 2, (originCoords.lat + destCoords.lat) / 2]
-        : destCoords ? [destCoords.lng, destCoords.lat] : originCoords ? [originCoords.lng, originCoords.lat] : [10, 50];
+  // ── Popups, built as DOM: names come from imports and emails ──
+  const showPopup = (at: LatLng, content: HTMLElement) => {
+    const map = mapRef.current, gl = glRef.current;
+    if (!map || !gl) return;
+    popupRef.current?.remove();
+    popupRef.current = new gl.Popup({ closeButton: false, offset: 16, maxWidth: '260px', className: 'tabiji-popup' })
+      .setLngLat([at.lng, at.lat]).setDOMContent(content).addTo(map);
+  };
+  const popupBox = (title: string, lines: string[] = []) => {
+    const box = document.createElement('div');
+    box.style.cssText = 'font-family:"Archivo",system-ui,sans-serif;color:#1D2642;display:flex;flex-direction:column;gap:3px;';
+    const h = document.createElement('div');
+    h.style.cssText = 'font-weight:800;font-size:13px;line-height:1.3;';
+    h.textContent = title;
+    box.appendChild(h);
+    for (const line of lines) {
+      const d = document.createElement('div');
+      d.style.cssText = 'font-size:11px;color:rgba(29,38,66,0.6);line-height:1.35;';
+      d.textContent = line;
+      box.appendChild(d);
+    }
+    return box;
+  };
+  const popupButton = (label: string, onClick: () => void) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = label;
+    b.style.cssText = 'all:unset;cursor:pointer;min-height:34px;margin-top:4px;padding:0 10px;border-radius:8px;background:#1D2642;color:#fff;font-size:12px;font-weight:800;display:flex;align-items:center;justify-content:center;';
+    b.addEventListener('click', e => { e.stopPropagation(); popupRef.current?.remove(); onClick(); });
+    return b;
+  };
 
-      if (!mapContainer.current) return;
-      const map = new mapboxgl.Map({ container: mapContainer.current, style: 'mapbox://styles/mapbox/light-v11', center: centre, zoom: 4, attributionControl: false });
-      map.addControl(new mapboxgl.AttributionControl({ compact: true }), 'bottom-right');
-      map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), 'top-right');
-      map.on('load', () => { mapRef.current = map; setMapReady(true); });
-      map.on('error', e => console.error('[MapTab]', e));
-      const t = setTimeout(() => { if (!mapRef.current) { mapRef.current = map; setMapReady(true); } }, 10000);
-      map.once('load', () => clearTimeout(t));
-    }).catch(() => setMapReady(true));
+  clickRef.current = (e: MapMouseEvent) => {
+    const map = mapRef.current;
+    if (!map || (e.originalEvent?.target as HTMLElement | null)?.closest?.('.mapboxgl-marker')) return;
+    const id   = legsAt(map, SOURCE, e.point)[0];
+    const item = id ? items.find(it => it.id === id) : undefined;
+    if (item) {
+      setSelected(item.id);
+      showPopup({ lat: e.lngLat.lat, lng: e.lngLat.lng }, popupBox(travelText(item.leg, item.travel), [`${item.leg.from.name} → ${item.leg.to.name}`, `Day ${days[item.dayIdx]?.dayNumber} · ${dayLabel(plans[item.dayIdx].date)}`]));
+      return;
+    }
+    popupRef.current?.remove();
+    setSelected(null);
+  };
 
-    return () => { if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; } };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token]);
+  const itemPoints = (it: Item) =>
+    legLine(it.leg, it.travel, it.gap === 'open').coordinates.map(([lng, lat]) => ({ lat, lng }));
 
-  const clearMarkers = useCallback(() => { markersRef.current.forEach(m => m.remove()); markersRef.current = []; }, []);
+  const showRoute     = layer === 'all' || layer === 'transport';
+  const showStays     = layer === 'all' || layer === 'stays';
+  const showVenues    = layer === 'all' || layer === 'venues';
+  const showItinerary = layer === 'all' || layer === 'itinerary';
 
-  // Main draw effect — clears and redraws all layers + markers
+  // ── Draw ──
   useEffect(() => {
-    if (!mapReady || !mapRef.current || loading) return;
-    const map = mapRef.current, mapboxgl = mapboxglRef.current;
-    if (!mapboxgl) return;
-    void (async () => {
+    const map = mapRef.current, gl = glRef.current;
+    if (!ready || !map || !gl || loading) return;
+    markersRef.current.forEach(m => m.remove());
+    markersRef.current = [];
+    const points: LatLng[] = [];
+    const add = (c: LatLng, el: HTMLElement) => {
+      points.push(c);
+      markersRef.current.push(new gl.Marker({ element: el }).setLngLat([c.lng, c.lat]).addTo(map));
+    };
 
-    clearMarkers();
-    (map.getStyle()?.layers ?? []).forEach((l: any) => { if (l.id.startsWith('leg-')) try { map.removeLayer(l.id); } catch {} });
-    Object.keys(map.getStyle()?.sources ?? {}).forEach(id => { if (id.startsWith('leg-src-')) try { map.removeSource(id); } catch {} });
-
-    const bounds = new mapboxgl.LngLatBounds();
-    const showTransport = layer === 'all' || layer === 'transport';
-    const showStays     = layer === 'all' || layer === 'stays';
-    const showVenues    = layer === 'all' || layer === 'venues';
-    const showItinerary = layer === 'all' || layer === 'itinerary';
-
-    if (showTransport) {
-      const seenMarkers = new Set<string>();
-      const markerKey = (c: Coordinates) => `${c.lng.toFixed(2)},${c.lat.toFixed(2)}`;
-
-      for (let i = 0; i < journeyLegs.length; i++) {
-        const leg = journeyLegs[i];
-        const isGap     = leg.kind === 'gap';
-        const confirmed = !isGap && STATUS_IS_CONFIRMED(leg.entry.status);
-        const color     = isGap ? D.terra : (confirmed ? D.green : D.terra);
-
-        bounds.extend([leg.fromCoords.lng, leg.fromCoords.lat]);
-        bounds.extend([leg.toCoords.lng,   leg.toCoords.lat]);
-
-        let coordinates: number[][];
-        if (!isGap && leg.entry.type === 'flight') {
-          coordinates = flightArc(leg.fromCoords, leg.toCoords);
-        } else if (isGap) {
-          const road = await fetchDirections(leg.fromCoords, leg.toCoords, token, roadsCache.current);
-          coordinates = road ?? [[leg.fromCoords.lng, leg.fromCoords.lat], [leg.toCoords.lng, leg.toCoords.lat]];
-        } else {
-          coordinates = [[leg.fromCoords.lng, leg.fromCoords.lat], [leg.toCoords.lng, leg.toCoords.lat]];
-        }
-
-        try {
-          map.addSource(`leg-src-${i}`, { type: 'geojson', data: { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates } } });
-          map.addLayer({ id: `leg-${i}`, type: 'line', source: `leg-src-${i}`,
-            paint: { 'line-color': color, 'line-width': isGap ? 1.5 : 2.5, 'line-opacity': isGap ? 0.6 : 0.9, 'line-dasharray': isGap ? [3, 4] : [1] } });
-        } catch {}
-
-        if (!isGap) {
-          for (const { c, label, isOrigin, isFrom } of [
-            { c: leg.fromCoords, label: iataCode(leg.fromLabel), isOrigin: i === 0, isFrom: true  },
-            { c: leg.toCoords,   label: iataCode(leg.toLabel),   isOrigin: false,   isFrom: false },
-          ]) {
-            const key = markerKey(c);
-            if (seenMarkers.has(key)) continue;
-            seenMarkers.add(key);
-
-            const pc = isOrigin ? D.navy : D.terra;
-            const sz = isOrigin ? 18 : 14;
-            const el = document.createElement('div');
-            el.style.cssText = `width:${sz}px;height:${sz}px;border-radius:50%;background:${pc};border:3px solid white;box-shadow:0 2px 8px rgba(0,0,0,0.35);cursor:pointer;position:relative;`;
-
-            if (label) {
-              const lbl = document.createElement('div');
-              lbl.style.cssText = `position:absolute;bottom:${sz + 4}px;left:50%;transform:translateX(-50%);background:${pc};color:white;font-family:"Archivo Black",sans-serif;font-size:11px;font-weight:900;letter-spacing:0.03em;padding:3px 8px;border-radius:10px;white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,0.2);pointer-events:none;`;
-              lbl.textContent = label;
-              el.appendChild(lbl);
-            }
-
-            const airportRecord = AIRPORT_DB.find(a => a.iata === label);
-            const timeHtml = isFrom
-              ? (leg.entry.departureTime ? `<div style="font-size:11px;color:#6b7280;margin-top:4px;">Dep: ${fmtTime(leg.entry.departureTime)} · ${fmtDate(leg.entry.departureTime)}</div>` : '')
-              : (leg.entry.arrivalTime   ? `<div style="font-size:11px;color:#6b7280;margin-top:4px;">Arr: ${fmtTime(leg.entry.arrivalTime)} · ${fmtDate(leg.entry.arrivalTime)}</div>` : '');
-            const flightHtml = isFrom && leg.entry.details?.airline
-              ? `<div style="font-size:11px;color:#6b7280;">${leg.entry.details.airline}${leg.entry.details.flightNumber ? ' · ' + leg.entry.details.flightNumber : ''}</div>`
-              : '';
-            const popup = new mapboxgl.Popup({ offset: sz + 6, closeButton: false }).setHTML(
-              `<div style="font-family:system-ui;padding:4px 2px;min-width:130px;">
-                <div style="font-weight:800;font-size:13px;color:#1D2642;">${label}${airportRecord ? ' · ' + airportRecord.city : ''}</div>
-                ${airportRecord ? `<div style="font-size:10px;color:#9ca3af;">${airportRecord.name}</div>` : ''}
-                ${timeHtml}${flightHtml}
-              </div>`
-            );
-
-            markersRef.current.push(
-              new mapboxgl.Marker({ element: el, anchor: 'center' })
-                .setLngLat([c.lng, c.lat])
-                .setPopup(popup)
-                .addTo(map)
-            );
-          }
-        }
+    if (showItinerary) {
+      for (const pl of places) {
+        const first = pl.days[0];
+        const label = dayIdx === -1
+          ? (pl.days.length > 2 ? `${days[first]?.dayNumber}+` : pl.days.map(i => days[i]?.dayNumber).join(','))
+          : pl.n.join(',');
+        const el = pinElement({ label, color: dayIdx === -1 ? dayColor(first) : D.navy, size: dayIdx === -1 ? 22 : 26, title: pl.name });
+        el.addEventListener('click', ev => {
+          ev.stopPropagation();
+          const box = popupBox(pl.name, pl.days.map(i => `Day ${days[i]?.dayNumber} · ${dayLabel(plans[i].date)}`));
+          for (const i of pl.days.slice(0, 4)) box.appendChild(popupButton(`Open day ${days[i]?.dayNumber}’s map`, () => openDay(i)));
+          showPopup(pl.coordinates, box);
+        });
+        add(pl.coordinates, el);
       }
     }
 
     if (showStays) {
-      (logistics?.accommodation ?? []).forEach((a: AccomEntry) => {
-        if (!a.coordinates?.lat) return;
-        const { lat, lng } = a.coordinates; bounds.extend([lng, lat]);
-        const confirmed = STATUS_IS_CONFIRMED(a.status);
-        const el = document.createElement('div');
-        el.style.cssText = `width:32px;height:32px;border-radius:8px;background:${confirmed ? '#5c35a0' : 'white'};border:2px solid #5c35a0;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,0.25);cursor:pointer;font-size:16px;`;
-        el.textContent = '🏨';
-        const popup = new mapboxgl.Popup({ offset: 20, closeButton: false })
-          .setHTML(`<div style="font-family:system-ui;padding:4px 2px;"><div style="font-weight:800;font-size:13px;color:#1D2642;">${a.name}</div>${a.address ? `<div style="font-size:10px;color:#9ca3af;margin-top:3px;">${a.address}</div>` : ''}${a.checkIn ? `<div style="font-size:10px;color:#6b7280;margin-top:3px;">Check-in: ${new Date(a.checkIn).toLocaleDateString('en-IE',{day:'numeric',month:'short'})}</div>` : ''}</div>`);
-        markersRef.current.push(new mapboxgl.Marker({ element: el, anchor: 'center' }).setLngLat([lng, lat]).setPopup(popup).addTo(map));
-      });
+      for (const s of stays) {
+        if (!isPinned(s.coordinates)) continue;
+        const el = pinElement({ icon: 'hotel', color: MAP_COLORS.stay, title: s.name });
+        el.addEventListener('click', ev => {
+          ev.stopPropagation();
+          showPopup(s.coordinates!, popupBox(s.name, [s.address ?? '', `${dayLabel(s.checkIn)} – ${dayLabel(s.checkOut)}`].filter(Boolean)));
+        });
+        add(s.coordinates, el);
+      }
     }
 
+    // Venues the itinerary already pins are shown as its places; the rest here
     if (showVenues) {
-      (logistics?.venues ?? []).forEach((v: VenueEntry) => {
-        if (!v.coordinates?.lat) return;
-        const { lat, lng } = v.coordinates; bounds.extend([lng, lat]);
-        const confirmed = STATUS_IS_CONFIRMED(v.status);
-        const emoji = VENUE_EMOJI[v.type] ?? '📍';
-        const el = document.createElement('div');
-        el.style.cssText = `width:32px;height:32px;border-radius:8px;background:${confirmed ? D.navy : 'white'};border:2px solid ${D.navy};display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,0.25);cursor:pointer;font-size:16px;`;
-        el.textContent = emoji;
-        const popup = new mapboxgl.Popup({ offset: 20, closeButton: false })
-          .setHTML(`<div style="font-family:system-ui;padding:4px 2px;"><div style="font-weight:800;font-size:13px;color:#1D2642;">${v.name}</div><div style="font-size:11px;color:#6b7280;margin-top:2px;text-transform:capitalize;">${v.type}</div>${v.address ? `<div style="font-size:10px;color:#9ca3af;margin-top:2px;">${v.address}</div>` : ''}</div>`);
-        markersRef.current.push(new mapboxgl.Marker({ element: el, anchor: 'center' }).setLngLat([lng, lat]).setPopup(popup).addTo(map));
-      });
+      for (const v of logistics?.venues ?? []) {
+        if (!isPinned(v.coordinates)) continue;
+        if (layer === 'all' && showItinerary && places.some(p => distanceKm(p.coordinates, v.coordinates) <= SAME_PLACE_KM)) continue;
+        const el = pinElement({ color: D.navy, size: 16, outline: true, title: v.name });
+        el.addEventListener('click', ev => {
+          ev.stopPropagation();
+          showPopup(v.coordinates, popupBox(v.name, [v.type ?? '', v.address ?? ''].filter(Boolean)));
+        });
+        add(v.coordinates, el);
+      }
     }
 
-    if (showItinerary) {
-      const stopsToShow = itineraryDay === 0
-        ? itinerary.flatMap(d => d.stops)
-        : (itinerary.find(d => d.dayNumber === itineraryDay)?.stops ?? []);
-      stopsToShow.forEach(stop => {
-        if (!stop.coordinates?.lat) return;
-        const { lat, lng } = stop.coordinates; bounds.extend([lng, lat]);
-        const color = STOP_COLOUR[stop.type] ?? '#6b7280';
-        const el = document.createElement('div');
-        el.style.cssText = `width:12px;height:12px;border-radius:50%;background:${color};border:2.5px solid white;box-shadow:0 1px 4px rgba(0,0,0,0.3);cursor:pointer;`;
-        const popup = new mapboxgl.Popup({ offset: 14, closeButton: false })
-          .setHTML(`<div style="font-family:system-ui;padding:4px 2px;"><div style="font-weight:700;font-size:12px;color:#1D2642;">${stop.name}</div><div style="font-size:10px;color:#6b7280;text-transform:capitalize;">${stop.type}</div></div>`);
-        markersRef.current.push(new mapboxgl.Marker({ element: el, anchor: 'center' }).setLngLat([lng, lat]).setPopup(popup).addTo(map));
-      });
+    const drawn = showRoute ? items : [];
+    if (showRoute) {
+      const homes = new Map<string, LatLng>();
+      for (const it of drawn) for (const p of [it.leg.from, it.leg.to]) if (p.kind === 'home') homes.set(p.key, p.coordinates);
+      for (const c of homes.values()) add(c, pinElement({ icon: 'home', color: D.navy, title: 'Home' }));
     }
+    (map.getSource(SOURCE) as GeoJSONSource | undefined)?.setData(legCollection(drawn.map(it => {
+      const line = legLine(it.leg, it.travel, it.gap === 'open');
+      return { id: it.id, style: line.style, coordinates: line.coordinates, selected: it.id === selected };
+    })));
+    for (const it of drawn) points.push(...itemPoints(it));
 
-    if (!bounds.isEmpty()) map.fitBounds(bounds, { padding: { top: 60, bottom: 60, left: 60, right: 60 }, maxZoom: 14, duration: 800 });
-    })();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mapReady, loading, logistics, itinerary, layer, journeyLegs, clearMarkers, itineraryDay]);
-
-  // Selection effect — updates line weights and flies to leg without a full redraw
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !mapboxglRef.current) return;
-    journeyLegs.forEach((leg, i) => {
-      try {
-        const sel   = selectedLegIdx === i;
-        const isGap = leg.kind === 'gap';
-        map.setPaintProperty(`leg-${i}`, 'line-width',   sel ? 4.5 : (isGap ? 1.5 : 2.5));
-        map.setPaintProperty(`leg-${i}`, 'line-opacity', sel ? 1   : (isGap ? 0.6 : 0.9));
-      } catch {}
-    });
-    if (selectedLegIdx !== null) {
-      const leg = journeyLegs[selectedLegIdx];
-      if (!leg) return;
-      const bounds = new mapboxglRef.current.LngLatBounds()
-        .extend([leg.fromCoords.lng, leg.fromCoords.lat])
-        .extend([leg.toCoords.lng,   leg.toCoords.lat]);
-      map.fitBounds(bounds, { padding: 80, maxZoom: 12, duration: 600 });
+    const fitKey = `${layer}|${dayIdx}|${points.length}`;
+    if (fittedRef.current !== fitKey) {
+      const first = fittedRef.current === '';
+      fittedRef.current = fitKey;
+      fitPoints(gl, map, points, 56, !first);
     }
-  }, [selectedLegIdx, journeyLegs]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- redrawn from these
+  }, [ready, loading, items, places, stays, logistics, layer, dayIdx, selected]);
 
-  const handleLegSelect = useCallback((i: number) => {
-    setSelectedLegIdx(prev => prev === i ? null : i);
-  }, []);
+  const selectItem = (it: Item) => {
+    const next = selected === it.id ? null : it.id;
+    setSelected(next);
+    popupRef.current?.remove();
+    const map = mapRef.current, gl = glRef.current;
+    if (next && map && gl) fitPoints(gl, map, itemPoints(it), 64);
+  };
 
-  const gapCount       = journeyLegs.filter(l => l.kind === 'gap').length;
-  const showDayPicker  = (layer === 'all' || layer === 'itinerary') && itinerary.length > 1;
+  // Rows, with a heading per day
+  const rows: Array<{ head: number } | { item: Item }> = [];
+  for (const it of items) {
+    const last = rows[rows.length - 1];
+    if (!last || ('item' in last && last.item.dayIdx !== it.dayIdx)) rows.push({ head: it.dayIdx });
+    rows.push({ item: it });
+  }
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
-
       <Box sx={{ position: 'relative', borderRadius: 2, overflow: 'hidden' }}>
-        {/* Filter chips + expand toggle */}
-        <Box sx={{ position: 'absolute', top: 12, left: 12, zIndex: 10, display: 'flex', gap: 0.5, alignItems: 'center', backgroundColor: 'rgba(253,250,245,0.95)', backdropFilter: 'blur(4px)', borderRadius: 1.5, p: 0.5, boxShadow: '0 2px 8px rgba(0,0,0,0.12)' }}>
+        {/* Layers + expand */}
+        <Box sx={{ position: 'absolute', top: 12, left: 12, zIndex: 10, display: 'flex', gap: 0.5, alignItems: 'center', backgroundColor: 'rgba(253,250,245,0.95)', backdropFilter: 'blur(4px)', borderRadius: 1.5, p: 0.5, boxShadow: '0 2px 8px rgba(0,0,0,0.12)', maxWidth: 'calc(100% - 70px)', overflowX: 'auto' }}>
           {LAYERS.map(l => (
-            <Box key={l.value} component="button" onClick={() => setLayer(l.value)} sx={{ background: layer === l.value ? D.navy : 'transparent', color: layer === l.value ? 'white' : D.muted, border: 'none', borderRadius: 1, px: { xs: 1, sm: 1.5 }, py: 0.6, fontSize: '0.72rem', fontWeight: 800, fontFamily: D.body, textTransform: 'none', cursor: 'pointer', whiteSpace: 'nowrap', letterSpacing: '0.02em', transition: 'background 0.15s, color 0.15s' }}>
+            <Box key={l.value} component="button" onClick={() => setLayer(l.value)} sx={{ background: layer === l.value ? D.navy : 'transparent', color: layer === l.value ? 'white' : D.muted, border: 'none', borderRadius: 1, px: { xs: 1, sm: 1.5 }, minHeight: 32, fontSize: '0.72rem', fontWeight: 800, fontFamily: D.body, cursor: 'pointer', whiteSpace: 'nowrap', letterSpacing: '0.02em', transition: 'background 0.15s, color 0.15s' }}>
               {l.label}
             </Box>
           ))}
-          <Box component="button" onClick={() => setMapExpanded(e => !e)} title={mapExpanded ? 'Collapse map' : 'Expand map'} sx={{ background: 'transparent', border: 'none', borderRadius: 1, px: 0.75, py: 0.5, display: 'flex', alignItems: 'center', cursor: 'pointer', color: D.muted, ml: 0.25, transition: 'color 0.15s', '&:hover': { color: D.navy } }}>
-            {mapExpanded ? <FullscreenExitIcon sx={{ fontSize: 16 }} /> : <FullscreenIcon sx={{ fontSize: 16 }} />}
+          <Box component="button" onClick={() => setExpanded(e => !e)} aria-label={expanded ? 'Collapse map' : 'Expand map'} title={expanded ? 'Collapse map' : 'Expand map'} sx={{ background: 'transparent', border: 'none', borderRadius: 1, px: 0.75, minHeight: 32, display: 'flex', alignItems: 'center', cursor: 'pointer', color: D.muted, ml: 0.25, '&:hover': { color: D.navy } }}>
+            {expanded ? <FullscreenExitIcon sx={{ fontSize: 16 }} /> : <FullscreenIcon sx={{ fontSize: 16 }} />}
           </Box>
         </Box>
 
-        <Box
-          ref={mapContainer}
-          sx={{ width: '100%', height: mapExpanded ? { xs: '72vh', sm: '80vh' } : { xs: 320, sm: 420, md: 500 }, backgroundColor: '#f0ede8', transition: 'height 0.3s ease' }}
-        />
+        <Box ref={boxRef} sx={{ width: '100%', height: expanded ? { xs: '72vh', sm: '80vh' } : { xs: 340, sm: 440, md: 500 }, backgroundColor: '#f0ede8', transition: 'height 0.3s ease' }} />
 
-        {(loading || !mapReady) && !tokenError && (
+        {(loading || (!ready && !unavailable)) && (
           <Box sx={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(245,240,232,0.85)' }}>
             <CircularProgress size={32} sx={{ color: D.green }} />
           </Box>
         )}
-        {tokenError && (
+        {unavailable && (
           <Box sx={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(245,240,232,0.95)' }}>
             <Box sx={{ textAlign: 'center', px: 3 }}>
               <MapIcon sx={{ fontSize: 40, color: D.muted, mb: 1 }} />
@@ -594,55 +403,190 @@ export default function MapTab({ tripId, trip }: MapTabProps) {
         )}
       </Box>
 
-      {/* Itinerary day picker */}
-      {showDayPicker && (
-        <Box sx={{ display: 'flex', gap: 0.5, pt: 1.5, flexWrap: 'wrap' }}>
-          {[{ dayNumber: 0 }, ...itinerary].map(d => (
-            <Box
-              key={d.dayNumber}
-              component="button"
-              onClick={() => setItineraryDay(d.dayNumber)}
-              sx={{
-                background: itineraryDay === d.dayNumber ? D.navy : 'transparent',
-                color: itineraryDay === d.dayNumber ? 'white' : D.muted,
-                border: `1.5px solid ${itineraryDay === d.dayNumber ? D.navy : D.rule}`,
-                borderRadius: 1, px: 1.25, py: 0.5,
-                fontSize: '0.72rem', fontWeight: 800, fontFamily: D.body,
-                cursor: 'pointer', whiteSpace: 'nowrap',
-                transition: 'background 0.15s, color 0.15s, border-color 0.15s',
-              }}
-            >
-              {d.dayNumber === 0 ? 'All days' : `Day ${d.dayNumber}`}
-            </Box>
-          ))}
+      {/* Days */}
+      {daysWithPlaces.length > 0 && (
+        <Box sx={{ display: 'flex', gap: 0.5, pt: 1.5, overflowX: 'auto', scrollbarWidth: 'none', '&::-webkit-scrollbar': { display: 'none' } }}>
+          {[{ i: -1 }, ...daysWithPlaces].map(({ i }) => {
+            const on = dayIdx === i;
+            return (
+              <Box
+                key={i}
+                component="button"
+                onClick={() => { setDayIdx(i); setSelected(null); popupRef.current?.remove(); }}
+                sx={{
+                  flexShrink: 0, display: 'flex', alignItems: 'center', gap: 0.75,
+                  background: on ? D.navy : 'transparent', color: on ? 'white' : D.navy,
+                  border: `1.5px solid ${on ? D.navy : D.rule}`, borderRadius: 1, px: 1.25, minHeight: 36,
+                  fontSize: '0.75rem', fontWeight: 800, fontFamily: D.body, cursor: 'pointer', whiteSpace: 'nowrap',
+                }}
+              >
+                {i >= 0 && <Box component="span" sx={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: dayColor(i), border: on ? '1px solid #fff' : 'none' }} />}
+                {i === -1 ? 'Whole trip' : `Day ${days[i]?.dayNumber}`}
+              </Box>
+            );
+          })}
+        </Box>
+      )}
+
+      {dayIdx >= 0 && plans[dayIdx] && (
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, pt: 1.5 }}>
+          <Typography sx={{ flex: 1, minWidth: 0, fontFamily: D.body, fontWeight: 700, fontSize: '0.88rem', color: D.navy }}>
+            Day {days[dayIdx]?.dayNumber} · {dayLabel(plans[dayIdx].date)}
+          </Typography>
+          <Button
+            variant="outlined" startIcon={<MapIcon />} onClick={() => openDay(dayIdx)}
+            sx={{ minHeight: 44, fontFamily: D.body, fontWeight: 800, color: D.navy, borderColor: alpha(D.navy, 0.25), flexShrink: 0 }}
+          >
+            Open in itinerary
+          </Button>
         </Box>
       )}
 
       <Box sx={{ pt: 3, pb: 2 }}>
-        <Box sx={{ mb: 2.5 }}>
+        <Box sx={{ mb: 2 }}>
           <Typography sx={{ fontFamily: D.display, fontSize: { xs: '1.5rem', sm: '1.75rem' }, color: D.navy, lineHeight: 1, letterSpacing: '-0.03em', mb: 0.5 }}>
             {trip.origin?.city} → {trip.destination?.city}
           </Typography>
-          {gapCount > 0 && (
-            <Typography sx={{ fontSize: '0.85rem', color: D.terra, fontWeight: 600 }}>
-              {gapCount} transfer{gapCount !== 1 ? 's' : ''} not booked
+          {openGaps > 0 && (
+            <Typography sx={{ fontSize: '0.85rem', color: D.terra, fontWeight: 600, fontFamily: D.body }}>
+              {openGaps} {openGaps === 1 ? 'journey' : 'journeys'} with no way planned
             </Typography>
           )}
         </Box>
 
-        {journeyLegs.length > 0 ? (
+        {rows.length > 0 ? (
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-            {journeyLegs.map((leg, i) =>
-              leg.kind === 'transport'
-                ? <TransportLegCard key={i} leg={leg} selected={selectedLegIdx === i} onSelect={() => handleLegSelect(i)} />
-                : <GapLegCard      key={i} leg={leg} selected={selectedLegIdx === i} onSelect={() => handleLegSelect(i)} />
-            )}
+            {rows.map((r, k) => ('head' in r ? (
+              <Typography key={`h${r.head}-${k}`} sx={{ pt: k ? 1.5 : 0, fontFamily: D.body, fontSize: '0.66rem', fontWeight: 800, letterSpacing: '0.08em', textTransform: 'uppercase', color: D.muted }}>
+                Day {days[r.head]?.dayNumber} · {dayLabel(plans[r.head].date)}
+              </Typography>
+            ) : r.item.leg.kind === 'flight' ? (
+              <FlightCard key={r.item.id} item={r.item} booking={bookingFor(r.item.leg, logistics)} selected={selected === r.item.id} onSelect={() => selectItem(r.item)} />
+            ) : (
+              <JourneyCard
+                key={r.item.id} item={r.item} selected={selected === r.item.id}
+                onSelect={() => selectItem(r.item)}
+                onPlan={() => openDay(r.item.dayIdx, r.item.leg.id)}
+                onSorted={v => setSorted(r.item, v)}
+              />
+            )))}
           </Box>
         ) : !loading && (
-          <Typography sx={{ fontSize: '0.9rem', color: D.muted, py: 2 }}>No transport added yet.</Typography>
+          <Typography sx={{ fontSize: '0.9rem', color: D.muted, py: 2, fontFamily: D.body }}>
+            {dayIdx === -1 ? 'No journeys yet.' : 'Nothing to get between on this day.'}
+          </Typography>
         )}
       </Box>
+    </Box>
+  );
+}
 
+/** The booking a flight leg mirrors, for its airline, number, seat and reference */
+function bookingFor(leg: Leg<Stop>, logistics: any): any | null {
+  const ref = leg.ride?.logisticsRef;
+  return ref?.collection === 'transport' ? logistics?.transportation?.[ref.index] ?? null : null;
+}
+
+function FlightCard({ item, booking, selected, onSelect }: { item: Item; booking: any | null; selected: boolean; onSelect: () => void }) {
+  const { leg } = item;
+  const confirmed = STATUS_IS_CONFIRMED(booking?.status);
+  const from = airportAt(leg.from.coordinates) ?? leg.from.name;
+  const to   = airportAt(leg.to.coordinates)   ?? leg.to.name;
+  const dep  = leg.ride ? pageStart(leg.ride) : null;
+  const d    = booking?.details ?? {};
+  return (
+    <ButtonBase
+      onClick={onSelect}
+      sx={{
+        display: 'block', textAlign: 'left', width: '100%',
+        borderLeft: `3px solid ${booking ? (confirmed ? D.green : D.terra) : D.navy}`,
+        backgroundColor: selected ? 'rgba(29,38,66,0.06)' : D.paper,
+        borderRadius: '0 8px 8px 0', px: 2.5, py: 2,
+        outline: selected ? `2px solid ${D.navy}` : '2px solid transparent', outlineOffset: -2,
+      }}
+    >
+      <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1.5, mb: 0.75 }}>
+        <Typography sx={{ fontFamily: D.display, fontSize: { xs: '1.75rem', sm: '2rem' }, color: D.navy, lineHeight: 1, letterSpacing: '-0.03em' }}>
+          {dep !== null ? formatTime(dep) : '—'}
+        </Typography>
+        <Typography sx={{ color: D.muted, fontSize: '1rem', fontWeight: 700, lineHeight: 1 }}>→</Typography>
+        <Typography sx={{ fontFamily: D.display, fontSize: { xs: '1.75rem', sm: '2rem' }, color: D.navy, lineHeight: 1, letterSpacing: '-0.03em' }}>
+          {leg.arriveBy !== null ? formatTime(leg.arriveBy) : '—'}
+        </Typography>
+        <Box sx={{ ml: 'auto', display: 'flex', alignItems: 'center', gap: 1, flexShrink: 0 }}>
+          <TravelIcon leg={leg} travel={item.travel} size={15} />
+          {booking && (
+            <Box sx={{ px: 1, py: 0.3, borderRadius: 0.75, backgroundColor: confirmed ? 'rgba(107,124,92,0.12)' : 'rgba(196,113,74,0.10)', fontSize: '0.68rem', fontWeight: 800, letterSpacing: '0.07em', textTransform: 'uppercase', color: confirmed ? D.green : D.terra }}>
+              {confirmed ? 'Booked' : booking.status}
+            </Box>
+          )}
+        </Box>
+      </Box>
+      <Typography sx={{ fontFamily: D.display, fontSize: { xs: '1.2rem', sm: '1.4rem' }, color: D.navy, lineHeight: 1.1, letterSpacing: '-0.02em', mb: 1 }}>
+        {from} → {to}
+      </Typography>
+      <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+        {d.airline && <Typography sx={{ fontSize: '0.8rem', color: D.muted }}>{d.airline}</Typography>}
+        {d.flightNumber && <Typography sx={{ fontSize: '0.8rem', color: D.muted, fontWeight: 700 }}>{d.flightNumber}</Typography>}
+        {d.seat && <Typography sx={{ fontSize: '0.8rem', color: D.muted }}>Seat {d.seat}</Typography>}
+        {booking?.confirmationNumber && <Typography sx={{ fontSize: '0.78rem', color: D.muted, fontFamily: 'monospace', letterSpacing: '0.1em' }}>{booking.confirmationNumber}</Typography>}
+        {item.travel.minutes !== null && <Typography sx={{ fontSize: '0.8rem', color: D.muted }}>{travelText(leg, item.travel)}</Typography>}
+      </Box>
+    </ButtonBase>
+  );
+}
+
+function JourneyCard({ item, selected, onSelect, onPlan, onSorted }: {
+  item: Item; selected: boolean; onSelect: () => void; onPlan: () => void; onSorted: (sorted: boolean) => void;
+}) {
+  const { leg, travel, gap } = item;
+  const asking = gap === 'open';
+  const when = leg.kind === 'ride' && leg.leaveAfter !== null
+    ? `${formatTime(leg.leaveAfter)}${leg.arriveBy !== null ? `–${formatTime(leg.arriveBy)}` : ''}`
+    : leg.arriveBy !== null ? `by ${formatTime(leg.arriveBy)}`
+    : leg.leaveAfter !== null ? `from ${formatTime(leg.leaveAfter)}` : '';
+  return (
+    <Box sx={{
+      borderLeft: `3px ${asking ? 'dashed' : 'solid'} ${asking ? D.terra : D.navy}`,
+      backgroundColor: asking ? 'rgba(196,113,74,0.05)' : selected ? 'rgba(29,38,66,0.06)' : D.paper,
+      borderRadius: '0 8px 8px 0',
+      outline: selected ? `2px solid ${asking ? D.terra : D.navy}` : '2px solid transparent', outlineOffset: -2,
+    }}>
+      <Box sx={{ display: 'flex', alignItems: 'center' }}>
+      <ButtonBase onClick={onSelect} sx={{ display: 'flex', flex: 1, minWidth: 0, justifyContent: 'flex-start', textAlign: 'left', gap: 1.5, px: 2.5, py: 1.75, minHeight: 56 }}>
+        {asking ? <HelpOutlineIcon sx={{ fontSize: 20, color: D.terra, flexShrink: 0 }} /> : <TravelIcon leg={leg} travel={travel} size={20} />}
+        <Box sx={{ flex: 1, minWidth: 0 }}>
+          <Typography sx={{ fontFamily: D.display, fontSize: { xs: '1rem', sm: '1.1rem' }, color: D.navy, lineHeight: 1.25, letterSpacing: '-0.01em' }}>
+            {leg.from.name} → {leg.to.name}
+          </Typography>
+          <Typography sx={{ fontFamily: D.body, fontSize: '0.82rem', color: asking ? D.terra : D.muted, mt: 0.25 }}>
+            {[when, asking ? 'nothing planned' : travelText(leg, travel)].filter(Boolean).join(' · ')}
+          </Typography>
+        </Box>
+      </ButtonBase>
+      {gap === 'sorted' && (
+        <ButtonBase
+          onClick={() => onSorted(false)}
+          title="Ask about this again"
+          aria-label="Sorted. Ask about this again"
+          sx={{ flexShrink: 0, minHeight: 44, px: 1, mr: 1, borderRadius: 4 }}
+        >
+          <Box component="span" sx={{ px: 1, py: 0.5, borderRadius: 4, fontFamily: D.body, fontSize: '0.66rem', fontWeight: 800, color: D.green, backgroundColor: alpha(D.green, 0.12) }}>
+            Sorted
+          </Box>
+        </ButtonBase>
+      )}
+      </Box>
+      {asking && (
+        <Box sx={{ display: 'flex', gap: 1, px: 2.5, pb: 1.75, flexWrap: 'wrap' }}>
+          <Button variant="contained" onClick={onPlan} sx={{ minHeight: 44, flex: 1, fontFamily: D.body, fontWeight: 800, backgroundColor: D.navy, boxShadow: 'none', '&:hover': { backgroundColor: D.navy, boxShadow: 'none' } }}>
+            Plan it
+          </Button>
+          <Button variant="outlined" onClick={() => onSorted(true)} sx={{ minHeight: 44, flex: 1, fontFamily: D.body, fontWeight: 800, color: D.navy, borderColor: alpha(D.navy, 0.25) }}>
+            I’ve sorted this
+          </Button>
+        </Box>
+      )}
     </Box>
   );
 }

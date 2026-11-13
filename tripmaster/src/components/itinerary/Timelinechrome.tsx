@@ -2,8 +2,6 @@
 
 import { Box, ButtonBase, Typography } from '@mui/material';
 import { alpha }           from '@mui/material/styles';
-import DirectionsWalkIcon  from '@mui/icons-material/DirectionsWalk';
-import LocalTaxiIcon       from '@mui/icons-material/LocalTaxi';
 import WarningAmberIcon    from '@mui/icons-material/WarningAmber';
 import {
   DAY_START_HOUR, DAY_END_HOUR, D,
@@ -11,6 +9,8 @@ import {
 import type { Stop } from './Itinerary.config';
 import { minutesToPx, stopStartMinutes, formatTime } from './Itinerary.helpers';
 import type { HourWeather } from './hourWeather';
+import { TravelIcon, travelText } from './LegRow';
+import type { Leg, Travel } from '@/lib/itinerary/dayPlan';
 import { weatherIcon, warmth } from '@/components/weather/weatherUi';
 
 // ─── Hour ruler ────────────────────────────────────────────────────────────────
@@ -220,45 +220,47 @@ export function FreeGap({
 }
 
 // ─── Travel connector ──────────────────────────────────────────────────────────
-export function TravelConnector({ stop, pxPerMin, startHour = DAY_START_HOUR }: { stop: Stop; pxPerMin: number; startHour?: number }) {
-  const t = stop.travelToNext;
-  if (!t) return null;
-
+// The way on from a stop, drawn in the time after it: how and how long, a warning
+// when it doesn't fit, and a question when there's no way planned. Tap → the map.
+export function TravelConnector({ stop, legs, pxPerMin, startHour = DAY_START_HOUR, onSelect }: {
+  stop:      Stop;
+  legs:      Array<{ leg: Leg<Stop>; travel: Travel; asking: boolean }>;
+  pxPerMin:  number;
+  startHour?: number;
+  onSelect:  (leg: Leg<Stop>) => void;
+}) {
   const start = stopStartMinutes(stop);
-  if (start === null) return null;
-
-  const top = minutesToPx(start + (stop.duration ?? 60), pxPerMin, startHour);
+  if (start === null || !legs.length) return null;
+  const { leg, travel, asking } = legs.find(l => l.asking) ?? legs[0];
+  const top     = minutesToPx(start + (stop.duration ?? 60), pxPerMin, startHour);
+  const mins    = legs.reduce((sum, l) => sum + (l.leg.kind === 'move' ? l.travel.minutes ?? 0 : 0), 0);
+  const late    = travel.late !== null;
+  const text    = asking
+    ? `How are you getting to ${leg.to.name}?`
+    : legs.map(l => (l.leg.anchor === 'end' ? `${travelText(l.leg, l.travel)} to ${l.leg.to.name}` : travelText(l.leg, l.travel))).join(' · then ');
 
   return (
-    <Box sx={{
-      position: 'absolute', left: 0, right: 4, top, zIndex: 3,
-      height:   Math.max(t.duration * pxPerMin, 18),
-      display:  'flex', alignItems: 'center',
-      backgroundColor: t.isImpossible
-        ? alpha('#ef4444', 0.08)
-        : t.isTight
-        ? alpha('#f59e0b', 0.08)
-        : 'transparent',
-      px: 1,
-    }}>
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
-        {t.isImpossible
-          ? <WarningAmberIcon sx={{ fontSize: 12, color: 'error.main' }} />
-          : t.mode === 'walk'
-          ? <DirectionsWalkIcon sx={{ fontSize: 12, color: D.muted }} />
-          : <LocalTaxiIcon sx={{ fontSize: 12, color: D.muted }} />
-        }
+    <ButtonBase
+      onClick={e => { e.stopPropagation(); onSelect(leg); }}
+      aria-label={`${text}. Show on the map`}
+      sx={{
+        position: 'absolute', left: 0, right: 4, top, zIndex: 3,
+        height: Math.max(mins * pxPerMin, 20),
+        display: 'flex', alignItems: 'center', justifyContent: 'flex-start', px: 1,
+        backgroundColor: asking ? alpha(D.terra, 0.08) : late ? alpha('#ef4444', 0.08) : travel.tight ? alpha('#f59e0b', 0.08) : 'transparent',
+      }}
+    >
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, minWidth: 0 }}>
+        {late ? <WarningAmberIcon sx={{ fontSize: 12, color: 'error.main' }} /> : <TravelIcon leg={leg} travel={travel} size={12} color={asking ? D.terra : undefined} />}
         <Typography sx={{
-          fontSize:   '0.65rem',
-          fontFamily: D.body,
-          fontWeight: t.isTight || t.isImpossible ? 700 : 400,
-          color: t.isImpossible ? 'error.main' : t.isTight ? 'warning.dark' : D.muted,
+          fontSize: '0.65rem', fontFamily: D.body, lineHeight: 1.2,
+          fontWeight: asking || late || travel.tight ? 700 : 400,
+          color: asking ? D.terra : late ? 'error.main' : travel.tight ? 'warning.dark' : D.muted,
+          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
         }}>
-          {t.toName ? `→ ${t.toName} · ` : ''}{t.duration}min · {(t.distance / 1000).toFixed(1)}km
-          {t.isTight && ' ⚠️'}
-          {t.isImpossible && ' 🚨'}
+          {text}{late ? ` · ${travel.late} min short` : travel.tight ? ' · tight' : ''}
         </Typography>
       </Box>
-    </Box>
+    </ButtonBase>
   );
 }

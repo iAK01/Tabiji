@@ -59,6 +59,24 @@ export function canNavigate(dest: NavigationDestination, intent: NavIntent = 'di
   return !!(latLng(dest) || dest.address || (intent === 'view' && dest.name));
 }
 
+/** Has a map point. Map apps only ever route to one — text makes them guess. */
+export const isPinned = (dest: NavigationDestination) => !!latLng(dest);
+
+/** What to search a map app for when a place has no pin: its name, then the address. */
+export function searchText(dest: NavigationDestination): string {
+  const name    = (dest.name ?? '').replace(/[\p{Extended_Pictographic}️‍]/gu, '').replace(/\([^)]*\)/g, ' ').replace(/\s+/g, ' ').trim();
+  const address = dest.address?.trim() ?? '';
+  if (!name || address.toLowerCase().includes(name.toLowerCase())) return address || name;
+  return address ? `${name}, ${address}` : name;
+}
+
+/** A search, never a route: the app shows what it found, for you to check before setting off. */
+export function searchLink(dest: NavigationDestination, app: Exclude<NavApp, 'waze'>, platform: Platform): string {
+  const q = encodeURIComponent(searchText(dest));
+  if (app === 'apple_maps') return `${platform === 'ios' ? 'maps://' : 'https://maps.apple.com/'}?q=${q}`;
+  return platform === 'ios' ? `comgooglemaps://?q=${q}` : `https://www.google.com/maps/search/?api=1&query=${q}`;
+}
+
 /** What "Copy" puts on the clipboard: coordinates when we have them, else the address. */
 export function copyableLocation(dest: NavigationDestination): { kind: 'coordinates' | 'address'; text: string } | null {
   const c = dest.coordinates;
@@ -78,25 +96,27 @@ export function navLink(
   platform: Platform,
   origin?:  NavOrigin | null,
 ): string {
-  const ll    = latLng(dest);
-  const query = encodeURIComponent(dest.address || dest.name || '');
-  const where = ll ?? query;
+  const where = latLng(dest);
   const ios   = platform === 'ios';
-  // Directions from a set place rather than from where you are
-  const from  = intent === 'directions' && origin
-    ? latLng(origin) ?? encodeURIComponent(origin.address || origin.name)
-    : null;
+  // No pin: a search the person checks, never a route to wherever the app guesses
+  if (!where) {
+    return app === 'waze'
+      ? `${ios ? 'waze://' : 'https://waze.com/ul'}?q=${encodeURIComponent(searchText(dest))}`
+      : searchLink(dest, app, platform);
+  }
+  // Directions from a set place (your hotel) rather than from where you are — only from its pin
+  const from = intent === 'directions' && origin ? latLng(origin) : null;
 
   if (app === 'apple_maps') {
     const base = ios ? 'maps://' : 'https://maps.apple.com/';
-    if (intent === 'view') return ll ? `${base}?ll=${ll}&q=${encodeURIComponent(dest.name || dest.address || '')}` : `${base}?q=${query}`;
+    if (intent === 'view') return `${base}?ll=${where}&q=${encodeURIComponent(dest.name || dest.address || '')}`;
     return `${base}?${from ? `saddr=${from}&` : ''}daddr=${where}&dirflg=${APPLE_DIRFLG[mode]}`;
   }
 
   // Waze only drives, whatever mode is picked.
   if (app === 'waze') {
     const base = ios ? 'waze://' : 'https://waze.com/ul';
-    return `${base}?${ll ? `ll=${ll}` : `q=${query}`}${intent === 'directions' ? '&navigate=yes' : ''}`;
+    return `${base}?ll=${where}${intent === 'directions' ? '&navigate=yes' : ''}`;
   }
 
   if (ios) {

@@ -21,7 +21,10 @@ import FilterListIcon       from '@mui/icons-material/FilterList';
 import HotelIcon            from '@mui/icons-material/Hotel';
 import CheckIcon            from '@mui/icons-material/Check';
 import EventRepeatIcon      from '@mui/icons-material/EventRepeat';
+import MapIcon              from '@mui/icons-material/Map';
+import EastIcon             from '@mui/icons-material/East';
 import NavigateButton       from '@/components/ui/NavigateButton';
+import { haversineKm }      from '@/lib/geo/geocode';
 import type { TravelOrigin } from '@/lib/navigation/useTravelTimes';
 import type { NavOrigin }  from '@/lib/navigation/links';
 import DocumentViewer, { type ViewableFile } from '@/components/files/DocumentViewer';
@@ -70,6 +73,21 @@ interface Props {
   navFrom?:        TravelOrigin | null;
   /** Where you're staying that day — a route from each, laid out in the map app */
   hotels?:         NavOrigin[];
+  /** Navigate found a pin for this unpinned stop — keep it on the stop */
+  onPinned?:       (stop: Stop, pin: { lat: number; lng: number }) => void;
+  /** The day's map, centred on this stop */
+  onShowOnMap?:    (stop: Stop) => void;
+}
+
+// How far a pin is from where you're staying, so a wrong one shows before you set off
+function fromStay(stop: Stop, hotels: NavOrigin[]): string | null {
+  const c = stop.coordinates;
+  const h = hotels.find(x => x.coordinates && Number.isFinite(x.coordinates.lat) && Number.isFinite(x.coordinates.lng));
+  if (!c || !Number.isFinite(c.lat) || !Number.isFinite(c.lng) || !h?.coordinates) return null;
+  const km = haversineKm(h.coordinates.lat, h.coordinates.lng, c.lat, c.lng);
+  if (km < 0.05) return `At ${h.name}`;
+  const dist = km < 1 ? `${Math.round(km * 20) * 50} m` : `${km < 10 ? km.toFixed(1) : Math.round(km)} km`;
+  return `${dist} from ${h.name} in a straight line`;
 }
 
 const sectionLabelSx = {
@@ -85,6 +103,7 @@ export function StopDetailSheet({
   stop, concurrent, isMobile, linkedFiles, resources = [], isStarted, reminder, flight,
   reminderSetting = null, reminderNotice = null, onReminderChange,
   onClose, onSelect, onSkip, onEdit, onEditNote, onHighlight, onChangeType, onRepeat, onOpenLogistics, onFilterType, navFrom = null, hotels = [],
+  onPinned, onShowOnMap,
 }: Props) {
   const [viewerFile,     setViewerFile]     = useState<ViewableFile | null>(null);
   const [reminderOpen,   setReminderOpen]   = useState(false);
@@ -229,12 +248,17 @@ export function StopDetailSheet({
                 {stop.locationName && stop.address && stop.address !== stop.locationName && (
                   <Typography sx={{ fontFamily: D.body, fontSize: '0.78rem', color: D.muted }}>{stop.address}</Typography>
                 )}
+                {(() => {
+                  const far = fromStay(stop, hotels);
+                  return far && <Typography sx={{ fontFamily: D.body, fontSize: '0.78rem', color: D.muted }}>{far}</Typography>;
+                })()}
               </Box>
               {(stop.address || stop.coordinates) && (
                 <NavigateButton
                   destination={{ name: stop.name, address: stop.address, coordinates: stop.coordinates ?? null }}
                   suggestedMode="walking"
                   from={navFrom}
+                  onPinned={pin => onPinned?.(stop, pin)}
                   size="small"
                   sx={{ flexShrink: 0, minWidth: 44, minHeight: 44 }}
                 />
@@ -250,6 +274,7 @@ export function StopDetailSheet({
               label={`Route from ${h.name}`}
               origin={h}
               destination={{ name: stop.name, address: stop.address, coordinates: stop.coordinates ?? null }}
+              onPinned={pin => onPinned?.(stop, pin)}
               suggestedMode="walking"
               sx={{
                 display: 'flex', justifyContent: 'flex-start', width: '100%', minHeight: 44, px: 0, mt: -1, mb: 1,
@@ -259,6 +284,41 @@ export function StopDetailSheet({
               }}
             />
           ))}
+
+          {/* ── A transport stop's destination ── */}
+          {(stop.to?.name || stop.to?.address) && (
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5 }}>
+              <EastIcon sx={{ fontSize: 18, color: D.muted, flexShrink: 0 }} />
+              <Box sx={{ flex: 1, minWidth: 0 }}>
+                <Typography sx={{ fontFamily: D.body, fontSize: '0.92rem', fontWeight: 700, color: D.navy }}>
+                  To {stop.to!.name || stop.to!.address}
+                </Typography>
+                {stop.to!.name && stop.to!.address && stop.to!.address !== stop.to!.name && (
+                  <Typography sx={{ fontFamily: D.body, fontSize: '0.78rem', color: D.muted }}>{stop.to!.address}</Typography>
+                )}
+              </Box>
+              <NavigateButton
+                destination={{ name: stop.to!.name, address: stop.to!.address, coordinates: stop.to!.coordinates ?? null }}
+                suggestedMode="driving"
+                size="small"
+                sx={{ flexShrink: 0, minWidth: 44, minHeight: 44 }}
+              />
+            </Box>
+          )}
+
+          {onShowOnMap && stop.coordinates && (
+            <Box
+              component="button"
+              onClick={() => onShowOnMap(stop)}
+              sx={{
+                display: 'flex', alignItems: 'center', gap: 1, width: '100%', minHeight: 44, mt: -0.5, mb: 1,
+                p: 0, border: 'none', background: 'none', cursor: 'pointer', color: D.muted, textAlign: 'left',
+              }}
+            >
+              <MapIcon sx={{ fontSize: 20 }} />
+              <Typography sx={{ fontFamily: D.body, fontSize: '0.88rem', fontWeight: 700 }}>Show on the day’s map</Typography>
+            </Box>
+          )}
 
           {flight && (
             <Box sx={{ mb: 1.5 }}>

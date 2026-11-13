@@ -7,7 +7,7 @@ import NearMeDisabledIcon  from '@mui/icons-material/NearMeDisabled';
 import MapIcon             from '@mui/icons-material/Map';
 import { canNavigate }     from '@/lib/navigation/links';
 import type { NavIntent, NavMode, NavigationDestination, NavOrigin } from '@/lib/navigation/links';
-import NavigateOptions, { NavigateNotice, type NavNotice } from '@/components/navigation/NavigateOptions';
+import NavigateOptions, { NavigateNotice, type FoundPin, type NavNotice } from '@/components/navigation/NavigateOptions';
 import type { TravelOrigin } from '@/lib/navigation/useTravelTimes';
 
 // ─── Props ────────────────────────────────────────────────────────────────────
@@ -21,6 +21,10 @@ interface NavigateButtonProps {
   from?:     TravelOrigin | null;
   /** Route from this place (your hotel) instead of where you are */
   origin?:   NavOrigin | null;
+  /** The trip an unpinned place is looked up in — needed off the trip's own pages */
+  tripId?:   string;
+  /** A pin was found for an unpinned place when opened — keep it */
+  onPinned?: (pin: FoundPin) => void;
   /** 'icon'   = icon-only button (default, used inside cards)
    *  'button' = full text button (used in larger contexts)
    *  'text'   = icon + label, no outline (a line in a sheet) */
@@ -47,6 +51,8 @@ export default function NavigateButton({
   intent        = 'directions',
   from,
   origin        = null,
+  tripId,
+  onPinned,
   variant       = 'icon',
   icon,
   label         = intent === 'view' ? 'Map' : 'Navigate',
@@ -148,6 +154,8 @@ export default function NavigateButton({
           initialMode={suggestedMode}
           from={from}
           origin={origin}
+          tripId={tripId}
+          onPinned={onPinned}
           onPicked={() => setAnchor(null)}
           onNotice={setNotice}
           onLayoutChange={refit}

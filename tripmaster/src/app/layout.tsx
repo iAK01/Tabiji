@@ -11,6 +11,7 @@ import OfflineIndicator from '@/components/ui/OfflineIndicator';
 import SaveErrorToast from '@/components/ui/SaveErrorToast';
 import PassMoment from '@/components/passes/PassMoment';
 import 'mapbox-gl/dist/mapbox-gl.css';
+import '@/styles/mapbox-popup-overrides.css';
 
 export default function RootLayout({
   children,

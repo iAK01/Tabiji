@@ -1,7 +1,9 @@
 import mongoose from 'mongoose';
+import { after } from 'next/server';
 import TripItinerary from '@/lib/mongodb/models/TripItinerary';
 import { pinIfFound } from '@/lib/geo/pinAddress';
 import { tripAreas } from '@/lib/geo/tripAreas';
+import { pinPlace, searchArea } from '@/lib/geo/pinPlace';
 
 // Server-side itinerary writes shared by the routes and the email intake.
 
@@ -28,7 +30,28 @@ export async function ensureItinerary(trip: any) {
   return itinerary;
 }
 
-const hasPin = (c: any) => Number.isFinite(c?.lat) && Number.isFinite(c?.lng);
+const hasPin = (c: any) => Number.isFinite(c?.lat) && Number.isFinite(c?.lng)
+  && Math.abs(c.lat) <= 90 && Math.abs(c.lng) <= 180;
+
+/**
+ * Where a transport stop goes, as it's stored: { name?, address?, coordinates? },
+ * or null when nothing usable was given. A typed address with no pin is pinned
+ * the way a stop's own address is.
+ */
+export async function cleanDestination(raw: unknown, trip: any): Promise<{ name?: string; address?: string; coordinates?: { lat: number; lng: number } } | null> {
+  if (!raw || typeof raw !== 'object') return null;
+  const r       = raw as Record<string, any>;
+  const name    = typeof r.name    === 'string' ? r.name.trim().slice(0, 300)    : '';
+  const address = typeof r.address === 'string' ? r.address.trim().slice(0, 500) : '';
+  let coordinates = hasPin(r.coordinates) ? { lat: r.coordinates.lat, lng: r.coordinates.lng } : null;
+  if (!coordinates && address) coordinates = await pinIfFound(address, tripAreas(trip));
+  if (!name && !address && !coordinates) return null;
+  return {
+    ...(name && { name }),
+    ...(address && { address }),
+    ...(coordinates && { coordinates: { lat: coordinates.lat, lng: coordinates.lng } }),
+  };
+}
 
 export type AddStopResult =
   | { itinerary: any; stop: any; error?: undefined }
@@ -43,6 +66,11 @@ export async function addStop(trip: any, dayDate: string, stop: any): Promise<Ad
       ? await pinIfFound(stop.address, tripAreas(trip))
       : null;
     if (pin) stop.coordinates = pin;
+  }
+  if (stop && 'to' in stop) {
+    const to = await cleanDestination(stop.to, trip);
+    if (to) stop.to = to;
+    else delete stop.to;
   }
 
   const itinerary = await TripItinerary.findOne({ tripId: trip._id });
@@ -59,7 +87,36 @@ export async function addStop(trip: any, dayDate: string, stop: any): Promise<Ad
 
   itinerary.markModified('days');
   await itinerary.save();
+  // The address didn't pin ("Place Bab El Had, Avenue Hassan II" is a street): try the place's name
+  if (!created.coordinates && typeof created.address === 'string' && created.address.trim()) {
+    pinStopLater(trip, created._id.toString(), { name: created.name, address: created.address });
+  }
   return { itinerary, stop: created };
+}
+
+/**
+ * After the reply: look the stop's place up by name (pinPlace — certain matches
+ * only) and pin it, unless it was pinned or its address changed meanwhile.
+ * Name lookups take seconds, too long to hold a save for.
+ */
+export function pinStopLater(trip: any, stopId: string, place: { name?: string; address?: string }) {
+  after(async () => {
+    try {
+      const areas = tripAreas(trip);
+      const area  = searchArea(areas, null, trip.destination?.country);
+      if (!area) return;
+      const pin = await pinPlace(place, area, areas);
+      if (!pin) return;
+      const ids = [stopId, ...(mongoose.Types.ObjectId.isValid(stopId) ? [new mongoose.Types.ObjectId(stopId)] : [])];
+      await TripItinerary.collection.updateOne(
+        { tripId: trip._id },
+        { $set: { 'days.$[].stops.$[s].coordinates': { lat: pin.lat, lng: pin.lng } } },
+        { arrayFilters: [{ 's._id': { $in: ids }, 's.address': place.address, 's.coordinates': null }] },
+      );
+    } catch (err) {
+      console.error('[pinStopLater]', err);
+    }
+  });
 }
 
 /** The stop with this id and its day, or null. */

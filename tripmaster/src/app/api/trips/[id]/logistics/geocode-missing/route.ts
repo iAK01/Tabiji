@@ -5,7 +5,8 @@ import Trip                  from '@/lib/mongodb/models/Trip';
 import User                  from '@/lib/mongodb/models/User';
 import TripLogistics         from '@/lib/mongodb/models/TripLogistics';
 import { syncLogisticsToItinerary } from '@/lib/itinerary/syncLogistics';
-import { locatePlace }       from '@/lib/geo/geocode';
+import { pinPlace }          from '@/lib/geo/pinPlace';
+import { tripAreas }         from '@/lib/geo/tripAreas';
 
 // POST /api/trips/[id]/logistics/geocode-missing
 // Backfills real address + coordinates for venues / accommodation that were
@@ -37,7 +38,7 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
   const repair = async (item: any) => {
     if (!item?.name || item.coordinates?.lat) return;   // named + not already located
     checked++;
-    const hit = await locatePlace({ name: item.name, address: item.address }, area);
+    const hit = await pinPlace({ name: item.name, address: item.address }, area, tripAreas(trip));
     if (hit) {
       item.address     = hit.address;
       item.coordinates = { lat: hit.lat, lng: hit.lng };

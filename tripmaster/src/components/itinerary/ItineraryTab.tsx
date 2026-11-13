@@ -17,9 +17,8 @@ import {
 import { alpha }              from '@mui/material/styles';
 import { useTheme, useMediaQuery } from '@mui/material';
 import AddIcon            from '@mui/icons-material/Add';
-import RouteIcon          from '@mui/icons-material/Route';
-import DirectionsWalkIcon from '@mui/icons-material/DirectionsWalk';
 import LockIcon           from '@mui/icons-material/Lock';
+import MapIcon            from '@mui/icons-material/Map';
 import HotelIcon          from '@mui/icons-material/Hotel';
 import CalendarMonthIcon  from '@mui/icons-material/CalendarMonth';
 import ViewDayIcon        from '@mui/icons-material/ViewDay';
@@ -58,6 +57,11 @@ import {
 } from './Itinerary.helpers';
 import { clockMinutes, daysBetween, insertByTime, DAY_MINS, NIGHT_ENDS_MIN } from '@/lib/itinerary/nights';
 import { HourRuler, GridLines, FreeGap, TravelConnector } from './Timelinechrome';
+import { DayMap, type NewPlace } from './DayMap';
+import { LegRow }               from './LegRow';
+import { useTripRoutes }        from '@/lib/itinerary/useTripRoutes';
+import { saveGapSorted }        from '@/lib/itinerary/gaps';
+import { legTravel, gapKey, staysFrom, namedFrom, type Leg, type Stay, type NamedPlace } from '@/lib/itinerary/dayPlan';
 import { StopBlock }            from './Stopblock';
 import { AddStopDrawer }        from './Addstopdrawer';
 import { FreeSuggestionsModal } from './FreeSuggestionsModal';
@@ -82,10 +86,11 @@ import type { NavOrigin }       from '@/lib/navigation/links';
 import type { Highlight }       from '@/lib/itinerary/highlight';
 import { repeatStop }           from '@/lib/itinerary/repeat';
 
-const VIEW_MODES = ['timeline', 'list', 'recap'] as const;
+const VIEW_MODES = ['timeline', 'list', 'map', 'recap'] as const;
 const VIEW_OPTIONS = [
   { value: 'timeline', label: 'Timeline', Icon: ViewDayIcon },
   { value: 'list',     label: 'List',     Icon: ViewAgendaIcon },
+  { value: 'map',      label: 'Map',      Icon: MapIcon },
   { value: 'recap',    label: 'Recap',    Icon: AutoStoriesIcon },
 ] as const;
 const MIN_ZOOM   = 1;
@@ -131,14 +136,6 @@ interface Props {
 // Stops whose pin is a departure point, not somewhere you'll be afterwards.
 const NOT_A_PLACE = new Set(['flight', 'transport', 'transfer', 'checkin']);
 
-interface Accom {
-  name:         string;
-  address?:     string;
-  coordinates?: { lat: number; lng: number } | null;
-  checkIn:      string;   // YYYY-MM-DD
-  checkOut:     string;   // YYYY-MM-DD
-}
-
 export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabTrigger, onSwitchToDiscover, onSwitchToLogistics }: Props) {
   const theme    = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
@@ -156,7 +153,6 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
   // Resources linked to stops — files, and the notes, contacts and to-dos shown with them
   const [linked,         setLinked]         = useState<Map<string, LinkedItem[]>>(new Map());
   const [activeDayIdx,   setActiveDayIdx]   = useState(0);
-  const [calculating,    setCalculating]    = useState(false);
   const [quickAddAnchor, setQuickAddAnchor] = useState<HTMLElement | null>(null);
   // Phone: the add button's type picker opens just above it
   const [typePickerAt,   setTypePickerAt]   = useState<{ top: number; left: number } | null>(null);
@@ -178,13 +174,15 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
       .catch(() => {});
     return () => { live = false; };
   }, [tripId]);
-  const [accoms,         setAccoms]         = useState<Accom[]>([]);
+  const [accoms,         setAccoms]         = useState<Stay[]>([]);
+  const [venues,         setVenues]         = useState<NamedPlace[]>([]);
   const [drawer, setDrawer] = useState<{
     open:       boolean;
     time:       string;
     type:       string;
     editStop?:  Stop;
     lateNight?: boolean;   // early hours: after midnight (true) or the date's own morning
+    prefill?:   Partial<Stop> | null;   // a place picked on the map, a way to a transfer
   }>({ open: false, time: '09:00', type: 'activity' });
   const [suggestionSlot, setSuggestionSlot] = useState<{ start: number; mins: number } | null>(null);
   const [exportOpen,     setExportOpen]     = useState(false);
@@ -218,6 +216,14 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
   // early-hours stops (stored on the next date) at the end of its own page.
   const pages       = useMemo(() => dayPages(days), [days]);
   const activeStops = pages[activeDayIdx]?.stops ?? [];
+
+  // Each day as a route — the legs between its places, looked up and kept (dayPlan)
+  const { plans, routes } = useTripRoutes(tripId, days, accoms, venues);
+  const activePlan  = plans[activeDayIdx] ?? null;
+  // Journeys you've said are sorted, so the map stops asking how you're getting there
+  const [dismissedGaps, setDismissedGaps] = useState<Set<string>>(new Set());
+  // What the Map view should bring into view: a leg or a stop
+  const [mapFocus, setMapFocus] = useState<{ leg?: string; stop?: string; seq: number } | null>(null);
   // The calendar day after the viewed one, where its after-midnight stops are stored
   const nextIdx = days[activeDayIdx] && days[activeDayIdx + 1] &&
     daysBetween(days[activeDayIdx].date, days[activeDayIdx + 1].date) === 1 ? activeDayIdx + 1 : -1;
@@ -350,6 +356,19 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
     }, 250);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nowParam, days.length, active]);
+
+  // ── The trip map's "Plan it" (?leg=): this day's map with that leg in view ────
+  useEffect(() => {
+    const leg = searchParams.get('leg');
+    if (!active || !leg) return;
+    const params = new URLSearchParams(window.location.search);
+    params.delete('leg');
+    window.history.replaceState(null, '', `${pathname}?${params.toString()}`);
+    setMapFocus({ leg, seq: Date.now() });
+  }, [searchParams, pathname, active]);
+
+  // The map shows every stop of the day — a type filter would hide legs it draws
+  useEffect(() => { if (viewMode === 'map') setTypeFilter([]); }, [viewMode]);
 
   // ── Reminder times for the bells — refreshed shortly after any change ────────
   const loadReminders = useCallback(() => {
@@ -580,6 +599,7 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
         const res  = await fetch(`/api/trips/${tripId}/itinerary`);
         const data = await res.json();
         setDays(data.days ?? []);
+        setDismissedGaps(new Set(data.dismissedGaps ?? []));
         const cached = await getTripCache(tripId);
         await saveTripCache(tripId, { ...(cached ?? {}), itinerary: data.days ?? [] });
       } catch {
@@ -606,16 +626,9 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
       .then(r => r.json())
       .then(data => {
         const logistics = data.logistics ?? data;
-        const ymd = (v: any) => (v ? String(v).split('T')[0] : '');
         setTransport(logistics.transportation ?? []);
-        setAccoms(
-          (logistics.accommodation ?? [])
-            .filter((a: any) => a.name && a.checkIn)
-            .map((a: any) => ({
-              name: a.name, address: a.address, coordinates: a.coordinates ?? null,
-              checkIn: ymd(a.checkIn), checkOut: ymd(a.checkOut || a.checkIn),
-            })),
-        );
+        setAccoms(staysFrom(logistics.accommodation));
+        setVenues(namedFrom(logistics.venues));
         const locs: KnownLocation[] = [];
         (logistics.accommodation ?? []).forEach((a: any) => {
           if (a.name) locs.push({ label: a.name, address: a.address, coordinates: a.coordinates, type: 'hotel' });
@@ -637,8 +650,8 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
   }, [tripId]);
 
   // ── FAB trigger ──────────────────────────────────────────────────────────────
-  const openDrawer = (time: string, type = 'activity', editStop?: Stop, lateNight?: boolean) =>
-    setDrawer({ open: true, time, type, editStop, lateNight: lateNight ?? (editStop?.afterMidnight || undefined) });
+  const openDrawer = (time: string, type = 'activity', editStop?: Stop, lateNight?: boolean, prefill?: Partial<Stop>) =>
+    setDrawer({ open: true, time, type, editStop, lateNight: lateNight ?? (editStop?.afterMidnight || undefined), prefill: prefill ?? null });
 
   const handleStopClick = (stop: Stop) => {
     // View mode: read first — the detail sheet, with what else is on at the same time
@@ -891,6 +904,61 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
   const setStopType = (stop: Stop, type: string) =>
     patchStop(stop, { type }, { type }, 'the new type');
 
+  // ── Getting about: the day's map, and the journeys it asks about ──────────────
+  const showOnMap = (f: { leg?: string; stop?: string }) => {
+    setViewMode('map');
+    setEditMode(false);
+    setMapFocus({ ...f, seq: Date.now() });
+  };
+
+  // "I've sorted this" on a journey with no way planned — or asking about it again
+  const setGapSorted = async (leg: Leg<Stop>, sorted: boolean) => {
+    if (!activePlan) return;
+    const gap  = gapKey(activePlan.date, leg);
+    const prev = dismissedGaps;
+    const next = new Set(prev);
+    if (sorted) next.add(gap); else next.delete(gap);
+    setDismissedGaps(next);
+    try {
+      setDismissedGaps(await saveGapSorted(tripId, gap, sorted, next));
+    } catch (err) {
+      setDismissedGaps(prev);
+      reportSaveFailure(sorted ? '“I’ve sorted this”' : 'asking about this journey again', err);
+    }
+  };
+
+  // A way to a transfer: a transport stop from here to there, timed to leave
+  // when the stop before ends (or to arrive for the one after)
+  const addTransportFor = (leg: Leg<Stop>) => {
+    const drive = routes?.[leg.pair]?.drive?.minutes ?? null;
+    const mins  = Math.max(15, Math.ceil((drive ?? 30) / 5) * 5);
+    const start = leg.leaveAfter ?? (leg.arriveBy !== null ? Math.max(0, leg.arriveBy - mins) : 9 * 60);
+    openDrawer(formatTime(start), 'transport', undefined, lateAt(start), {
+      name:        `To ${leg.to.name}`,
+      address:     leg.from.address || leg.from.name,
+      coordinates: leg.from.coordinates,
+      to:          { name: leg.to.name, address: leg.to.address || leg.to.name, coordinates: leg.to.coordinates },
+      duration:    mins,
+    });
+  };
+
+  // A place picked on the map, in the free time it fits best
+  const addPlace = (place: NewPlace, start: number | null) => {
+    const at = start === null ? null : Math.ceil(start / 15) * 15;
+    openDrawer(at === null ? '09:00' : formatTime(at), place.type, undefined, at === null ? undefined : lateAt(at), {
+      name:        place.name,
+      address:     place.address || place.name,
+      coordinates: place.coordinates,
+      notes:       place.notes,
+    });
+  };
+
+  // Navigate found the pin of a stop that had none — keep it, so the next tap (or offline) has it
+  const keepPin = (stop: Stop, pin: { lat: number; lng: number }) => {
+    const coordinates = { lat: pin.lat, lng: pin.lng };
+    return patchStop(stop, { coordinates }, { coordinates }, 'the map pin');
+  };
+
   // A copy of the stop on each day `offsets` away. Resolves false when it couldn't be
   // saved or queued, so the day picker stays open.
   const repeatOn = async (stop: Stop, offsets: number[]): Promise<boolean> => {
@@ -1037,25 +1105,6 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
     }
   };
 
-  const calculateTravel = async () => {
-    setCalculating(true);
-    try {
-      const res = await sendOrQueue(
-        { type: 'CALCULATE_TRAVEL', tripId },
-        () => fetch(`/api/trips/${tripId}/itinerary/calculate-travel`, { method: 'POST' }),
-      );
-      if (!res) return;
-      const calculated = await daysFrom(res);
-      setDays(calculated);
-      await saveTripCache(tripId, { ...(await getTripCache(tripId)), itinerary: calculated });
-    } catch (err) {
-      // Nothing was changed on screen or offline — the current plan stays as it is.
-      reportSaveFailure('the travel times', err);
-    } finally {
-      setCalculating(false);
-    }
-  };
-
   // ── Loading / empty ───────────────────────────────────────────────────────────
   if (loading) return (
     <Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}>
@@ -1183,7 +1232,7 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
   const openWeatherDay = (w: HourWeather) => {
     const n = (weather?.days ?? []).findIndex(d => d.date === w.date);
     const params = new URLSearchParams(window.location.search);
-    for (const k of ['day', 'section', 'view', 'stop', 'file', 'todo', 'expense', 'proof', 'sheet', 'i']) params.delete(k);
+    for (const k of ['day', 'section', 'view', 'stop', 'leg', 'file', 'todo', 'expense', 'proof', 'sheet', 'i']) params.delete(k);
     params.set('tab', 'weather');
     if (n >= 0) params.set('day', String(n + 1));
     window.history.pushState(null, '', `?${params.toString()}`);
@@ -1228,6 +1277,58 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
     setTimeout(() => setHighlightStop(cur => (cur === first ? null : cur)), 4000);
   };
 
+  // ── Getting from stop to stop (lib/itinerary/dayPlan): the legs on from a stop,
+  // shown after it in the timeline and the list; tapping one opens the map ──────
+  const legInfo = (leg: Leg<Stop>) => {
+    const travel = legTravel(leg, routes);
+    const sorted = !!activePlan && dismissedGaps.has(gapKey(activePlan.date, leg));
+    return { leg, travel, asking: travel.needsPlan && !sorted, sorted: travel.needsPlan && sorted };
+  };
+  // Walks and drives only — a flight or a ride is a stop of its own already
+  const legsFrom = (stops: Stop[]) => {
+    const keys = new Set(stops.map(stopKey));
+    return (activePlan?.legs ?? []).filter(l => l.kind === 'move' && l.fromStop && keys.has(stopKey(l.fromStop)));
+  };
+  const legRow = (leg: Leg<Stop>) => {
+    const { travel, asking, sorted } = legInfo(leg);
+    return (
+      <LegRow
+        key={leg.id} leg={leg} travel={travel} gap={asking ? 'open' : sorted ? 'sorted' : null}
+        onSelect={() => showOnMap({ leg: leg.id })}
+        onAddTransport={() => addTransportFor(leg)}
+        onSorted={v => setGapSorted(leg, v)}
+      />
+    );
+  };
+  const isNowPage = nowPageIdx(here()) === activeDayIdx;
+
+  // This date's early hours are on the night before's page
+  const lastNightRow = movedBack.length > 0 && prevDay ? (
+    <Box
+      role="button"
+      onClick={showLastNight}
+      sx={{
+        display: 'flex', alignItems: 'center', gap: 1,
+        minHeight: 44, px: 1.5,
+        borderBottom: `1px solid ${D.rule}`,
+        backgroundColor: alpha(D.navy, 0.04),
+        cursor: 'pointer',
+        '&:active': { backgroundColor: alpha(D.navy, 0.08) },
+        '@media (hover: hover)': { '&:hover': { backgroundColor: alpha(D.navy, 0.06) } },
+      }}
+    >
+      <NightsStayIcon sx={{ fontSize: 18, color: D.navy, flexShrink: 0 }} />
+      <Typography sx={{
+        flex: 1, minWidth: 0,
+        fontFamily: D.body, fontSize: '0.8rem', fontWeight: 700, color: D.navy,
+        whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+      }}>
+        {movedBack.length} {movedBack.length === 1 ? 'stop' : 'stops'} after midnight · on {dayLabel(prevDay.date, { weekday: 'long' })} night
+      </Typography>
+      <ChevronRightIcon sx={{ fontSize: 20, color: D.muted, flexShrink: 0 }} />
+    </Box>
+  ) : null;
+
   // Day header numbers — the desktop chips and the phone's stats line
   const plannedCount   = committed.filter(s => s.source !== 'logistics').length;
   const logisticsCount = activeStops.filter(s => s.source === 'logistics').length;
@@ -1238,7 +1339,7 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
   } as const;
 
   // Type filter — on desktop in the view row, on a phone its own line
-  const typeFilterChips = typesToday.length > 1 && viewMode !== 'recap' ? (
+  const typeFilterChips = typesToday.length > 1 && viewMode !== 'recap' && viewMode !== 'map' ? (
     <>
       <Chip
         label="All"
@@ -1290,15 +1391,6 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
           </Typography>
 
           <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-            <Button
-              variant="outlined" size="small"
-              onClick={calculateTravel}
-              disabled={calculating}
-              startIcon={calculating ? <CircularProgress size={14} /> : <DirectionsWalkIcon />}
-              sx={{ fontFamily: D.body, fontWeight: 700 }}
-            >
-              {calculating ? 'Calculating…' : 'Calculate A-to-B'}
-            </Button>
             <Button
               variant="outlined" size="small"
               onClick={() => setExportOpen(true)}
@@ -1603,11 +1695,11 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
 
           <IconButton
             onClick={e => setMoreAnchor(e.currentTarget)}
-            aria-label="More: travel times, export, not going"
+            aria-label="More: export, not going"
             aria-haspopup="menu"
             sx={{ width: 44, height: 44, flexShrink: 0, border: `1.5px solid ${D.rule}`, borderRadius: 1.5, color: D.navy }}
           >
-            {calculating ? <CircularProgress size={18} /> : <MoreVertIcon fontSize="small" />}
+            <MoreVertIcon fontSize="small" />
           </IconButton>
 
           <Menu
@@ -1641,14 +1733,6 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
             anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
             transformOrigin={{ vertical: 'top', horizontal: 'right' }}
           >
-            <MenuItem
-              disabled={calculating}
-              onClick={() => { setMoreAnchor(null); calculateTravel(); }}
-              sx={{ fontFamily: D.body, fontWeight: 600, fontSize: '0.9rem', color: D.navy }}
-            >
-              <ListItemIcon><RouteIcon fontSize="small" /></ListItemIcon>
-              {calculating ? 'Calculating…' : 'Calculate A-to-B times'}
-            </MenuItem>
             <MenuItem
               onClick={() => { setMoreAnchor(null); setExportOpen(true); }}
               sx={{ fontFamily: D.body, fontWeight: 600, fontSize: '0.9rem', color: D.navy }}
@@ -1797,8 +1881,31 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
         />
       )}
 
+      {/* ── Map — the day as a route ── */}
+      {activeDay && viewMode === 'map' && activePlan && (
+        <>
+          {lastNightRow && (
+            <Box sx={{ mb: 1.5, border: `1px solid ${D.rule}`, borderRadius: '2px', backgroundColor: '#fff' }}>{lastNightRow}</Box>
+          )}
+          <DayMap
+            tripId={tripId}
+            plan={activePlan}
+            routes={routes}
+            dismissed={dismissedGaps}
+            isMobile={isMobile}
+            nowMins={isNowPage ? nowMins : null}
+            focus={mapFocus}
+            slots={freeSlots(committed)}
+            onOpenStop={s => setSheetKey(stopKey(s))}
+            onAddTransport={addTransportFor}
+            onSorted={setGapSorted}
+            onAddPlace={addPlace}
+          />
+        </>
+      )}
+
       {/* ── Timeline / list ── */}
-      {activeDay && viewMode !== 'recap' && (
+      {activeDay && viewMode !== 'recap' && viewMode !== 'map' && (
         <Paper sx={{
           backgroundColor: '#ffffff',
           overflow: 'hidden',
@@ -1806,32 +1913,7 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
           // Edit mode is unmistakable without taking any space
           border: editMode && viewMode === 'timeline' ? `2px solid ${D.terra}` : `1px solid ${D.rule}`,
         }}>
-          {/* ── This date's early hours are on the night before's page ── */}
-          {movedBack.length > 0 && prevDay && (
-            <Box
-              role="button"
-              onClick={showLastNight}
-              sx={{
-                display: 'flex', alignItems: 'center', gap: 1,
-                minHeight: 44, px: 1.5,
-                borderBottom: `1px solid ${D.rule}`,
-                backgroundColor: alpha(D.navy, 0.04),
-                cursor: 'pointer',
-                '&:active': { backgroundColor: alpha(D.navy, 0.08) },
-                '@media (hover: hover)': { '&:hover': { backgroundColor: alpha(D.navy, 0.06) } },
-              }}
-            >
-              <NightsStayIcon sx={{ fontSize: 18, color: D.navy, flexShrink: 0 }} />
-              <Typography sx={{
-                flex: 1, minWidth: 0,
-                fontFamily: D.body, fontSize: '0.8rem', fontWeight: 700, color: D.navy,
-                whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-              }}>
-                {movedBack.length} {movedBack.length === 1 ? 'stop' : 'stops'} after midnight · on {dayLabel(prevDay.date, { weekday: 'long' })} night
-              </Typography>
-              <ChevronRightIcon sx={{ fontSize: 20, color: D.muted, flexShrink: 0 }} />
-            </Box>
-          )}
+          {lastNightRow}
 
           {/* ── All-day strip — venues/places known only by date, no time ── */}
           {allDayStops.length > 0 && (
@@ -1934,6 +2016,8 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
           {viewMode === 'list' ? (
             <ItineraryList
               stops={timedStops}
+              before={(activePlan?.legs ?? []).filter(l => l.kind === 'move' && l.anchor === 'start').map(legRow)}
+              after={group => legsFrom(group).map(legRow)}
               onOpen={s => setSheetKey(stopKey(s))}
               onSkip={skipStop}
               onHighlight={setHighlight}
@@ -2058,7 +2142,11 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
                         bounds={dragBounds(stop)}
                         onHighlight={h => setHighlight(stop, h)}
                       />
-                      <TravelConnector stop={stop} pxPerMin={pxPerMin} startHour={effectiveStartHour} />
+                      <TravelConnector
+                        stop={stop} legs={legsFrom([stop]).map(legInfo)}
+                        pxPerMin={pxPerMin} startHour={effectiveStartHour}
+                        onSelect={leg => showOnMap({ leg: leg.id })}
+                      />
                     </Box>
                   ));
                 })()}
@@ -2113,6 +2201,8 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
         flight={sheetStop ? flightFor(sheetStop) : null}
         navFrom={sheetStop ? navFromFor(sheetStop) : null}
         hotels={sheetStop ? hotelsFor(sheetStop) : []}
+        onPinned={keepPin}
+        onShowOnMap={s => { setSheetKey(null); showOnMap({ stop: s._id }); }}
         onClose={() => setSheetKey(null)}
         onSelect={s => setSheetKey(stopKey(s))}
         onSkip={skipStop}
@@ -2254,7 +2344,7 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
         tripId={tripId}
         areas={areas}
         open={drawer.open}
-        onClose={() => setDrawer(d => ({ ...d, open: false, editStop: undefined }))}
+        onClose={() => setDrawer(d => ({ ...d, open: false, editStop: undefined, prefill: null }))}
         onAdd={addStop}
         onUpdate={updateStop}
         onDelete={
@@ -2266,6 +2356,7 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
         defaultType={drawer.type}
         inheritedLeadFor={inheritedFor}
         editStop={drawer.editStop}
+        prefill={drawer.prefill}
         isMobile={isMobile}
         knownLocations={knownLocations}
         nightDates={nightDates}

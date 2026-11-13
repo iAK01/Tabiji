@@ -63,6 +63,8 @@ export interface ExtractedStop extends Located {
   scheduledStart: string;
   duration: number;
   notes?: string;
+  /** Where a transport stop goes */
+  to?: { name?: string; address?: string; coordinates?: { lat: number; lng: number } } | null;
 }
 
 export interface ExtractedTransport extends Flagged {
@@ -309,6 +311,7 @@ export default function SmartExtractModal({
               address:        s.address ?? '',
               coordinates:    s.coordinates ?? null,
               notes:          s.notes   ?? '',
+              ...(s.to && { to: s.to }),
               source:         'imported',
             },
           }),

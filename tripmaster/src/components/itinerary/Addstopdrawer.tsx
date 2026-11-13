@@ -38,6 +38,8 @@ interface Props {
   /** The reminder a stop of this type gets without its own (trip setting, then yours, then by type). */
   inheritedLeadFor?: (type: string) => number | null;
   editStop?:      Stop;
+  /** A new stop's fields filled in already — a place picked on the map, a way to a transfer */
+  prefill?:       Partial<Stop> | null;
   isMobile:       boolean;
   knownLocations: KnownLocation[];
   // An early-hours time on a day's page means either that date's morning or,
@@ -77,7 +79,7 @@ function referencePlaceholder(name: string): string {
 
 export function AddStopDrawer({
   tripId, areas, open, onClose, onAdd, onUpdate, onDelete,
-  defaultTime, defaultType, inheritedLeadFor, editStop,
+  defaultTime, defaultType, inheritedLeadFor, editStop, prefill = null,
   isMobile, knownLocations, nightDates = null, nightDefault,
 }: Props) {
   const isEditing   = !!editStop;
@@ -96,6 +98,10 @@ export function AddStopDrawer({
     locationName:          '',
     // null = not pinned; sent as null so an edit clears an old pin (the server then tries to pin)
     coordinates:           null as { lat: number; lng: number } | null,
+    // Where a transport stop goes
+    toName:                '',
+    toAddress:             '',
+    toCoordinates:         null as { lat: number; lng: number } | null,
     // undefined = follow the trip / your default; only sent once picked
     notificationLeadMins:  undefined as number | null | undefined,
     lateNight:             undefined as boolean | undefined,   // picked here; else nightDefault
@@ -121,6 +127,9 @@ export function AddStopDrawer({
         address:              editStop.address ?? '',
         locationName:         resolveLocationName(editStop, knownLocations),
         coordinates:          editStop.coordinates ?? null,
+        toName:               editStop.to?.name ?? '',
+        toAddress:            editStop.to?.address ?? '',
+        toCoordinates:        editStop.to?.coordinates ?? null,
         // Its own setting if it has one (Off stays off), else it follows the default
         notificationLeadMins: editStop.notificationLeadMins,
         lateNight:            undefined,
@@ -128,21 +137,24 @@ export function AddStopDrawer({
       setShowExtras(!!(editStop.notes || editStop.address));
     } else {
       setForm({
-        name:                 '',
+        name:                 prefill?.name ?? '',
         type:                 defaultType,
         scheduledStart:       defaultTime,
-        duration:             DEFAULT_DURATIONS[defaultType] ?? 60,
+        duration:             prefill?.duration ?? DEFAULT_DURATIONS[defaultType] ?? 60,
         reference:            '',
-        notes:                '',
-        address:              '',
+        notes:                prefill?.notes ?? '',
+        address:              prefill?.address ?? '',
         locationName:         '',
-        coordinates:          null,
+        coordinates:          prefill?.coordinates ?? null,
+        toName:               prefill?.to?.name ?? '',
+        toAddress:            prefill?.to?.address ?? '',
+        toCoordinates:        prefill?.to?.coordinates ?? null,
         notificationLeadMins: undefined,
         lateNight:            undefined,
       });
-      setShowExtras(false);
+      setShowExtras(!!(prefill?.address || prefill?.coordinates || prefill?.notes));
     }
-  }, [defaultTime, defaultType, editStop, open, knownLocations]);
+  }, [defaultTime, defaultType, editStop, prefill, open, knownLocations]);
 
   const handleAddressChange = (result: ResolvedAddress) => {
     setForm(f => ({
@@ -175,7 +187,16 @@ export function AddStopDrawer({
     if (saving) return;
     setSaving(true);
     try {
-      const stop = { ...form, lateNight: earlyHours ? lateNight : null };
+      const { toName, toAddress, toCoordinates, ...fields } = form;
+      const hasTo = goesSomewhere && !!(toAddress.trim() || toCoordinates);
+      const stop: Partial<Stop> = {
+        ...fields,
+        lateNight: earlyHours ? lateNight : null,
+        // Only a transport stop goes somewhere; a stop changed to another type loses it
+        ...(hasTo
+          ? { to: { name: toName.trim() || undefined, address: toAddress.trim() || undefined, coordinates: toCoordinates } }
+          : (goesSomewhere || editStop?.to) ? { to: null } : {}),
+      };
       const saved = isEditing
         ? await onUpdate({ ...editStop, ...stop })
         : await onAdd(stop);
@@ -196,6 +217,7 @@ export function AddStopDrawer({
   };
 
   const cfg = STOP_CONFIG[form.type] ?? STOP_CONFIG.other;
+  const goesSomewhere = form.type === 'transport' || form.type === 'transfer';
 
   // A big extracted programme can mean a dozen rooms/stages — show a handful,
   // always including the selected one.
@@ -341,6 +363,20 @@ export function AddStopDrawer({
               },
             }}
           />
+        )}
+
+        {/* ── Where a transport stop goes — its pin (Location) is where it leaves from ── */}
+        {goesSomewhere && (
+          <Box sx={{ mb: 2.5 }}>
+            <AddressSearch
+              label="To (optional)"
+              value={form.toAddress}
+              coordinates={form.toCoordinates}
+              onChange={r => setForm(f => ({ ...f, toAddress: r.address, toCoordinates: r.coordinates, toName: r.name ?? '' }))}
+              tripId={tripId}
+              areas={areas}
+            />
+          </Box>
         )}
 
         {/* ── Time + Duration row ── */}
@@ -573,7 +609,7 @@ export function AddStopDrawer({
             )}
 
             <AddressSearch
-              label="Location (optional)"
+              label={goesSomewhere ? 'From (optional)' : 'Location (optional)'}
               value={form.address}
               coordinates={form.coordinates}
               onChange={handleAddressChange}

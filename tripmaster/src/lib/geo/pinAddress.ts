@@ -22,6 +22,7 @@ export interface Pin {
 
 const PRECISE = new Set(['ROOFTOP', 'RANGE_INTERPOLATED']);
 const A_PLACE = new Set(['premise', 'subpremise', 'establishment', 'point_of_interest', 'street_address']);
+const PLUS_CODE = /(^|[\s,])[23456789CFGHJMPQRVWX]{4,8}\+[23456789CFGHJMPQRVWX]{2,3}([\s,]|$)/i;
 const TOWN    = new Set(['locality', 'postal_town', 'sublocality', 'neighborhood', 'administrative_area_level_2', 'administrative_area_level_3']);
 
 // Every number in the text — a house number, or a postcode that can't match one
@@ -52,6 +53,7 @@ export async function pinAddress(address: string, areas: TripArea[]): Promise<Pi
   const typed     = new Set(words(text));
   const numbers   = numbersIn(text);
   const namesCity = areas.some(a => a.city && namesPlace(typed, a.city));
+  const hasCity   = areas.some(a => a.city);
 
   for (const r of data.results ?? []) {
     const { lat, lng } = r.geometry?.location ?? {};
@@ -59,6 +61,11 @@ export async function pinAddress(address: string, areas: TripArea[]): Promise<Pi
 
     const precision = r.geometry.location_type;
     const types: string[] = r.types ?? [];
+    // A plus code ("25C9+65F, Rabat") is an exact spot of a few metres
+    if (types.includes('plus_code')) {
+      if (PLUS_CODE.test(text) && inTripArea(areas, lat, lng)) return { lat, lng, label: r.formatted_address };
+      continue;
+    }
     if (!PRECISE.has(precision) && !(precision === 'GEOMETRIC_CENTER' && types.some(t => A_PLACE.has(t)))) continue;
 
     const parts: { long_name: string; short_name: string; types: string[] }[] = r.address_components ?? [];
@@ -67,8 +74,13 @@ export async function pinAddress(address: string, areas: TripArea[]): Promise<Pi
 
     const towns  = parts.filter(p => p.types.some(t => TOWN.has(t))).flatMap(p => [p.long_name, p.short_name]);
     const inTown = towns.some(t => namesPlace(typed, t));
-    // Naming one of the trip's towns but landing in another is a wrong match, however near
-    if (!inTown && (namesCity || !inTripArea(areas, lat, lng))) continue;
+    // Naming one of the trip's towns but landing in another is a wrong match, however near.
+    // Naming no town, it must land in one of the trip's towns: every town has its
+    // Avenue Mohammed V, and the next town's is still inside the trip's area.
+    const inTripTown = hasCity
+      ? areas.some(a => !!a.city && towns.some(t => namesPlace(new Set(words(a.city ?? '')), t)))
+      : inTripArea(areas, lat, lng);
+    if (!inTown && (namesCity || !inTripTown)) continue;
 
     return { lat, lng, label: r.formatted_address };
   }

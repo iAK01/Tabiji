@@ -108,9 +108,14 @@ function inArea(area: SearchArea, lat: unknown, lng: unknown): boolean {
 }
 
 // A stated address → the numbered point on that same street, never the street's centre.
+// Every town has its Avenue Mohammed V, so the point must be in the town the address
+// names — or, naming none, the trip's own town. "286 Avenue Mohammed V" (a Rabat hotel)
+// once landed on the Salé street of that name, 6 km away and still inside the area.
 async function byAddress(address: string, area: SearchArea, token: string): Promise<GeoHit | null> {
   const street = address.split(',').find(s => /\d/.test(s) && /\p{L}{3,}/u.test(s));
   if (!street) return null;
+  const typed = new Set(words(address));
+  const home  = localityWords(area.locality);
   const q   = address.includes(',') ? address : `${address}, ${area.locality}`;
   const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(q)}.json` +
               `?types=address&limit=5&proximity=${area.center.lng},${area.center.lat}&bbox=${bbox(area)}&access_token=${token}`;
@@ -121,6 +126,8 @@ async function byAddress(address: string, area: SearchArea, token: string): Prom
     const [lng, lat] = f.center ?? [];
     if (!f.address || !inArea(area, lat, lng)) continue;          // no house number = street centroid
     if (!sameName(f.text ?? '', street, NONE, NONE)) continue;     // a different street
+    const town = words((f.context ?? []).find((c: any) => String(c?.id ?? '').startsWith('place.'))?.text ?? '');
+    if (!town.length || !(town.every(w => typed.has(w)) || town.every(w => home.has(w)))) continue;   // another town's street
     return { address: f.place_name, lat, lng };
   }
   return null;
@@ -164,6 +171,17 @@ export async function locatePlace(p: PlaceLookup, area: SearchArea): Promise<Geo
   try {
     return (p.address?.trim() ? await byAddress(p.address.trim(), area, token) : null)
         ?? await byName(p, area, token);
+  } catch {
+    return null;
+  }
+}
+
+/** A stated street address only — the numbered building, in the town it names (or the trip's). */
+export async function locateAddress(address: string, area: SearchArea): Promise<GeoHit | null> {
+  const token = process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN;
+  if (!token || !address.trim()) return null;
+  try {
+    return await byAddress(address.trim(), area, token);
   } catch {
     return null;
   }

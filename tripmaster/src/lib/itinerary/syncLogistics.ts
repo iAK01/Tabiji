@@ -539,6 +539,10 @@ export async function syncLogisticsToItinerary(tripId: string, logistics?: any) 
         if (!ov) continue;
         // "Not going" applies to facts too; everything else only to derived stops
         if (ov.skipped !== undefined) stop.skipped = ov.skipped;
+        // A pin Navigate found while the booking had none — the booking's own pin wins once it has one
+        if (ov.coordinates && !(Number.isFinite(stop.coordinates?.lat) && Number.isFinite(stop.coordinates?.lng))) {
+          stop.coordinates = ov.coordinates;
+        }
         if (stop.locked) { stop.userOverride = ov; continue; }
         if (ov.scheduledStart) {
           stop.scheduledStart = ov.scheduledStart;

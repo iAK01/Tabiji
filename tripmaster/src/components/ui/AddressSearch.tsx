@@ -195,7 +195,7 @@ export default function AddressSearch({
   const helper =
     pin.kind === 'looking'  ? 'Finding it on the map…' :
     pin.kind === 'pinned'   ? (pin.label ? `Pinned to ${pin.label}` : 'Pinned on the map') :
-    pin.kind === 'unpinned' ? 'Not pinned — Navigate will search this address' :
+    pin.kind === 'unpinned' ? 'Not pinned yet — Navigate will look the place up by name' :
     undefined;
 
   return (

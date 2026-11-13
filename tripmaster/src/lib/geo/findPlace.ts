@@ -19,7 +19,7 @@ export interface FoundPlace {
   branches: number;   // how many branches matched; >1 means the nearest was taken
 }
 
-interface Search {
+export interface Search {
   name:    string;
   query:   string;                          // "F.café, Rabat, Morocco"
   centre:  { lat: number; lng: number };    // the town or trip area
@@ -30,7 +30,8 @@ interface Search {
 
 const key = () => process.env.GOOGLE_ROUTES_API_KEY;
 
-async function viaPlaces(s: Search): Promise<FoundPlace | null | 'unavailable'> {
+/** 'unavailable' = Places (New) isn't switched on for the key. */
+export async function viaPlaces(s: Search): Promise<FoundPlace | null | 'unavailable'> {
   const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
     method: 'POST',
     signal: AbortSignal.timeout(10_000),

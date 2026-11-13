@@ -3,6 +3,7 @@ import { ownedTrip } from '@/lib/auth/ownedTrip';
 import TripItinerary from '@/lib/mongodb/models/TripItinerary';
 import { insertByTime } from '@/lib/itinerary/nights';
 import { pinIfFound } from '@/lib/geo/pinAddress';
+import { pinStopLater, cleanDestination } from '@/lib/itinerary/stops';
 import { tripAreas } from '@/lib/geo/tripAreas';
 import { isHighlight } from '@/lib/itinerary/highlight';
 
@@ -37,10 +38,16 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   if (error) return error;
 
   const body = await req.json();
-  const { scheduledStart, duration, name, type, notes, address, locationName, coordinates, notificationLeadMins, reference, skipped, lateNight, myNotes, highlight } = body;
-  // A skip/unskip, a reminder change, your note, a colour or a new type alone needs no time — all-day items don't have one
+  const { scheduledStart, duration, name, type, notes, address, locationName, coordinates, notificationLeadMins, reference, skipped, lateNight, myNotes, highlight, to } = body;
+  // A map pin found by Navigate for a stop that had none
+  const pinOnly = !!coordinates && typeof coordinates === 'object';
+  if (pinOnly && !(Number.isFinite(coordinates.lat) && Number.isFinite(coordinates.lng)
+    && Math.abs(coordinates.lat) <= 90 && Math.abs(coordinates.lng) <= 180)) {
+    return NextResponse.json({ error: 'Invalid coordinates' }, { status: 400 });
+  }
+  // A skip/unskip, a reminder change, your note, a colour, a new type or a pin alone needs no time — all-day items don't have one
   if (!scheduledStart && skipped === undefined && notificationLeadMins === undefined && myNotes === undefined
-    && highlight === undefined && type === undefined) {
+    && highlight === undefined && type === undefined && !pinOnly) {
     return NextResponse.json({ error: 'scheduledStart required' }, { status: 400 });
   }
   if (myNotes !== undefined && (typeof myNotes !== 'string' || myNotes.length > MAX_NOTE)) {
@@ -62,7 +69,9 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   // queued offline — gets its pin here.
   const pin = coordinates === null && typeof address === 'string' && address.trim()
     ? await pinIfFound(address, tripAreas(trip))
-    : coordinates;
+    : pinOnly ? { lat: coordinates.lat, lng: coordinates.lng } : coordinates;
+  // Where a transport stop goes: null clears it
+  const destination = to === undefined ? undefined : await cleanDestination(to, trip);
 
   const itinerary = await TripItinerary.findOne({ tripId: id });
   if (!itinerary) return NextResponse.json({ error: 'Not found' }, { status: 404 });
@@ -94,6 +103,8 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       else if (pin !== undefined) stop.coordinates = pin;
       if (notificationLeadMins !== undefined) stop.notificationLeadMins = notificationLeadMins;
       if (reference            !== undefined) stop.reference            = reference;
+      if (destination === null) delete stop.to;
+      else if (destination !== undefined) stop.to = destination;
 
       // A logistics-mirrored stop is regenerated on every logistics sync. Record
       // the traveller's change as an override so syncLogistics can re-apply it
@@ -107,7 +118,13 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
           ...(duration !== undefined ? { duration } : {}),
           ...(name     !== undefined ? { name }     : {}),
           ...(notes    !== undefined ? { notes }    : {}),
+          // Kept until the booking itself has a pin
+          ...(pinOnly ? { coordinates: pin } : {}),
         };
+      }
+      // An edited address that didn't pin: try the place's name, after replying
+      if (coordinates === null && !stop.coordinates && typeof stop.address === 'string' && stop.address.trim()) {
+        pinStopLater(trip, stopId, { name: stop.name, address: stop.address });
       }
 
       // A new time on another date (an after-midnight stop) lives on that date's day

@@ -28,7 +28,7 @@ function NavigatePicker() {
         <Paper elevation={0} sx={{ borderRadius: 3, border: 1, borderColor: 'divider', overflow: 'hidden' }}>
           {canNavigate(destination) ? (
             <>
-              <NavigateOptions destination={destination} initialMode={mode} onNotice={setNotice} />
+              <NavigateOptions destination={destination} initialMode={mode} tripId={tripId ?? undefined} onNotice={setNotice} />
               {destination.address && destination.address !== destination.name && (
                 <Typography sx={{ px: 2, py: 1.5, fontSize: '0.8rem', color: 'text.secondary', borderTop: 1, borderColor: 'divider' }}>
                   {destination.address}

@@ -107,14 +107,8 @@ export interface Stop {
   // its minutes on that page run past 24:00.
   afterMidnight?: boolean;
   metadata?: Record<string, any>;
-  travelToNext?: {
-    duration:    number;
-    mode:        string;
-    isTight:     boolean;
-    isImpossible: boolean;
-    distance:    number;
-    toName?:     string;
-  };
+  // A transport stop's destination — the map draws the ride from its pin to here
+  to?: { name?: string; address?: string; coordinates?: { lat: number; lng: number } | null } | null;
 }
 
 export interface Day {

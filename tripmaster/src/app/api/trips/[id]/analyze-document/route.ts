@@ -8,7 +8,7 @@ import TripFile              from '@/lib/mongodb/models/TripFile';
 import TripLogistics         from '@/lib/mongodb/models/TripLogistics';
 import TripItinerary         from '@/lib/mongodb/models/TripItinerary';
 import { MAX_TEXT_CHARS, CLAUDE_IMAGE_TYPES, fetchBinary, toClaudeInput, type Resolved } from '@/lib/extract/sources';
-import { locateExtracted } from '@/lib/extract/locate';
+import { locateExtracted, type Locatable } from '@/lib/extract/locate';
 import { resolveCheckIn, checkInHint } from '@/lib/itinerary/checkInTiming';
 import { DOCUMENT_TYPE_VALUES, DOC_TYPE_EXTRACT } from '@/lib/files/documentTypes';
 import { buildExistingIndex, describeExisting, flagDuplicates } from '@/lib/extract/existingMatch';
@@ -62,6 +62,7 @@ Rules:
 - Only include what is actually present in the material. Do not invent times or reference numbers. Omit a field rather than guess.
 - "address": only a real street address if the material states one, else "". Never put just a city.
 - "building": for a room, hall, stage, stand, booth or area INSIDE a larger venue, that venue's name — e.g. "Sala Sinfónica" → "Auditorio Alfredo Kraus", "Hall 9" → "NEC Birmingham". Use the event's main venue for its own rooms/stages/stands when the material or your knowledge of the event places them there. "" for a standalone place, or when you don't know.
+- "to" / "toSearchQuery": only for an itinerary stop of type transport or transfer — where it goes (e.g. a bus "to Gare Rabat-Ville" → "Gare Rabat-Ville") and that place's search query in the same form as "searchQuery". Its own address/searchQuery is where it leaves from. "" when the material doesn't say, and for every other type.
 - "searchQuery": ALWAYS provide one for accommodation, venues and itinerary stops — the real place's name (the building's, when "building" is set) followed by the actual town or city it is in and the country, e.g. "Sartory Hall, Cologne, Germany". Name the town, never just an island or region: "Las Palmas de Gran Canaria", not "Gran Canaria". The destination is ${ctx.city}, ${ctx.country} unless the material places it elsewhere.
 - If the material contains none of a given group, return an empty array for it
 
@@ -90,7 +91,7 @@ Return ONLY valid JSON, no markdown, no commentary:
     { "type": "concert", "name": "...", "address": "...", "building": "... or empty", "searchQuery": "Venue name, Town, Country", "date": "YYYY-MM-DD or null", "time": "HH:MM or null", "notes": "...", "existingId": "v0 or null" }
   ],
   "itineraryStops": [
-    { "name": "...", "type": "meeting", "date": "YYYY-MM-DD", "scheduledStart": "2026-07-22T14:30:00", "duration": 90, "address": "...", "building": "... or empty", "searchQuery": "Place name, Town, Country", "notes": "...", "existingId": "s0 or null" }
+    { "name": "...", "type": "meeting", "date": "YYYY-MM-DD", "scheduledStart": "2026-07-22T14:30:00", "duration": 90, "address": "...", "building": "... or empty", "searchQuery": "Place name, Town, Country", "to": "... or empty", "toSearchQuery": "... or empty", "notes": "...", "existingId": "s0 or null" }
   ],
   "transport": [
     { "type": "flight", "departureLocation": "...", "arrivalLocation": "...", "departureTime": "2026-07-22T09:00:00 or null", "arrivalTime": "2026-07-22T11:30:00 or null", "confirmationNumber": "... or null", "flightNumber": "... or null", "operator": "... or null", "notes": "...", "existingId": "t0 or null" }
@@ -264,11 +265,25 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
     flagDuplicates(extracted, existing);
 
+    // Where a transport stop goes — located like any other place
+    const destinations: Array<{ stop: any; place: Locatable }> = [];
+    for (const s of extracted.itineraryStops) {
+      const to = typeof s?.to === 'string' ? s.to.trim() : '';
+      if (to && (s.type === 'transport' || s.type === 'transfer')) {
+        destinations.push({ stop: s, place: { name: to, searchQuery: typeof s.toSearchQuery === 'string' ? s.toSearchQuery : undefined } });
+      }
+      delete s.to;
+      delete s.toSearchQuery;
+    }
+
     // ── Resolve real addresses + coordinates (see locateExtracted) ───────────
     await locateExtracted(
-      [...extracted.accommodation, ...extracted.venues, ...extracted.itineraryStops],
+      [...extracted.accommodation, ...extracted.venues, ...extracted.itineraryStops, ...destinations.map(d => d.place)],
       trip, logistics,
     );
+    for (const { stop, place } of destinations) {
+      stop.to = { name: place.name, ...(place.address && { address: place.address }), ...(place.coordinates && { coordinates: place.coordinates }) };
+    }
 
     // ── Preview the check-in time against the trip's inbound flights ──────────
     if (extracted.accommodation.length) {

@@ -1,6 +1,7 @@
 import { DAY_START_HOUR, DAY_END_HOUR, SNAP_MINS } from './Itinerary.config';
 import type { Day, Stop } from './Itinerary.config';
 import { clockMinutes, stopDuration, eveningEnd, carriesOn, nightPages, DAY_MINS } from '@/lib/itinerary/nights';
+import { clusterByTime } from '@/lib/itinerary/dayPlan';
 
 export { stopDuration };
 
@@ -168,19 +169,10 @@ export function timeRangeLabel(stop: Stop): string {
 }
 
 // Timed stops grouped into runs that overlap each other (transitively), in time
-// order — "3 things at once" reads as one group in the list view.
+// order — "3 things at once" reads as one group in the list view, and the same
+// groups are the numbered pins on the day's map.
 export function overlapClusters(stops: Stop[]): Stop[][] {
-  const timed = stops
-    .map(s => ({ s, start: stopStartMinutes(s) }))
-    .filter((x): x is { s: Stop; start: number } => x.start !== null)
-    .sort((a, b) => a.start - b.start || stopDuration(b.s) - stopDuration(a.s));
-  const clusters: Stop[][] = [];
-  let end = -Infinity;
-  for (const { s, start } of timed) {
-    if (start >= end || !clusters.length) { clusters.push([s]); end = start + Math.max(stopDuration(s), 1); }
-    else { clusters[clusters.length - 1].push(s); end = Math.max(end, start + Math.max(stopDuration(s), 1)); }
-  }
-  return clusters;
+  return clusterByTime(stops, stopStartMinutes);
 }
 
 // Other timed stops that overlap this one

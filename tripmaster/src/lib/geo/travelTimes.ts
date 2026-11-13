@@ -7,6 +7,7 @@
 // Driving with live traffic bills as Compute Routes Pro (5,000 free a month).
 
 import { haversineKm } from '@/lib/geo/geocode';
+import { computeRoute, routeSeconds } from '@/lib/geo/googleRoutes';
 
 type LatLng = { lat: number; lng: number };
 export type TravelMode = 'walking' | 'driving' | 'transit';
@@ -39,7 +40,6 @@ export interface TravelTimes {
 /** Further apart than this, none of the three answers is useful, so Google isn't asked. */
 export const MAX_TRAVEL_KM = 150;
 
-const TIMEOUT_MS = 6_000;
 const CACHE_MS: Record<TravelMode, number> = {
   walking: 24 * 60 * 60_000,   // streets don't change
   driving: 15 * 60_000,        // traffic does
@@ -51,14 +51,14 @@ interface Answer { minutes: number | null; plan?: TransitLeg[] | null }
 const NO_ANSWER: Answer = { minutes: null };
 const cache = new Map<string, { answer: Answer; at: number }>();
 
-const GOOGLE_MODE: Record<TravelMode, string> = { walking: 'WALK', driving: 'DRIVE', transit: 'TRANSIT' };
+const GOOGLE_MODE = { walking: 'WALK', driving: 'DRIVE', transit: 'TRANSIT' } as const;
 const FIELDS: Record<TravelMode, string> = {
   walking: 'routes.duration',
   driving: 'routes.duration',
   transit: 'routes.duration,routes.legs.steps.travelMode,routes.legs.steps.staticDuration,routes.legs.steps.transitDetails',
 };
 
-const seconds = (d: unknown) => parseFloat(typeof d === 'string' ? d : '');   // "1234s"
+const seconds = routeSeconds;
 
 // Google's steps → walk / ride / walk. Back-to-back walking steps (each turn is a
 // step) become one walk.
@@ -99,22 +99,12 @@ function transitPlan(steps: any[]): TransitLeg[] {
 
 // undefined = the lookup failed (not cached, so the next open tries again).
 async function google(mode: TravelMode, from: LatLng, to: LatLng): Promise<Answer | undefined> {
-  const key = process.env.GOOGLE_ROUTES_API_KEY;
-  if (!key) return NO_ANSWER;
-  const res = await fetch('https://routes.googleapis.com/directions/v2:computeRoutes', {
-    method:  'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': key, 'X-Goog-FieldMask': FIELDS[mode] },
-    body: JSON.stringify({
-      origin:       { location: { latLng: { latitude: from.lat, longitude: from.lng } } },
-      destination:  { location: { latLng: { latitude: to.lat,   longitude: to.lng } } },
-      travelMode:   GOOGLE_MODE[mode],
-      languageCode: 'en-GB',   // 24-hour departure times
-      ...(mode === 'driving' && { routingPreference: 'TRAFFIC_AWARE' }),
-    }),
-    signal: AbortSignal.timeout(TIMEOUT_MS),
-  });
-  if (!res.ok) return undefined;   // includes the daily cap being hit
-  const route = (await res.json()).routes?.[0];
+  if (!process.env.GOOGLE_ROUTES_API_KEY) return NO_ANSWER;
+  const route = await computeRoute(
+    GOOGLE_MODE[mode], from, to, FIELDS[mode],
+    mode === 'driving' ? { routingPreference: 'TRAFFIC_AWARE' } : {},
+  );
+  if (route === undefined) return undefined;   // includes the daily cap being hit
   const secs  = seconds(route?.duration);
   if (!Number.isFinite(secs)) return NO_ANSWER;
   return {

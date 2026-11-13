@@ -181,7 +181,7 @@ const slugToTab = (slug: string | null): number => {
 const ALL_TABS = [...TAB_SLUGS.keys()];
 
 // Sub-view and deep-link params belong to the tab (or sheet) that set them
-const TAB_PARAMS = ['day', 'section', 'view', 'stop', 'file', 'todo', 'expense', 'proof', 'sheet', 'i'];
+const TAB_PARAMS = ['day', 'section', 'view', 'stop', 'leg', 'file', 'todo', 'expense', 'proof', 'sheet', 'i'];
 // Where you were on a tab — put back in the address when you return to it
 const RETURN_PARAMS: Record<number, string[]> = {
   1: ['section'],
@@ -392,7 +392,7 @@ function TripPageInner() {
     showTab(2);
     const params = new URLSearchParams(window.location.search);
     params.set('tab', TAB_SLUGS[2]);
-    for (const k of ['day', 'section', 'stop', 'file', 'todo', 'expense', 'proof', 'sheet', 'i']) params.delete(k);
+    for (const k of ['day', 'section', 'stop', 'leg', 'file', 'todo', 'expense', 'proof', 'sheet', 'i']) params.delete(k);
     if (params.get('view') === 'recap') params.delete('view');
     params.set('now', String(Date.now()));
     window.history.pushState(null, '', `?${params.toString()}`);

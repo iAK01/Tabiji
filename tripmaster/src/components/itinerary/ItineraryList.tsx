@@ -27,11 +27,15 @@ interface Props {
   /** Started stops are went / didn't go rather than going / not going */
   isStarted?: (stop: Stop) => boolean;
   onHighlight?: (stop: Stop, h: Highlight | null) => void;
+  /** Before the first stop: the way there from where you slept */
+  before?: React.ReactNode;
+  /** After a group of stops: the way on to the next */
+  after?:  (group: Stop[]) => React.ReactNode;
 }
 
 // The phone-first reading of a day: one full-width row per stop, full names,
 // clashes grouped under a bracket, a big ✕ to drop what you won't go to.
-export function ItineraryList({ stops, onOpen, onSkip, live, afterMidnightLabel, isStarted, onHighlight }: Props) {
+export function ItineraryList({ stops, onOpen, onSkip, live, afterMidnightLabel, isStarted, onHighlight, before, after }: Props) {
   const clusters = overlapClusters(stops);
   // The night runs on past midnight: one heading before the first stop from the next date
   const firstLate = clusters.findIndex(g => g.some(s => s.afterMidnight));
@@ -46,6 +50,7 @@ export function ItineraryList({ stops, onOpen, onSkip, live, afterMidnightLabel,
 
   return (
     <Box sx={{ py: 0.5 }}>
+      {before}
       {clusters.map((group, gi) => {
         const clash = group.filter(s => !s.skipped).length > 1;
         const start = Math.min(...group.map(s => stopStartMinutes(s) ?? 0));
@@ -158,6 +163,7 @@ export function ItineraryList({ stops, onOpen, onSkip, live, afterMidnightLabel,
                 );
               })}
             </Box>
+            {after?.(group)}
           </Box>
         );
       })}

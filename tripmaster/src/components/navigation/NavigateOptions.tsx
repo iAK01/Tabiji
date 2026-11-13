@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   Box, Typography, ToggleButton, ToggleButtonGroup, List, ListItemButton,
-  ListItemIcon, ListItemText, ListSubheader, Divider, Snackbar, Button, alpha,
+  ListItemIcon, ListItemText, ListSubheader, Divider, Snackbar, Button, CircularProgress, alpha,
 } from '@mui/material';
 import DirectionsWalkIcon    from '@mui/icons-material/DirectionsWalk';
 import DirectionsCarIcon     from '@mui/icons-material/DirectionsCar';
@@ -14,7 +14,8 @@ import NavigationIcon        from '@mui/icons-material/Navigation';
 import ContentCopyIcon       from '@mui/icons-material/ContentCopy';
 import LocalTaxiIcon         from '@mui/icons-material/LocalTaxi';
 import {
-  NAV_APP_LABEL, copyableLocation, detectPlatform, isAppScheme, navAppsFor, navLink, uberLink, takesOrigin,
+  NAV_APP_LABEL, copyableLocation, detectPlatform, isAppScheme, isPinned, navAppsFor, navLink, searchLink, searchText,
+  uberLink, takesOrigin,
   type NavApp, type NavIntent, type NavMode, type NavigationDestination, type NavOrigin,
 } from '@/lib/navigation/links';
 import { useTravelTimes, formatTravelMins, type TravelOrigin } from '@/lib/navigation/useTravelTimes';
@@ -58,15 +59,31 @@ export interface NavNotice {
   fallback?: string;
 }
 
+/** A pin found for a place that had none, and what it is */
+export interface FoundPin { lat: number; lng: number; label: string }
+
+// The trip a page belongs to (/trips/<id>/…), for buttons not told it
+function tripFromPath(): string | undefined {
+  if (typeof window === 'undefined') return undefined;
+  return window.location.pathname.match(/\/trips\/([a-f0-9]{24})(\/|$)/)?.[1];
+}
+
 // ─── Picker ───────────────────────────────────────────────────────────────────
 // Shared by NavigateButton's dropdown and the /navigate page. Messages go to the
 // parent (onNotice) because the dropdown closes — and unmounts this — on pick.
+//
+// Map apps only ever get a pin. Given text, they guess — "Place Bab El Had, Avenue
+// Hassan II" became the far end of Avenue Hassan II, 11 km away. A place with no pin
+// is looked up first (/locate: certain matches only); found, the route goes to that
+// point and says what it is. Not found, or offline, it's a search to check — no route.
 export default function NavigateOptions({
   destination,
   intent      = 'directions',
   initialMode = 'driving',
   from,
   origin = null,
+  tripId,
+  onPinned,
   onPicked,
   onNotice,
   onLayoutChange,
@@ -78,6 +95,10 @@ export default function NavigateOptions({
   from?:        TravelOrigin | null;
   /** Route from here (your hotel) instead of where you are — times, links and Uber pickup all start here */
   origin?:      NavOrigin | null;
+  /** The trip whose towns an unpinned place is looked up in (else read from the page's URL) */
+  tripId?:      string;
+  /** A pin was found for an unpinned place — the owner can keep it */
+  onPinned?:    (pin: FoundPin) => void;
   onPicked?:    () => void;
   onNotice:     (n: NavNotice) => void;
   /** Height changed (transit summary, "Times from…") — lets a dropdown re-fit the screen */
@@ -85,14 +106,54 @@ export default function NavigateOptions({
 }) {
   const [mode, setMode] = useState<NavMode>(initialMode);
   const platform = detectPlatform();
-  const copy     = copyableLocation(destination);
+
+  // ── An unpinned place: find its pin before offering any route ──
+  const pinnedAlready = isPinned(destination);
+  const [found,  setFound]  = useState<FoundPin | null>(null);
+  const [lookup, setLookup] = useState<'looking' | 'none' | null>(pinnedAlready ? null : 'looking');
+  const pinnedCb = useRef(onPinned);
+  pinnedCb.current = onPinned;
+  const near = origin?.coordinates ?? from?.coordinates ?? null;
+  useEffect(() => {
+    if (pinnedAlready) { setLookup(null); return; }
+    const trip = tripId ?? tripFromPath();
+    const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
+    if (!trip || offline || !(destination.name?.trim() || destination.address?.trim())) { setLookup('none'); return; }
+    let live = true;
+    setFound(null);
+    setLookup('looking');
+    fetch(`/api/trips/${trip}/locate`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ name: destination.name, address: destination.address, near }),
+    })
+      .then(res => (res.ok ? res.json() : null))
+      .then(data => {
+        if (!live) return;
+        const pin = data?.pin;
+        if (pin && Number.isFinite(pin.lat) && Number.isFinite(pin.lng)) {
+          const p: FoundPin = { lat: pin.lat, lng: pin.lng, label: String(pin.label ?? '') };
+          setFound(p);
+          setLookup(null);
+          pinnedCb.current?.(p);
+        } else {
+          setLookup('none');
+        }
+      })
+      .catch(() => { if (live) setLookup('none'); });
+    return () => { live = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `near` only picks the town; a new one doesn't need a new lookup
+  }, [pinnedAlready, tripId, destination.name, destination.address]);
+
+  const place    = found ? { ...destination, coordinates: { lat: found.lat, lng: found.lng } } : destination;
+  const copy     = copyableLocation(place);
   const title    = destination.name || destination.address || '';
   const routeFrom = intent === 'directions' ? origin : null;
   const pinnedFrom: TravelOrigin | null = routeFrom?.coordinates
     ? { name: routeFrom.name, coordinates: routeFrom.coordinates }
     : null;
   const { status, times, fromLabel, pickup: nearPickup } = useTravelTimes(
-    destination, routeFrom ? pinnedFrom : from, intent === 'directions', !!routeFrom,
+    place, routeFrom ? pinnedFrom : from, intent === 'directions', !!routeFrom,
   );
   // From your hotel, the Uber pickup is the hotel — even when the times didn't load
   const pickup = routeFrom ? pinnedFrom : nearPickup;
@@ -104,7 +165,7 @@ export default function NavigateOptions({
   const apps  = navAppsFor(platform).filter(app => !routeFrom || takesOrigin(app));
   const pasteText = destination.address || destination.name;
 
-  useEffect(() => { onLayoutChange?.(); }, [showTransit, fromLabel, rides.length, onLayoutChange]);
+  useEffect(() => { onLayoutChange?.(); }, [showTransit, fromLabel, rides.length, lookup, found, onLayoutChange]);
 
   // Web pages open in a new tab, app schemes in place. A scheme does nothing when
   // the app isn't installed: if we're still on screen shortly after, offer
@@ -134,9 +195,18 @@ export default function NavigateOptions({
   const open = (app: NavApp) => {
     onPicked?.();
     launch(
-      navLink(destination, app, mode, intent, platform, routeFrom),
+      navLink(place, app, mode, intent, platform, routeFrom),
       NAV_APP_LABEL[app],
-      app === 'apple_maps' ? undefined : navLink(destination, app, mode, intent, 'desktop', routeFrom),   // always on iPhone
+      app === 'apple_maps' ? undefined : navLink(place, app, mode, intent, 'desktop', routeFrom),   // always on iPhone
+    );
+  };
+
+  const search = (app: Exclude<NavApp, 'waze'>) => {
+    onPicked?.();
+    launch(
+      searchLink(destination, app, platform),
+      NAV_APP_LABEL[app],
+      app === 'apple_maps' ? undefined : searchLink(destination, app, 'desktop'),
     );
   };
 
@@ -145,7 +215,7 @@ export default function NavigateOptions({
   const ride = async (svc: TransportService) => {
     onPicked?.();
     if (svc.id === 'uber') {
-      launch(uberLink(destination, pickup, platform), svc.name, uberLink(destination, pickup, 'desktop'));
+      launch(uberLink(place, pickup, platform), svc.name, uberLink(place, pickup, 'desktop'));
       return;
     }
     if (pasteText) {
@@ -170,11 +240,78 @@ export default function NavigateOptions({
     }
   };
 
+  const heading = title && (
+    <Typography noWrap sx={{ ...SECTION_LABEL, px: 2, pt: 1.5, pb: 1 }}>
+      {intent !== 'directions' ? title : routeFrom ? `From ${routeFrom.name} to ${title}` : `Directions to ${title}`}
+    </Typography>
+  );
+
+  if (lookup === 'looking') {
+    return (
+      <Box>
+        {heading}
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, px: 2, pt: title ? 0.5 : 2, pb: 2 }}>
+          <CircularProgress size={18} />
+          <Typography sx={{ fontSize: '0.88rem', fontWeight: 600 }}>Finding it on the map…</Typography>
+        </Box>
+      </Box>
+    );
+  }
+
+  // Not pinned and not found for certain: searches to check, never a route
+  if (lookup === 'none') {
+    const searchApps = navAppsFor(platform).filter((a): a is Exclude<NavApp, 'waze'> => a !== 'waze');
+    return (
+      <Box>
+        {heading}
+        <Typography sx={{ px: 2, pt: title ? 0 : 1.5, pb: 1, fontSize: '0.82rem', color: 'text.secondary' }}>
+          Not pinned on the map. Check the search finds the right place before you set off.
+        </Typography>
+        <List disablePadding>
+          {searchApps.map(app => {
+            const { Icon, color } = APP_ICON[app];
+            return (
+              <ListItemButton key={app} onClick={() => search(app)} sx={{ minHeight: 48 }}>
+                <ListItemIcon sx={{ minWidth: 44 }}>
+                  <AppBadge Icon={Icon} color={color} />
+                </ListItemIcon>
+                <ListItemText
+                  primary={`Search ${NAV_APP_LABEL[app]}`}
+                  secondary={searchText(destination)}
+                  slotProps={{ primary: { sx: { fontWeight: 600 } }, secondary: { noWrap: true } }}
+                />
+              </ListItemButton>
+            );
+          })}
+          {copy && (
+            <>
+              <Divider />
+              <ListItemButton onClick={copyLocation} sx={{ minHeight: 48 }}>
+                <ListItemIcon sx={{ minWidth: 44 }}>
+                  <Box sx={{ width: 30, height: 30, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <ContentCopyIcon sx={{ fontSize: 18, color: 'text.secondary' }} />
+                  </Box>
+                </ListItemIcon>
+                <ListItemText
+                  primary="Copy address"
+                  secondary={copy.text}
+                  slotProps={{ primary: { sx: { fontWeight: 600 } }, secondary: { noWrap: true } }}
+                />
+              </ListItemButton>
+            </>
+          )}
+        </List>
+      </Box>
+    );
+  }
+
   return (
     <Box>
-      {title && (
-        <Typography noWrap sx={{ ...SECTION_LABEL, px: 2, pt: 1.5, pb: 1 }}>
-          {intent !== 'directions' ? title : routeFrom ? `From ${routeFrom.name} to ${title}` : `Directions to ${title}`}
+      {heading}
+
+      {found?.label && (
+        <Typography noWrap sx={{ px: 2, pt: title ? 0 : 1.5, pb: 1, fontSize: '0.75rem', color: 'text.secondary' }}>
+          Pinned to {found.label}
         </Typography>
       )}
 
