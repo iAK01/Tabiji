@@ -28,7 +28,6 @@ export default function RootLayout({
     <html lang="en">
 <head>
   <title>Tabiji</title>
-  <link rel="icon" href="/favicon.ico" />
   <link rel="manifest" href="/manifest.json" />
   <meta name="theme-color" content="#6B7C5C" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
