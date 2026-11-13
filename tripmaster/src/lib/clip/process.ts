@@ -3,6 +3,8 @@ import Clip from '@/lib/mongodb/models/Clip';
 import SavedPlace from '@/lib/mongodb/models/SavedPlace';
 import Trip from '@/lib/mongodb/models/Trip';
 import { locatePlace, localityWords, sameName } from '@/lib/geo/geocode';
+import { findNamedPlace } from '@/lib/geo/findPlace';
+import { stayForTrip } from '@/lib/guide/load';
 import { isCategory, type ClipCategory } from './categories';
 import { fetchPage } from './page';
 import { readClip, type ClipItem, type ClipTrip } from './read';
@@ -38,15 +40,36 @@ async function cityCentre(city: string, country: string): Promise<{ lat: number;
   }
 }
 
-/** Pins a place only on an exact named match near where it is (lib/geo/geocode). */
-async function pin(item: ClipItem, trip: any | null): Promise<{ address: string; lat: number; lng: number } | null> {
+type PinFor = { name: string; city?: string; country?: string; searchQuery?: string; address?: string };
+
+/**
+ * Pins a place only on an exact named match near where it is: Mapbox first
+ * (lib/geo/geocode), then Google (lib/geo/findPlace) — which also picks, for a
+ * chain, the branch nearest the trip's stay.
+ */
+export async function pinPlace(item: PinFor, trip: any | null): Promise<{ address: string; lat: number; lng: number } | null> {
   const stop = trip
     ? placesOf(trip).find((p: any) => norm(p.city) === norm(item.city)) ?? trip.destination
     : null;
-  const centre = pinned(stop?.coordinates) ? stop.coordinates : await cityCentre(item.city || stop?.city, item.country || stop?.country);
+  const city    = item.city || stop?.city || '';
+  const country = item.country || stop?.country || '';
+  const centre  = pinned(stop?.coordinates) ? stop.coordinates : await cityCentre(city, country);
   if (!centre) return null;
-  const locality = [item.city || stop?.city, item.country || stop?.country].filter(Boolean).join(', ');
-  return locatePlace({ name: item.name, query: item.searchQuery, address: item.address }, { center: centre, locality, maxKm: 40 });
+  const locality = [city, country].filter(Boolean).join(', ');
+
+  const hit = await locatePlace({ name: item.name, query: item.searchQuery, address: item.address }, { center: centre, locality, maxKm: 40 });
+  if (hit) return hit;
+
+  const stay = trip ? await stayForTrip(String(trip._id), centre).catch(() => null) : null;
+  const found = await findNamedPlace({
+    name:   item.name,
+    query:  item.searchQuery || [item.name, locality].filter(Boolean).join(', '),
+    centre,
+    near:   stay?.coordinates ?? centre,
+    locality,
+    maxKm:  40,
+  });
+  return found ? { address: found.address, lat: found.lat, lng: found.lng } : null;
 }
 
 export async function processClip(
@@ -102,15 +125,16 @@ export async function processClip(
         if (!existing.tip && item.tip) fill.tip = item.tip;
         if (!existing.website && item.website) fill.website = item.website;
         if (item.kind === 'place' && !pinned(existing.coordinates)) {
-          const hit = await pin(item, trip);
+          const hit = await pinPlace(item, trip);
           if (hit) { fill.coordinates = { lat: hit.lat, lng: hit.lng }; fill.address = hit.address; }
+          fill.pinTriedAt = new Date();
         }
         await SavedPlace.updateOne({ _id: existing._id }, { $set: fill, $push: { sources: source } });
         savedIds.push(existing._id);
         continue;
       }
 
-      const hit = item.kind === 'place' ? await pin(item, trip) : null;
+      const hit = item.kind === 'place' ? await pinPlace(item, trip) : null;
       const doc = await SavedPlace.create({
         userId: clip.userId,
         tripId: trip?._id ?? null,
@@ -122,6 +146,7 @@ export async function processClip(
         tip: item.tip || undefined,
         address: hit?.address ?? (item.address || undefined),
         coordinates: hit ? { lat: hit.lat, lng: hit.lng } : undefined,
+        pinTriedAt: item.kind === 'place' ? new Date() : undefined,
         website: item.website || undefined,
         sources: [source],
       });

@@ -1,6 +1,7 @@
-import { NextResponse } from 'next/server';
+import { NextResponse, after } from 'next/server';
 import { ownedTrip } from '@/lib/auth/ownedTrip';
 import SavedPlace from '@/lib/mongodb/models/SavedPlace';
+import { pinPlace } from '@/lib/clip/process';
 
 const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -20,6 +21,27 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       ...(cities.length ? [{ tripId: null, city: { $in: cities.map(c => new RegExp(`^${escapeRe(c)}$`, 'i')) } }] : []),
     ],
   }).sort({ createdAt: -1 }).lean() as any[];
+
+  // Places saved without a map pin get another look, at most once a day — the
+  // lookups improve (Google after Mapbox), and the next visit shows the pin.
+  const dayAgo = Date.now() - 24 * 60 * 60 * 1000;
+  const unpinned = places
+    .filter(p => p.kind === 'place' && !Number.isFinite(p.coordinates?.lat) && !(p.pinTriedAt && new Date(p.pinTriedAt).getTime() > dayAgo))
+    .slice(0, 15);
+  if (unpinned.length) {
+    after(async () => {
+      for (const p of unpinned) {
+        try {
+          const hit = await pinPlace({ name: p.name, city: p.city, country: p.country, address: p.address }, trip);
+          await SavedPlace.updateOne({ _id: p._id }, {
+            $set: { pinTriedAt: new Date(), ...(hit ? { coordinates: { lat: hit.lat, lng: hit.lng }, address: hit.address } : {}) },
+          });
+        } catch (err) {
+          console.error('[saved] pin retry failed', p._id, err);
+        }
+      }
+    });
+  }
 
   return NextResponse.json({
     places: places.map(p => ({

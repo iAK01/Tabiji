@@ -18,6 +18,7 @@ const SavedPlaceSchema = new Schema({
   address:     String,
   coordinates: { lat: Number, lng: Number },
   website:     String,
+  pinTriedAt:  Date,      // last time a map pin was looked for — unpinned places are tried again a day later
   // Every page it was saved from — saving the same place twice adds a source, not a duplicate
   sources:     [{ _id: false, url: String, title: String, site: String, clipId: Schema.Types.ObjectId, at: Date }],
 }, { timestamps: true });
