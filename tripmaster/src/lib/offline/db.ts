@@ -284,6 +284,12 @@ async function dispatchQueuedAction(action: any): Promise<boolean> {
         });
         break;
 
+      case 'REMOVE_SAVED':
+        res = await fetch(`/api/trips/${action.tripId}/saved/${action.payload?.id}`, { method: 'DELETE' });
+        // Already gone counts as done
+        if (res.status === 404) return true;
+        break;
+
       default:
         // Unrecognised action type — drop it rather than block the queue forever.
         return true;
@@ -322,6 +328,7 @@ function describeAction(action: any): string {
     case 'MARK_NOTIFICATIONS_READ': return 'marking notifications read';
     case 'UPDATE_INBOX':            return 'clearing notifications';
     case 'DISMISS_PICK':            return `hiding${p.name ? ` “${p.name}”` : ' a pick'} in Discover`;
+    case 'REMOVE_SAVED':            return `removing${p.name ? ` “${p.name}”` : ' a saved place'} from Discover`;
     default:                        return 'a change';
   }
 }

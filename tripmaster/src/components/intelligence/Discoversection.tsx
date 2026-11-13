@@ -15,6 +15,7 @@ import { D, SectionHeading, SubHeading } from './Intelligence.shared';
 import NavigateButton from '@/components/ui/NavigateButton';
 import Addtoitinerarydialog, { type AddTarget } from './Addtoitinerarydialog';
 import { PicksRow } from './Discover.picks';
+import { SavedByYou, type SavedItem } from './Discover.saved';
 import { GuideAbout, GuideAreas, GuideBrowse, GuideCredit, GuideHero, placeName } from './Discover.guide';
 import { isOffline, subscribeConnectivity } from '@/lib/offline/connectivity';
 import { sendOrQueue } from '@/lib/offline/writes';
@@ -45,6 +46,7 @@ export default function Discoversection({ tripId }: Props) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [area,       setArea]       = useState<string | null>(null);
   const [about,      setAbout]      = useState<string | null>(null);
+  const [saved,      setSaved]      = useState<SavedItem[]>([]);
 
   const loadGuide = useCallback(() => {
     setGuideState('loading');
@@ -73,6 +75,10 @@ export default function Discoversection({ tripId }: Props) {
       })
       .catch(() => {});
     loadGuide();
+    fetch(`/api/trips/${tripId}/saved`)
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => { if (Array.isArray(d?.places)) setSaved(d.places); })
+      .catch(() => {});
   }, [tripId, loadGuide]);
 
   const generate = async () => {
@@ -111,6 +117,24 @@ export default function Discoversection({ tripId }: Props) {
     } catch (err) {
       setCulture(prev);
       reportSaveFailure(`the dismissal of “${h.name}”`, err);
+    }
+  };
+
+  // Gone at once; queued offline like any other change, put back if it fails.
+  const removeSaved = async (item: SavedItem) => {
+    const prev = saved;
+    const without = (list: SavedItem[]) => list.filter(x => x.id !== item.id);
+    setSaved(without);
+    try {
+      const res = await sendOrQueue(
+        { type: 'REMOVE_SAVED', tripId, payload: { id: item.id, name: item.name } },
+        () => fetch(`/api/trips/${tripId}/saved/${item.id}`, { method: 'DELETE' }),
+        { [`/api/trips/${tripId}/saved`]: (data: any) => data?.places && { ...data, places: without(data.places) } },
+      );
+      if (res && res.status !== 404) await readSaved(res);
+    } catch (err) {
+      setSaved(prev);
+      reportSaveFailure(`the removal of “${item.name}”`, err);
     }
   };
 
@@ -276,6 +300,9 @@ export default function Discoversection({ tripId }: Props) {
             </Box>
           )}
         </Box>
+
+        {/* ── Clipped from the web (Safari clipper) ── */}
+        <SavedByYou items={saved} onAdd={openAdd} onRemove={removeSaved} />
 
         {/* ── The guide ── */}
         {g && guide && (

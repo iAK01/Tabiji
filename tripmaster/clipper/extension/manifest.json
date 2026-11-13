@@ -1,0 +1,27 @@
+{
+  "manifest_version": 3,
+  "name": "Tabiji Clipper",
+  "description": "Save places and tips from any web page to Discover in Tabiji.",
+  "version": "1.0",
+  "icons": {
+    "48": "icons/icon-48.png",
+    "96": "icons/icon-96.png",
+    "128": "icons/icon-128.png",
+    "256": "icons/icon-256.png",
+    "512": "icons/icon-512.png"
+  },
+  "background": {
+    "scripts": ["shared.js", "background.js"]
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Clip to Tabiji",
+    "default_icon": {
+      "16": "icons/toolbar-16.png",
+      "19": "icons/toolbar-19.png",
+      "32": "icons/toolbar-32.png",
+      "38": "icons/toolbar-38.png"
+    }
+  },
+  "permissions": ["activeTab", "scripting", "contextMenus", "storage"]
+}

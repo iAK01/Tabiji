@@ -56,6 +56,13 @@ const UserSchema = new Schema({
   // The sign-in email always counts.
   forwardFrom: { type: [String], default: [] },
 
+  // The Safari clipper's key — only its hash is kept; last4 is to recognise it
+  clipKey: {
+    hash:      String,
+    last4:     String,
+    createdAt: Date,
+  },
+
   // Notification settings — shape and defaults in src/lib/push/prefs.ts. Kept
   // out of `preferences` because the profile save replaces that whole object.
   notificationPrefs: { type: Schema.Types.Mixed },

@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Clip to Tabiji</title>
+  <link rel="stylesheet" href="popup.css">
+  <script src="shared.js" defer></script>
+  <script src="popup.js" defer></script>
+</head>
+<body>
+  <header>
+    <img src="icons/icon-48.png" alt="" width="22" height="22">
+    <span>Clip to Tabiji</span>
+  </header>
+
+  <!-- Connect: the code from Tabiji → Profile → Clip from the web -->
+  <section id="setup" hidden>
+    <p>Paste the code from Tabiji → Profile → Clip from the web.</p>
+    <textarea id="code" rows="3" placeholder="https://…#tbj_…" autocapitalize="off" autocorrect="off" spellcheck="false"></textarea>
+    <p id="setup-error" class="error" hidden></p>
+    <button id="connect" class="primary">Connect</button>
+  </section>
+
+  <!-- Clip -->
+  <section id="clip" hidden>
+    <p id="last" class="muted" hidden></p>
+    <div class="page">
+      <div id="page-title" class="page-title"></div>
+      <div id="page-host" class="muted"></div>
+    </div>
+
+    <label for="selection">Highlighted</label>
+    <textarea id="selection" rows="4" placeholder="Nothing highlighted — the whole page is read"></textarea>
+
+    <label class="check"><input type="checkbox" id="shot"> Include a screenshot of what’s on screen</label>
+
+    <div class="row">
+      <div>
+        <label for="trip">Trip</label>
+        <select id="trip"><option value="auto">Work it out</option></select>
+      </div>
+      <div>
+        <label for="category">Kind</label>
+        <select id="category"><option value="auto">Work it out</option></select>
+      </div>
+    </div>
+
+    <label for="note">Note</label>
+    <input id="note" type="text" placeholder="e.g. only the rooftop bars">
+
+    <p id="clip-error" class="error" hidden></p>
+    <button id="send" class="primary">Save to Discover</button>
+    <button id="disconnect" class="link">Disconnect</button>
+  </section>
+
+  <!-- After sending -->
+  <section id="result" hidden>
+    <p id="result-status"></p>
+    <ul id="result-list"></ul>
+    <button id="again" class="secondary">Clip something else</button>
+  </section>
+</body>
+</html>

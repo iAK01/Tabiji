@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // The Safari clipper — a browser extension, not part of the app
+    "clipper/**",
   ]),
 ]);
 

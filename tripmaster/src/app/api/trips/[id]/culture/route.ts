@@ -5,6 +5,7 @@ import { jsonSchemaOutputFormat } from '@anthropic-ai/sdk/helpers/json-schema';
 import connectDB             from '@/lib/mongodb/connection';
 import Trip                  from '@/lib/mongodb/models/Trip';
 import TripLogistics         from '@/lib/mongodb/models/TripLogistics';
+import SavedPlace            from '@/lib/mongodb/models/SavedPlace';
 import User                  from '@/lib/mongodb/models/User';
 import { getFreeCultureAccess } from '@/lib/data/free-cultural-access';
 import { uploadFile }        from '@/lib/utils/storage';
@@ -115,6 +116,7 @@ interface PromptContext {
   weatherSummary: string | null;
   rainyDays:      number;
   dismissed:      Dismissed[];
+  saved:          string[];   // places the traveller saved from the web — shown beside the picks
   candidates:     { listing: GuideListing; km: number | null }[];
 }
 
@@ -143,6 +145,9 @@ function buildPrompt(ctx: PromptContext): string {
   const dismissedLine = ctx.dismissed.length
     ? `The traveller has ruled these out — don't suggest them again: ${ctx.dismissed.map(d => d.name).join('; ')}`
     : null;
+  const savedLine = ctx.saved.length
+    ? `The traveller has already saved these, shown beside your picks — pick other places: ${ctx.saved.join('; ')}`
+    : null;
 
   const searchRule = `give a searchQuery of the place's name, the actual town it is in and the country (e.g. "St Muredach's Cathedral, Ballina, County Mayo, Ireland") — the town, never just an island or region, when the destination "${place}" is one`;
   const source = ctx.candidates.length
@@ -162,7 +167,7 @@ When a pick is one of these places, copy its id exactly into listingId so its ho
 Trip:
 - Type: ${ctx.tripType}${ctx.purpose ? ` — ${ctx.purpose}` : ''}
 - Length: ${ctx.nights === 0 ? 'day trip' : `${ctx.nights} night${ctx.nights !== 1 ? 's' : ''}`}${ctx.dates ? ` (${ctx.dates})` : ''}
-- ${stayLine}${weatherLine ? `\n- ${weatherLine}` : ''}${dismissedLine ? `\n- ${dismissedLine}` : ''}
+- ${stayLine}${weatherLine ? `\n- ${weatherLine}` : ''}${dismissedLine ? `\n- ${dismissedLine}` : ''}${savedLine ? `\n- ${savedLine}` : ''}
 
 ${source}
 
@@ -489,6 +494,11 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
     const firstStay = logistics?.accommodation?.[0];
 
     const dismissed: Dismissed[] = trip.culture?.dismissed ?? [];
+    const cities = [trip.destination, ...(trip.additionalDestinations ?? [])].map((p: any) => p?.city).filter(Boolean) as string[];
+    const saved  = (await SavedPlace.find({
+      userId: trip.userId, kind: 'place',
+      $or: [{ tripId: trip._id }, { tripId: null, city: { $in: cities.map(c => new RegExp(`^${c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i')) } }],
+    }, 'name').lean() as any[]).map(p => p.name).slice(0, 60);
     const anchor      = stay?.coordinates ?? destCoords;
     const weatherDays = trip.weather?.days ?? [];
 
@@ -503,6 +513,7 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
       weatherSummary: summaryLine(weatherDays),
       rainyDays:      wetDayCount(weatherDays),
       dismissed,
+      saved,
       candidates:     candidatesFrom(guide, anchor, dismissed),
       destCoords,
       anchor,

@@ -32,6 +32,7 @@ import AirportSearch          from '@/components/ui/AirportSearch';
 import PushNotificationSetup  from '@/components/notifications/PushNotificationSetup';
 import NotificationSettings   from '@/components/notifications/NotificationSettings';
 import EmailForwarding        from '@/components/profile/EmailForwarding';
+import WebClipper             from '@/components/profile/WebClipper';
 import { Airport }            from '@/lib/data/airports';
 import { readSaved, assertSaved, reportSaveFailure } from '@/lib/offline/saveErrors';
 
@@ -498,6 +499,7 @@ export default function ProfilePage() {
             <PushNotificationSetup />
             <NotificationSettings />
             <EmailForwarding />
+            <WebClipper />
 
             <SectionCard icon={HomeIcon} title="Home" ghost={HomeIcon}>
               {profile.homeLocation?.countryCode ? (
