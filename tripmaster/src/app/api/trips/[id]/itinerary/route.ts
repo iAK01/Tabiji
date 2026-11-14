@@ -1,15 +1,26 @@
 import { NextResponse } from 'next/server';
 import { ownedTrip } from '@/lib/auth/ownedTrip';
 import TripItinerary from '@/lib/mongodb/models/TripItinerary';
+import TripTask from '@/lib/mongodb/models/TripTask';
 import { ensureItinerary } from '@/lib/itinerary/stops';
+import { sortTasks, taskOut } from '@/lib/itinerary/tasks';
 
+// The days and their stops, plus each day's tasks (their own collection, sent here
+// so every reader of the itinerary — and its offline copy — has them too)
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const { trip, error } = await ownedTrip(id);
   if (error) return error;
 
-  const itinerary = await ensureItinerary(trip);
-  return NextResponse.json({ days: itinerary.days, dismissedGaps: itinerary.dismissedGaps ?? [] });
+  const [itinerary, tasks] = await Promise.all([
+    ensureItinerary(trip),
+    TripTask.find({ tripId: trip._id }).lean(),
+  ]);
+  return NextResponse.json({
+    days:          itinerary.days,
+    dismissedGaps: itinerary.dismissedGaps ?? [],
+    tasks:         sortTasks((tasks as any[]).map(taskOut)),
+  });
 }
 
 // PATCH { gap, dismissed } — "I've sorted this" on a journey the map asked about

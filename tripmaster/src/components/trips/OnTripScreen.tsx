@@ -2,7 +2,7 @@
 
 // The on-trip parts of the Overview tab. OnTripNow sits above the section
 // summaries: the one thing happening now or next (rolling over to tomorrow's
-// first stop once today is done), plus todos due today. OnTripGetAround sits
+// first stop once today is done), plus todos due today and today's tasks. OnTripGetAround sits
 // below them: local ride and transit apps for wherever you've actually landed
 // (nothing while you're still at home or on the way), and your own apps.
 
@@ -35,6 +35,8 @@ import { placeTz } from '@/lib/push/timezones';
 import { useFlights } from '@/lib/flights/useFlights';
 import { stopNote, type Tone } from '@/lib/flights/status';
 import { TONE } from '@/components/flights/FlightLive';
+import type { DayTask } from '@/lib/itinerary/tasks';
+import { changedTask, sendTaskChange } from '@/lib/itinerary/taskWrites';
 
 // ─── Design tokens ─────────────────────────────────────────────────────────────
 
@@ -334,14 +336,43 @@ function TodoRow({ todo, now, onComplete }: { todo: Todo; now: Date; onComplete:
   );
 }
 
+// ─── Day task row ─────────────────────────────────────────────────────────────
+
+function TaskRow({ task, onComplete }: { task: DayTask; onComplete: (task: DayTask) => void }) {
+  return (
+    <Box sx={{ display: 'flex', gap: 1, py: 1, pr: { xs: 2, sm: 2.5 }, pl: 0.5, alignItems: 'flex-start' }}>
+      <IconButton aria-label={`Mark “${task.text}” done`} onClick={() => onComplete(task)}
+        sx={{ width: 44, height: 44, flexShrink: 0, color: D.muted }}>
+        <CheckBoxOutlineBlankIcon sx={{ fontSize: 22 }} />
+      </IconButton>
+
+      <Box sx={{ width: 3, alignSelf: 'stretch', my: 0.75, borderRadius: 2, backgroundColor: D.green, flexShrink: 0 }} />
+
+      <Box sx={{ flexGrow: 1, minWidth: 0, py: 0.75 }}>
+        <Typography sx={{ fontFamily: D.body, fontSize: '0.94rem', fontWeight: 800, color: D.navy, lineHeight: 1.35, overflowWrap: 'anywhere' }}>
+          {task.text}
+        </Typography>
+        {task.remindAt && (
+          <Typography sx={{ fontFamily: D.body, fontSize: '0.74rem', fontWeight: 700, mt: 0.3, color: D.muted }}>
+            Reminder {task.remindAt}
+          </Typography>
+        )}
+      </Box>
+    </Box>
+  );
+}
+
 // ─── Now + due today ──────────────────────────────────────────────────────────
 
-export function OnTripNow({ tripId, days, files, now, onFilesChange, onOpenFile }: {
+export function OnTripNow({ tripId, days, files, tasks, now, onFilesChange, onTasksChange, onOpenFile }: {
   tripId: string;
   days:   ItineraryDay[];
   files:  any[];
+  /** The itinerary days' tasks — today's open ones are listed with the to-dos */
+  tasks:  DayTask[];
   now:    Date;
   onFilesChange: (update: (files: any[]) => any[]) => void;
+  onTasksChange: (update: (tasks: DayTask[]) => DayTask[]) => void;
   onOpenFile:    (f: any) => void;
 }) {
   const [dismissed, setDismissed] = useState<Set<string>>(new Set());
@@ -414,6 +445,20 @@ export function OnTripNow({ tripId, days, files, now, onFilesChange, onOpenFile 
     }
   };
 
+  // Today's tasks still to do — ticked off here, they leave the list at once
+  const todayTasks = tasks.filter(t => t.date === today && !t.done);
+  const putTask = (task: DayTask) => onTasksChange(ts => ts.map(t => (t._id === task._id ? task : t)));
+  const completeTask = async (task: DayTask) => {
+    const done = changedTask(task, { done: true });
+    putTask(done);
+    try {
+      await sendTaskChange(tripId, task, { done: true }, tasks.map(t => (t._id === task._id ? done : t)));
+    } catch (err) {
+      putTask(task);
+      reportSaveFailure(`“${task.text}” as done`, err);
+    }
+  };
+
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mb: 3 }}>
       {pick ? (
@@ -433,7 +478,7 @@ export function OnTripNow({ tripId, days, files, now, onFilesChange, onOpenFile 
         </Box>
       )}
 
-      {todos.length > 0 && (
+      {(todos.length > 0 || todayTasks.length > 0) && (
         <Box>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, mb: 1 }}>
             <AssignmentIcon sx={{ fontSize: 14, color: D.muted }} />
@@ -445,9 +490,15 @@ export function OnTripNow({ tripId, days, files, now, onFilesChange, onOpenFile 
             </Typography>
           </Box>
           <Paper elevation={0} sx={{ border: `1.5px solid ${D.rule}`, borderRadius: '12px', overflow: 'hidden', backgroundColor: D.paper }}>
+            {todayTasks.map((task, i) => (
+              <Box key={task._id}>
+                {i > 0 && <Divider sx={{ borderColor: D.rule }} />}
+                <TaskRow task={task} onComplete={completeTask} />
+              </Box>
+            ))}
             {todos.map((todo, i) => (
               <Box key={todo._id}>
-                {i > 0 && <Divider sx={{ borderColor: D.rule }} />}
+                {(i > 0 || todayTasks.length > 0) && <Divider sx={{ borderColor: D.rule }} />}
                 <TodoRow todo={todo} now={now} onComplete={completeTodo} />
               </Box>
             ))}

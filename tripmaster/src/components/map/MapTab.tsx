@@ -47,7 +47,7 @@ const LAYERS: { value: Layer; label: string }[] = [
 ];
 
 const SOURCE = 'trip-legs';
-const TRIP_PARAMS = ['day', 'section', 'view', 'stop', 'leg', 'file', 'todo', 'expense', 'proof', 'sheet', 'i'];
+const TRIP_PARAMS = ['day', 'section', 'view', 'stop', 'task', 'leg', 'file', 'todo', 'expense', 'proof', 'sheet', 'i'];
 const STATUS_IS_CONFIRMED = (s?: string) => s === 'confirmed' || s === 'booked';
 
 interface Coordinates { lat: number; lng: number }

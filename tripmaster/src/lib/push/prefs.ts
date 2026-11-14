@@ -9,7 +9,7 @@ export type NotificationCategory =
   | 'checkin'     // online check-in opening
   | 'landed'      // arrival into a new city, baggage belt
   | 'briefings'   // evening-before / morning-of
-  | 'itinerary'   // itinerary stops and events
+  | 'itinerary'   // itinerary stops and events, and day tasks' reminders
   | 'todos'
   | 'expenses';   // proof reminders, end-of-trip nudge
 
@@ -31,7 +31,7 @@ export const CATEGORY_OPTIONS: Array<{ key: NotificationCategory; label: string 
   { key: 'checkin',   label: 'Online check-in opening' },
   { key: 'landed',    label: 'Arrivals and baggage belts' },
   { key: 'briefings', label: 'Morning and evening briefings' },
-  { key: 'itinerary', label: 'Itinerary and events' },
+  { key: 'itinerary', label: 'Itinerary, events and tasks' },
   { key: 'todos',     label: 'To-dos' },
   { key: 'expenses',  label: 'Expense reminders' },
 ];

@@ -85,6 +85,9 @@ import type { TravelOrigin }    from '@/lib/navigation/useTravelTimes';
 import type { NavOrigin }       from '@/lib/navigation/links';
 import type { Highlight }       from '@/lib/itinerary/highlight';
 import { repeatStop }           from '@/lib/itinerary/repeat';
+import { DayTasks }             from './DayTasks';
+import { sortTasks, type DayTask } from '@/lib/itinerary/tasks';
+import { changedTask, sendNewTask, sendTaskChange, sendTaskDelete } from '@/lib/itinerary/taskWrites';
 
 const VIEW_MODES = ['timeline', 'list', 'map', 'recap'] as const;
 const VIEW_OPTIONS = [
@@ -150,6 +153,10 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
   // ── State ────────────────────────────────────────────────────────────────────
   const [days,           setDays]           = useState<Day[]>([]);
   const [loading,        setLoading]        = useState(true);
+  // Each day's tasks (lib/itinerary/tasks.ts) — the ref is what the next change builds on
+  const [tasks,          setTasks]          = useState<DayTask[]>([]);
+  const tasksRef = useRef<DayTask[]>([]);
+  const [highlightTask,  setHighlightTask]  = useState<string | null>(null);
   // Resources linked to stops — files, and the notes, contacts and to-dos shown with them
   const [linked,         setLinked]         = useState<Map<string, LinkedItem[]>>(new Map());
   const [activeDayIdx,   setActiveDayIdx]   = useState(0);
@@ -241,7 +248,7 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
     () => hereNow(trip, transport, { zone: homeZone, countryCode: homeCountry }),
     [trip, transport, homeZone, homeCountry],
   );
-  const [reminders,     setReminders]     = useState<Array<{ local: string; sent: boolean; ref?: { stopId?: string; collection?: string; index?: number; phase?: string } }>>([]);
+  const [reminders,     setReminders]     = useState<Array<{ local: string; sent: boolean; ref?: { stopId?: string; collection?: string; index?: number; phase?: string; taskId?: string } }>>([]);
   // Whether anything will be sent at all, and which bookings had theirs switched off
   const [reminderState, setReminderState] = useState<{
     enabled: boolean; muted: boolean;
@@ -320,6 +327,26 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
     setTimeout(() => setHighlightStop(cur => (cur === stopId ? null : cur)), 4000);
   }, [days, pages, searchParams, pathname, active]);
 
+  // ── A task's reminder (?task=): its day, the task in view, rung for a moment ──
+  useEffect(() => {
+    const taskId = searchParams.get('task');
+    if (!active || !taskId || days.length === 0) return;
+    const task = tasks.find(t => t._id === taskId);
+    const idx  = task ? days.findIndex(d => ymdOf(d.date) === task.date) : -1;
+    const params = new URLSearchParams(window.location.search);
+    params.delete('task');
+    if (idx !== -1 && days[idx].dayNumber != null) params.set('day', String(days[idx].dayNumber));
+    window.history.replaceState(null, '', `${pathname}?${params.toString()}`);
+    if (idx === -1) return;
+    deepLinkedRef.current = true;
+    setActiveDayIdx(idx);
+    setHighlightTask(taskId);
+    setTimeout(() => {
+      document.querySelector(`[data-task-id="${taskId}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 250);
+    setTimeout(() => setHighlightTask(cur => (cur === taskId ? null : cur)), 4000);
+  }, [days, tasks, searchParams, pathname, active]);
+
   // ── "Now" (the trip's tab bar): the page now's on, the now line, and what you
   // should be at — on now, else next up — rung like a notification link ─────────
   const nowParam = searchParams.get('now');
@@ -389,7 +416,7 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
     if (days.length === 0) return;
     const t = setTimeout(loadReminders, 1500);
     return () => clearTimeout(t);
-  }, [days, loadReminders, notifPrefs]);
+  }, [days, tasks, loadReminders, notifPrefs]);
 
   // Trip-wide reminder times changed from the notification centre
   useEffect(() => {
@@ -459,15 +486,19 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
     return off || reminderFor(stop) ? { mode: 'booking' as const, on: !off } : null;
   };
 
-  const reminderNoticeFor = (stop: Stop): string | null => {
+  // Why a reminder of this kind wouldn't arrive at all — null when it would
+  const categoryNotice = (category: NotificationCategory): string | null => {
     if ((notifPrefs ? !notifPrefs.enabled : !reminderState.enabled)) return 'All notifications are off';
     if (notifPrefs ? notifPrefs.mutedTrips.includes(tripId) : reminderState.muted) return 'Notifications for this trip are muted';
-    const b = bookingOf(stop);
-    const category: NotificationCategory = !b || b.collection === 'venue' ? 'itinerary' : b.group === 'arrival' ? 'landed' : 'travel';
     if (notifPrefs && !notifPrefs.categories[category]) {
       return `${CATEGORY_OPTIONS.find(c => c.key === category)?.label ?? 'These'} are switched off in notification settings`;
     }
     return null;
+  };
+
+  const reminderNoticeFor = (stop: Stop): string | null => {
+    const b = bookingOf(stop);
+    return categoryNotice(!b || b.collection === 'venue' ? 'itinerary' : b.group === 'arrival' ? 'landed' : 'travel');
   };
 
   const setStopReminder = async (stop: Stop, lead: number | null) => {
@@ -598,13 +629,20 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
       try {
         const res  = await fetch(`/api/trips/${tripId}/itinerary`);
         const data = await res.json();
+        const dayTasks = sortTasks(Array.isArray(data.tasks) ? data.tasks : []);
         setDays(data.days ?? []);
         setDismissedGaps(new Set(data.dismissedGaps ?? []));
+        tasksRef.current = dayTasks;
+        setTasks(dayTasks);
         const cached = await getTripCache(tripId);
-        await saveTripCache(tripId, { ...(cached ?? {}), itinerary: data.days ?? [] });
+        await saveTripCache(tripId, { ...(cached ?? {}), itinerary: data.days ?? [], itineraryTasks: dayTasks });
       } catch {
         const cached = await getTripCache(tripId);
         if (cached?.itinerary) setDays(cached.itinerary);
+        if (Array.isArray(cached?.itineraryTasks)) {
+          tasksRef.current = cached.itineraryTasks;
+          setTasks(cached.itineraryTasks);
+        }
       } finally {
         setLoading(false);
       }
@@ -903,6 +941,66 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
 
   const setStopType = (stop: Stop, type: string) =>
     patchStop(stop, { type }, { type }, 'the new type');
+
+  // ── Day tasks ────────────────────────────────────────────────────────────────
+  // Shown at once (and in the offline copy), then sent or queued. A failure puts
+  // that one task back as it was and the toast names it; add / update / delete
+  // resolve false then, so the sheet stays open with what was typed.
+  const putTasks = (next: DayTask[]) => {
+    tasksRef.current = next;
+    setTasks(next);
+    getTripCache(tripId)
+      .then(c => saveTripCache(tripId, { ...(c ?? {}), itineraryTasks: next }))
+      .catch(() => {});
+  };
+  const replaceTask = (id: string, task: DayTask | null) =>
+    putTasks(task
+      ? sortTasks([...tasksRef.current.filter(t => t._id !== id), task])
+      : tasksRef.current.filter(t => t._id !== id));
+
+  const addTask = async (task: DayTask): Promise<boolean> => {
+    replaceTask(task._id, task);
+    try {
+      await sendNewTask(tripId, task, tasksRef.current);
+      return true;
+    } catch (err) {
+      replaceTask(task._id, null);
+      reportSaveFailure(`the task “${task.text}”`, err);
+      return false;
+    }
+  };
+
+  const updateTask = async (task: DayTask, fields: Partial<Pick<DayTask, 'text' | 'done' | 'remindAt' | 'date'>>, what: string): Promise<boolean> => {
+    replaceTask(task._id, changedTask(task, fields));
+    try {
+      await sendTaskChange(tripId, task, fields, tasksRef.current);
+      return true;
+    } catch (err) {
+      replaceTask(task._id, task);
+      reportSaveFailure(what, err);
+      return false;
+    }
+  };
+
+  const toggleTask = (task: DayTask) =>
+    updateTask(task, { done: !task.done }, `“${task.text}” as ${task.done ? 'not done' : 'done'}`);
+
+  const deleteTask = async (task: DayTask): Promise<boolean> => {
+    replaceTask(task._id, null);
+    try {
+      await sendTaskDelete(tripId, task, tasksRef.current);
+      return true;
+    } catch (err) {
+      replaceTask(task._id, task);
+      reportSaveFailure(`the deletion of “${task.text}”`, err);
+      return false;
+    }
+  };
+
+  const taskReminderFor = (task: DayTask) => {
+    const r = reminders.find(x => x.ref?.taskId === task._id);
+    return r ? { local: r.local, sent: r.sent } : null;
+  };
 
   // ── Getting about: the day's map, and the journeys it asks about ──────────────
   const showOnMap = (f: { leg?: string; stop?: string }) => {
@@ -1232,7 +1330,7 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
   const openWeatherDay = (w: HourWeather) => {
     const n = (weather?.days ?? []).findIndex(d => d.date === w.date);
     const params = new URLSearchParams(window.location.search);
-    for (const k of ['day', 'section', 'view', 'stop', 'leg', 'file', 'todo', 'expense', 'proof', 'sheet', 'i']) params.delete(k);
+    for (const k of ['day', 'section', 'view', 'stop', 'task', 'leg', 'file', 'todo', 'expense', 'proof', 'sheet', 'i']) params.delete(k);
     params.set('tab', 'weather');
     if (n >= 0) params.set('day', String(n + 1));
     window.history.pushState(null, '', `?${params.toString()}`);
@@ -1805,6 +1903,28 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
             />
           )}
         </Box>
+      )}
+
+      {/* ── Tasks — what has to get done today, no time block. Every view. ── */}
+      {activeDay && (
+        <DayTasks
+          key={activeDayYmd}
+          date={activeDayYmd}
+          tasks={tasks.filter(t => t.date === activeDayYmd)}
+          dayOptions={days.map(d => ({
+            date:  ymdOf(d.date),
+            label: `${dayLabel(d.date, { weekday: 'short', day: 'numeric', month: 'short' })} · Day ${d.dayNumber}`,
+          }))}
+          isMobile={isMobile}
+          highlightId={highlightTask}
+          now={here()}
+          reminderFor={taskReminderFor}
+          reminderNotice={categoryNotice('itinerary')}
+          onToggle={toggleTask}
+          onAdd={addTask}
+          onUpdate={(task, fields) => updateTask(task, fields, `your changes to “${task.text}”`)}
+          onDelete={deleteTask}
+        />
       )}
 
       {/* ── View controls — one slim row ── */}

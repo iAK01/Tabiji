@@ -6,6 +6,8 @@ import TripLogistics from '@/lib/mongodb/models/TripLogistics';
 import TripFile from '@/lib/mongodb/models/TripFile';
 import TripExpense from '@/lib/mongodb/models/TripExpense';
 import TripPacking from '@/lib/mongodb/models/TripPacking';
+import TripTask from '@/lib/mongodb/models/TripTask';
+import { sortTasks, taskOut } from '@/lib/itinerary/tasks';
 import { drivingTime, estimateDrive } from '@/lib/geo/drive';
 import { buildLegs, coords, departurePoint, setOffPoint } from '@/lib/push/journey';
 import { placeTz, tripZones } from '@/lib/push/timezones';
@@ -20,12 +22,13 @@ const LIVE_DRIVE_WITHIN_MS = 24 * 60 * 60 * 1000;
 
 export async function loadTripData(trip: any): Promise<TripData> {
   const tripId = trip._id;
-  const [itinerary, logistics, files, expenses, packing] = await Promise.all([
+  const [itinerary, logistics, files, expenses, packing, tasks] = await Promise.all([
     TripItinerary.findOne({ tripId }).lean(),
     TripLogistics.findOne({ tripId }).lean(),
     TripFile.find({ tripId }).lean(),
     TripExpense.find({ tripId }).lean(),
     TripPacking.findOne({ tripId }).select('items.packed items.skipped').lean(),
+    TripTask.find({ tripId }).lean(),
   ]);
   const items = ((packing as any)?.items ?? []) as any[];
   return {
@@ -36,6 +39,7 @@ export async function loadTripData(trip: any): Promise<TripData> {
     expenses: (expenses ?? []) as any[],
     packing:  items.length ? packingCounts(items) : null,
     flights:  await loadFlights((logistics as any)?.transportation ?? []),
+    tasks:    sortTasks(((tasks ?? []) as any[]).map(taskOut)),
   };
 }
 

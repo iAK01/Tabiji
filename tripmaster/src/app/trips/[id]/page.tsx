@@ -182,7 +182,7 @@ const slugToTab = (slug: string | null): number => {
 const ALL_TABS = [...TAB_SLUGS.keys()];
 
 // Sub-view and deep-link params belong to the tab (or sheet) that set them
-const TAB_PARAMS = ['day', 'section', 'view', 'stop', 'leg', 'file', 'todo', 'expense', 'proof', 'sheet', 'i'];
+const TAB_PARAMS = ['day', 'section', 'view', 'stop', 'task', 'leg', 'file', 'todo', 'expense', 'proof', 'sheet', 'i'];
 // Where you were on a tab — put back in the address when you return to it
 const RETURN_PARAMS: Record<number, string[]> = {
   1: ['section'],
@@ -276,8 +276,9 @@ function TripPageInner() {
   const [trip,      setTrip]      = useState<Trip | null>(null);
   const [activeTab, setActiveTabState] = useState(() => slugToTab(searchParams.get('tab')));
   const [editOpen,  setEditOpen]  = useState(false);
-  // The itinerary as it stands, to say which stops new dates would delete (null: couldn't read it)
+  // The itinerary as it stands, to say which stops and tasks new dates would delete (null: couldn't read it)
   const [editDays,  setEditDays]  = useState<any[] | null>(null);
+  const [editTasks, setEditTasks] = useState<Array<{ date: string; text: string }>>([]);
   const [editSaving, setEditSaving] = useState(false);
   const photoRefreshing = useRef(false);
   const [editForm,  setEditForm]  = useState({
@@ -393,7 +394,7 @@ function TripPageInner() {
     showTab(2);
     const params = new URLSearchParams(window.location.search);
     params.set('tab', TAB_SLUGS[2]);
-    for (const k of ['day', 'section', 'stop', 'leg', 'file', 'todo', 'expense', 'proof', 'sheet', 'i']) params.delete(k);
+    for (const k of ['day', 'section', 'stop', 'task', 'leg', 'file', 'todo', 'expense', 'proof', 'sheet', 'i']) params.delete(k);
     if (params.get('view') === 'recap') params.delete('view');
     params.set('now', String(Date.now()));
     window.history.pushState(null, '', `?${params.toString()}`);
@@ -493,9 +494,13 @@ function TripPageInner() {
       thereTo:   trip.presence?.leave  ?? trip.endDate?.split('T')[0] ?? '',
     });
     setEditDays(null);
+    setEditTasks([]);
     fetch(`/api/trips/${trip._id}/itinerary`)
       .then(r => (r.ok ? r.json() : null))
-      .then(d => setEditDays(Array.isArray(d?.days) ? d.days : null))
+      .then(d => {
+        setEditDays(Array.isArray(d?.days) ? d.days : null);
+        setEditTasks(Array.isArray(d?.tasks) ? d.tasks : []);
+      })
       .catch(() => setEditDays(null));
     setEditOpen(true);
   };
@@ -671,9 +676,19 @@ function TripPageInner() {
     : [];
   const dropUnknown  = narrowed && !editDays;
   const droppedNotes = dropped.filter(st => st.myNotes?.trim()).length;
-  const droppedNames = dropped.slice(0, 4).map(st => `“${String(st.name ?? '').trim() || 'Unnamed stop'}”`).join(', ')
-    + (dropped.length > 4 ? ` and ${dropped.length - 4} more` : '');
+  const droppedTasks = narrowed && editDays
+    ? editTasks.filter(t => t.date < editForm.startDate || t.date > editForm.endDate)
+    : [];
+  const droppedNames = [
+    ...dropped.map(st => String(st.name ?? '').trim() || 'Unnamed stop'),
+    ...droppedTasks.map(t => t.text),
+  ];
+  const droppedList  = droppedNames.slice(0, 4).map(n => `“${n}”`).join(', ')
+    + (droppedNames.length > 4 ? ` and ${droppedNames.length - 4} more` : '');
   const stopsWord    = (n: number) => `${n} ${n === 1 ? 'stop' : 'stops'}`;
+  const tasksWord    = (n: number) => `${n} ${n === 1 ? 'task' : 'tasks'}`;
+  const droppedWhat  = [dropped.length ? stopsWord(dropped.length) : '', droppedTasks.length ? tasksWord(droppedTasks.length) : '']
+    .filter(Boolean).join(' and ');
 
   // "Now" floats bottom-left on every tab while the trip's days are on — in thumb
   // reach, opposite the add button. Tapping Itinerary again while on it does the same.
@@ -1248,11 +1263,11 @@ function TripPageInner() {
                   InputProps={{ sx: { fontFamily: D.body } }}
                 />
               </Box>
-              {(dropped.length > 0 || dropUnknown) && (
+              {(droppedWhat || dropUnknown) && (
                 <Typography sx={{ fontFamily: D.body, fontSize: '0.85rem', fontWeight: 700, color: D.terra, mt: -1 }}>
                   {dropUnknown
-                    ? 'Itinerary stops on days outside these dates are deleted, with any notes on them.'
-                    : `${stopsWord(dropped.length)} on days outside these dates ${dropped.length === 1 ? 'is' : 'are'} deleted${droppedNotes ? `, with your notes on ${droppedNotes}` : ''}: ${droppedNames}.`}
+                    ? 'Itinerary stops and tasks on days outside these dates are deleted, with any notes on them.'
+                    : `${droppedWhat} on days outside these dates ${droppedNames.length === 1 ? 'is' : 'are'} deleted${droppedNotes ? `, with your notes on ${droppedNotes}` : ''}: ${droppedList}.`}
                 </Typography>
               )}
               <FormControl fullWidth>
@@ -1336,7 +1351,7 @@ function TripPageInner() {
                 backgroundColor: D.navy, boxShadow: 'none',
                 '&:hover': { backgroundColor: alpha(D.navy, 0.88), boxShadow: 'none' },
               }}>
-              {editSaving ? 'Saving…' : dropped.length ? `Save and delete ${stopsWord(dropped.length)}` : 'Save Changes'}
+              {editSaving ? 'Saving…' : droppedWhat ? `Save and delete ${droppedWhat}` : 'Save Changes'}
             </Button>
           </DialogActions>
         </Dialog>
@@ -1376,7 +1391,7 @@ function TripPageInner() {
                       <>
                         <ListItem>
                           <ListItemText
-                            primary={`Itinerary — ${deletePreview.audit.itinerary.days} day${deletePreview.audit.itinerary.days !== 1 ? 's' : ''}, ${deletePreview.audit.itinerary.stops} stop${deletePreview.audit.itinerary.stops !== 1 ? 's' : ''}`}
+                            primary={`Itinerary — ${deletePreview.audit.itinerary.days} day${deletePreview.audit.itinerary.days !== 1 ? 's' : ''}, ${deletePreview.audit.itinerary.stops} stop${deletePreview.audit.itinerary.stops !== 1 ? 's' : ''}${deletePreview.audit.itinerary.tasks ? `, ${deletePreview.audit.itinerary.tasks} task${deletePreview.audit.itinerary.tasks !== 1 ? 's' : ''}` : ''}`}
                             primaryTypographyProps={{ sx: { fontFamily: D.body, fontWeight: 600 } }}
                           />
                         </ListItem>

@@ -19,6 +19,7 @@ import { inQuietHours, QUIET_EXEMPT, type NotificationCategory, type Notificatio
 import { DEFAULT_LEAD_MIN, LEAD_MIN, LOGISTICS_FIELD, inheritedLead, parseTripLead, reminderGroup, stopLeadMins, type BookingCollection } from '@/lib/push/leads';
 import type { PushAction, PushPayload } from '@/lib/push/send';
 import { navigatePagePath } from '@/lib/navigation/links';
+import { tasksLine, type DayTask } from '@/lib/itinerary/tasks';
 import { passesForSure, passLabel, passSummary } from '@/lib/passes/passes';
 import {
   arrivalAt as liveArrival, closingTimes, delayMins, departureAt, flightPhase, landedMs, previousGate, DELAY_MIN,
@@ -72,6 +73,7 @@ export interface TripData {
   expenses:  any[];
   packing:   { packed: number; total: number } | null;
   flights:   Map<number, FlightStatus>;   // live status by transport index (lib/flights/live.ts)
+  tasks?:    DayTask[];                   // the itinerary days' tasks (lib/itinerary/tasks.ts)
 }
 
 /** Leg index → time to drive to its airport, for journey-start flights. */
@@ -83,6 +85,7 @@ export interface PlannedRef {
   index?:      number;
   phase?:      string;
   day?:        string;
+  taskId?:     string;
 }
 
 export interface Planned {
@@ -322,6 +325,7 @@ function gettingThereHint(trip: any, leg: Leg, isMainArrival: boolean): string |
 
 export function planTrip(data: TripData, r: Recipient, drive: DriveTimes, nowMs: number): Planned[] {
   const { trip, logistics, itinerary, files, expenses, packing, flights } = data;
+  const tasks          = data.tasks ?? [];
   const tripId         = String(trip._id);
   const zoneFor        = tripZones(trip);
   const transportation = logistics?.transportation ?? [];
@@ -821,6 +825,29 @@ export function planTrip(data: TripData, r: Recipient, drive: DriveTimes, nowMs:
     }
   }
 
+  // ── Day tasks: a reminder at the time set on one, read where you are then ──
+  const openOn = (date: string) => tasks.filter(t => !t.done && t.date === date);
+  if (trip.startDate) {
+    for (const task of tasks) {
+      if (task.done || !task.remindAt) continue;
+      const due = localStopTime(task.date, { time: task.remindAt });
+      if (!due) continue;
+      const others = openOn(task.date).filter(t => t._id !== task._id);
+      add({
+        key: `task-${task._id}${at$(due)}`, type: 'task_reminder', category: 'itinerary',
+        at: due.toMillis(), until: due.toMillis() + AT_EVENT_GRACE_MS, deferrable: false,
+        payload: {
+          title:   `Task: ${task.text}`,
+          body:    others.length ? `Also to do: ${tasksLine(others)}` : '',
+          url:     `/trips/${tripId}?tab=itinerary&day=${dayNumberOf(days, task.date, ymd(trip.startDate))}&task=${task._id}`,
+          tag:     `task-${task._id}`,
+          actions: [{ action: 'done', title: 'Done', complete: `/api/trips/${tripId}/tasks/${task._id}` }],
+        },
+        ref: { taskId: task._id },
+      });
+    }
+  }
+
   // ── Briefings ──────────────────────────────────────────────────────────────
   if (trip.startDate && trip.endDate) {
     const first   = ymd(trip.startDate);
@@ -836,13 +863,15 @@ export function planTrip(data: TripData, r: Recipient, drive: DriveTimes, nowMs:
       const zone  = zoneAt(probe.toMillis());
       const at    = atTime(date, morning, zone)!;
       const ahead = timedStops(days, date, localStopTime).filter(s => s.dt.toMillis() >= at.toMillis());
-      if (!ahead.length) continue;
+      const todo  = openOn(date);
+      if (!ahead.length && !todo.length) continue;
       add({
         key: `brief-${date}`, type: 'morning_briefing', category: 'briefings',
         at: at.toMillis(), until: at.toMillis() + BRIEFING_FOR_MS, deferrable: false, zone,
         payload: {
           title: isHomeAt(at.toMillis()) ? `Today: ${trip.name}` : `Today in ${cityOn(trip, date) || trip.name}`,
-          body:  [weatherLine(trip, date), itemsLine(ahead)].filter(Boolean).join('\n'),
+          body:  [weatherLine(trip, date), ahead.length ? itemsLine(ahead) : null, todo.length ? `To do: ${tasksLine(todo)}` : null]
+            .filter(Boolean).join('\n'),
           url:   dayUrl(tripId, dayNumberOf(days, date, first)),
           tag:   `brief-${date}`,
         },
@@ -884,6 +913,8 @@ export function planTrip(data: TripData, r: Recipient, drive: DriveTimes, nowMs:
         title = `Tomorrow: ${trip.name} begins`;
         if (firstUp) lines.push(`First up: ${firstUp.dt.toFormat('HH:mm')} ${firstUp.name}`);
       }
+      const todo = openOn(date);
+      if (todo.length) lines.push(`To do tomorrow: ${tasksLine(todo)}`);
       const isFirst = date === first;
       if (isFirst && packingLeft) lines.push(`Packed ${packing!.packed} of ${packing!.total}`);
       const weather = weatherLine(trip, date);

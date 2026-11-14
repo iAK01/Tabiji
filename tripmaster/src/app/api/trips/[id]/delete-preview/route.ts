@@ -9,6 +9,7 @@ import TripLogistics from '@/lib/mongodb/models/TripLogistics';
 import TripPacking from '@/lib/mongodb/models/TripPacking';
 import TripIntelligence from '@/lib/mongodb/models/TripIntelligence';
 import TripFile from '@/lib/mongodb/models/TripFile';
+import TripTask from '@/lib/mongodb/models/TripTask';
 import PushNotificationLog from '@/lib/mongodb/models/PushNotificationLog';
 
 export async function GET(
@@ -21,8 +22,9 @@ export async function GET(
   const trip = owned.trip.toObject() as any;
 
   // Fetch everything in parallel
-  const [itinerary, logistics, packing, intelligence, files, pushLogs] = await Promise.all([
+  const [itinerary, tasks, logistics, packing, intelligence, files, pushLogs] = await Promise.all([
     TripItinerary.findOne({ tripId }).lean() as any,
+    TripTask.countDocuments({ tripId }),
     TripLogistics.findOne({ tripId }).lean() as any,
     TripPacking.findOne({ tripId }).lean() as any,
     TripIntelligence.findOne({ tripId }).lean() as any,
@@ -52,7 +54,7 @@ export async function GET(
     tripName: trip.name,
     audit: {
       // MongoDB documents
-      itinerary:    { days: itineraryDays, stops: itineraryStops },
+      itinerary:    { days: itineraryDays, stops: itineraryStops, tasks },
       logistics:    { transport: transportCount, accommodation: accommodationCount, venues: venueCount },
       packing:      { exists: !!packing },
       intelligence: { exists: !!intelligence },

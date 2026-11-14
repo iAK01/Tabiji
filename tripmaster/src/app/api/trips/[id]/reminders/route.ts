@@ -59,7 +59,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
 
   const nowMs   = Date.now();
   const planned = planTrip(data, recipient, await driveTimes(data, recipient, nowMs), nowMs)
-    .filter(p => recipient.prefs.categories[p.category] && (p.ref?.stopId || p.ref?.collection));
+    .filter(p => recipient.prefs.categories[p.category] && (p.ref?.stopId || p.ref?.collection || p.ref?.taskId));
 
   const sentLogs = await PushNotificationLog.find({ userId: user._id, tripId: id }, 'key notificationType').lean() as any[];
   const sent     = new Set(sentLogs.map(l => `${l.key}|${l.notificationType}`));

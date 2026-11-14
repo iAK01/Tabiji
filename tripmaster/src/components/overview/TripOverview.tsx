@@ -481,8 +481,10 @@ export default function TripOverview({ trip, coverPhotoUrl, coverPhotoCredit, on
               tripId={trip._id}
               days={itinerary?.days ?? []}
               files={resources}
+              tasks={itinerary?.tasks ?? []}
               now={now}
               onFilesChange={setResources}
+              onTasksChange={update => setItinerary((it: any) => (it ? { ...it, tasks: update(it.tasks ?? []) } : it))}
               onOpenFile={f => setViewerFile({ _id: f._id, name: f.name, mimeType: f.mimeType, gcsUrl: f.gcsUrl })}
             />
           )}

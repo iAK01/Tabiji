@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import {
-  Box, ButtonBase, Dialog, Drawer, Fab, IconButton, Link, Menu, MenuItem, TextField,
+  Box, ButtonBase, Dialog, Drawer, Fab, IconButton, InputAdornment, Link, Menu, MenuItem, TextField,
   ToggleButton, ToggleButtonGroup, Tooltip, Typography, Zoom, alpha, useMediaQuery, useTheme,
 } from '@mui/material';
 import CurrencyExchangeIcon  from '@mui/icons-material/CurrencyExchange';
@@ -223,8 +223,11 @@ export default function CurrencyConverter({ tripId, raised = false, hidden = fal
             size="small" placeholder="Other" value={customPct}
             onChange={e => setCustomPct(e.target.value.replace(/[^\d.,]/g, '').slice(0, 5))}
             inputProps={{ inputMode: 'decimal', 'aria-label': 'Other percent off' }}
-            InputProps={{ endAdornment: <Typography sx={{ fontSize: '0.85rem', color: D.muted }}>% off</Typography> }}
-            sx={{ width: 118, mt: 1, '& .MuiInputBase-root': { fontFamily: D.body, fontSize: '0.9rem', backgroundColor: '#fff' } }}
+            InputProps={{ endAdornment: (
+              <InputAdornment position="end" sx={{ '& p': { fontFamily: D.body, fontSize: '0.85rem', color: D.muted } }}>% off</InputAdornment>
+            ) }}
+            // 16px: any smaller and iOS zooms the page in when the field is tapped
+            sx={{ width: 128, mt: 1, '& .MuiInputBase-root': { fontFamily: D.body, fontSize: '16px', backgroundColor: '#fff' } }}
           />
         </Box>
         {pcts.map(p => {

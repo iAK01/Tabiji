@@ -150,6 +150,28 @@ async function dispatchQueuedAction(action: any): Promise<boolean> {
         break;
       }
 
+      case 'ADD_TASK':
+        res = await fetch(`/api/trips/${action.tripId}/tasks`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(action.payload),
+        });
+        break;
+
+      case 'UPDATE_TASK': {
+        const { taskId, name: _name, ...fields } = action.payload;   // name: for describeAction
+        res = await fetch(`/api/trips/${action.tripId}/tasks/${taskId}`, {
+          method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(fields),
+        });
+        break;
+      }
+
+      case 'DELETE_TASK':
+        res = await fetch(`/api/trips/${action.tripId}/tasks/${action.payload?.taskId}`, { method: 'DELETE' });
+        // Already gone counts as done
+        if (res.status === 404) return true;
+        break;
+
       case 'DISMISS_GAP':
         res = await fetch(`/api/trips/${action.tripId}/itinerary`, {
           method: 'PATCH', headers: { 'Content-Type': 'application/json' },
@@ -313,6 +335,9 @@ function describeAction(action: any): string {
     case 'RESCHEDULE_STOP':         return 'a change to an itinerary stop';
     case 'DELETE_STOP':             return 'removing an itinerary stop';
     case 'REPEAT_STOP':             return `repeating${p.name ? ` “${p.name}”` : ' a stop'} on other days`;
+    case 'ADD_TASK':                return `the task${p.text ? ` “${p.text}”` : ''}`;
+    case 'UPDATE_TASK':             return `a change to the task${p.name ? ` “${p.name}”` : ''}`;
+    case 'DELETE_TASK':             return `deleting the task${p.name ? ` “${p.name}”` : ''}`;
     case 'DISMISS_GAP':             return p.dismissed ? '“I’ve sorted this” on a journey' : 'asking about a journey again';
     case 'ADD_TRANSPORT':
     case 'EDIT_TRANSPORT':          return 'a transport booking';

@@ -7,6 +7,7 @@ import TripLogistics from '@/lib/mongodb/models/TripLogistics';
 import TripPacking from '@/lib/mongodb/models/TripPacking';
 import TripIntelligence from '@/lib/mongodb/models/TripIntelligence';
 import TripFile from '@/lib/mongodb/models/TripFile';
+import TripTask from '@/lib/mongodb/models/TripTask';
 import PushNotificationLog from '@/lib/mongodb/models/PushNotificationLog';
 import { deleteFile } from '@/lib/utils/storage';
 import User from '@/lib/mongodb/models/User';
@@ -67,6 +68,11 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
       { days },
       { upsert: true }
     );
+    // Tasks on the days the new dates leave out go with them (Edit Trip names them first)
+    await TripTask.deleteMany({
+      tripId: id,
+      $or: [{ date: { $lt: String(body.startDate).slice(0, 10) } }, { date: { $gt: String(body.endDate).slice(0, 10) } }],
+    });
     await syncLogisticsToItinerary(id);
   }
 
@@ -114,9 +120,11 @@ const gcsFiles = await TripFile.find({ tripId, gcsPath: { $exists: true, $ne: nu
   const logsResult = await PushNotificationLog.deleteMany({ tripId });
   receipt.pushLogsDeleted = logsResult.deletedCount;
 
-  // ── Step 4: TripItinerary ──────────────────────────────────────────────────
+  // ── Step 4: TripItinerary, and the tasks on its days ───────────────────────
   await TripItinerary.deleteOne({ tripId });
   receipt.itineraryDeleted = true;
+  const tasksResult = await TripTask.deleteMany({ tripId });
+  receipt.tasksDeleted = tasksResult.deletedCount;
 
   // ── Step 5: TripLogistics ──────────────────────────────────────────────────
   await TripLogistics.deleteOne({ tripId });
