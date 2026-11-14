@@ -3,6 +3,8 @@
 import { Box, Typography, Paper, Button, Chip } from '@mui/material';
 import WarningAmberIcon  from '@mui/icons-material/WarningAmber';
 import OpenInNewIcon     from '@mui/icons-material/OpenInNew';
+import ArrowForwardRoundedIcon from '@mui/icons-material/ArrowForwardRounded';
+import PlugFace from './PlugFace';
 import type { Intelligence } from './Intelligence.types';
 import { D, SectionHeading, TimezoneCard } from './Intelligence.shared';
 
@@ -284,15 +286,15 @@ export default function Needtoknow({ visa, tipping, water, payment, cultural, ti
                 {electrical.message}
               </Typography>
               {/* Plug row — footnotes kept outside so they don't affect vertical alignment */}
-              <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: { xs: 2, sm: 3 }, flexWrap: 'wrap' }}>
+              <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: { xs: 1.5, sm: 3 }, flexWrap: 'wrap' }}>
                 {groupPlugs(electrical.originPlug, 'origin').map(g => (
-                  <Box key={g.displayType} sx={{ textAlign: 'center', width: 88 }}>
+                  <Box key={g.displayType} sx={{ textAlign: 'center', width: 116 }}>
                     <Box sx={{
-                      width: 80, height: 80, borderRadius: 2,
+                      width: 96, height: 96, borderRadius: 2.5, mx: 'auto',
                       border: `1px solid ${D.rule}`, backgroundColor: D.paper,
                       display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 1,
                     }}>
-                      <img src={`/plugs/${g.displayType}.svg`} alt={g.name} width={52} height={52} />
+                      <PlugFace type={g.displayType} size={80} title={`${g.typeLabel} plug`} />
                     </Box>
                     <Typography sx={{ fontSize: '0.7rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: D.muted, lineHeight: 1.2 }}>Home</Typography>
                     <Typography sx={{ fontSize: '0.97rem', fontWeight: 800, color: D.navy, lineHeight: 1.2 }}>{g.name}</Typography>
@@ -300,17 +302,17 @@ export default function Needtoknow({ visa, tipping, water, payment, cultural, ti
                   </Box>
                 ))}
 
-                <Typography sx={{ fontSize: '1.5rem', color: D.muted, fontWeight: 300, flexShrink: 0, mt: '28px' }}>→</Typography>
+                <ArrowForwardRoundedIcon sx={{ fontSize: 28, color: D.terra, flexShrink: 0, mt: '34px' }} />
 
                 {groupPlugs(electrical.destinationPlug, 'destination').map(g => (
-                  <Box key={g.displayType} sx={{ textAlign: 'center', width: 88 }}>
+                  <Box key={g.displayType} sx={{ textAlign: 'center', width: 116 }}>
                     <Box sx={{
-                      width: 80, height: 80, borderRadius: 2,
+                      width: 96, height: 96, borderRadius: 2.5, mx: 'auto',
                       border: `1px solid rgba(196,113,74,0.35)`,
                       backgroundColor: 'rgba(196,113,74,0.07)',
                       display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 1,
                     }}>
-                      <img src={`/plugs/${g.displayType}.svg`} alt={g.name} width={52} height={52} />
+                      <PlugFace type={g.displayType} size={80} title={`${g.typeLabel} plug`} />
                     </Box>
                     <Typography sx={{ fontSize: '0.7rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: D.muted, lineHeight: 1.2 }}>There</Typography>
                     <Typography sx={{ fontSize: '0.97rem', fontWeight: 800, color: D.navy, lineHeight: 1.2 }}>{g.name}</Typography>
