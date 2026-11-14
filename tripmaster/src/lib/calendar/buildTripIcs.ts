@@ -1,6 +1,7 @@
 import ical, { ICalCalendarMethod, type ICalEventData } from 'ical-generator';
 import { DateTime } from 'luxon';
 import { placeTz } from '@/lib/push/timezones';
+import { nightPages } from '@/lib/itinerary/nights';
 
 // ─── Types (all stored loosely as Mixed in Mongo) ─────────────────────────────
 
@@ -9,6 +10,8 @@ export type CalendarCategory = 'itinerary' | 'transport' | 'accommodation' | 've
 export interface BuildIcsOptions {
   include: CalendarCategory[];
   alarms:  boolean;
+  /** Only these dates (YYYY-MM-DD); absent = the whole trip */
+  days?:   string[];
 }
 
 interface TripLike {
@@ -100,6 +103,11 @@ export function buildTripIcs(
   });
 
   const want = new Set(opts.include);
+  // A chosen day matches what that day's itinerary page shows; bookings by their
+  // own local dates (a stay counts on every date from check-in to check-out)
+  const onDays = opts.days?.length ? new Set(opts.days) : null;
+  const ymd    = (v: unknown) => (v instanceof Date ? v.toISOString() : String(v ?? '')).slice(0, 10);
+  const picked = (...dates: (string | null | undefined)[]) => !onDays || dates.some(d => !!d && onDays.has(d));
 
   // ── Trip container (all-day span) ──────────────────────────────────────────
   if (trip.startDate && trip.endDate && want.size) {
@@ -117,8 +125,11 @@ export function buildTripIcs(
 
   // ── Itinerary stops ───────────────────────────────────────────────────────
   if (want.has('itinerary')) {
-    for (const day of itinerary?.days ?? []) {
-      for (const stop of day?.stops ?? []) {
+    const days  = (itinerary?.days ?? []).filter(Boolean).map((d: any) => ({ ...d, date: ymd(d.date), stops: d.stops ?? [] }));
+    const pages = nightPages(days);
+    for (const [i, day] of days.entries()) {
+      if (!picked(day.date)) continue;
+      for (const stop of pages[i].stops as any[]) {
         if (stop?.skipped) continue;
         const raw = stop?.scheduledStart;
         if (!raw) continue;
@@ -154,6 +165,7 @@ export function buildTripIcs(
       const depFloat = DateTime.fromISO(String(t.departureTime), { zone: 'utc' });
       if (!depFloat.isValid) return;
       const arrFloat = t.arrivalTime ? DateTime.fromISO(String(t.arrivalTime), { zone: 'utc' }) : null;
+      if (!picked(depFloat.toISODate(), arrFloat?.isValid ? arrFloat.toISODate() : null)) return;
 
       cal.createEvent({
         id: uid(`txn-${tripId}-${i}`),
@@ -186,6 +198,8 @@ export function buildTripIcs(
       const endBase = a.checkOut && DateTime.fromISO(a.checkOut).isValid
         ? DateTime.fromISO(a.checkOut)
         : startDate;
+      const from = startDate.toISODate()!, to = endBase.toISODate()!;
+      if (onDays && ![...onDays].some(d => d >= from && d <= to)) return;
 
       cal.createEvent({
         id: uid(`stay-${tripId}-${i}`),
@@ -210,6 +224,7 @@ export function buildTripIcs(
   if (want.has('venues')) {
     (logistics?.venues ?? []).forEach((v: any, i: number) => {
       if (!v?.date) return;
+      if (!picked(ymd(v.date))) return;
       const emoji = VENUE_EMOJI[v.type] ?? '📍';
       const common: Partial<ICalEventData> = {
         id: uid(`venue-${tripId}-${i}`),

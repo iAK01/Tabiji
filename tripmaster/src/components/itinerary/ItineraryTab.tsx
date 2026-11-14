@@ -1509,7 +1509,10 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
         </Box>
       )}
 
-      <ExportCalendarDialog tripId={tripId} open={exportOpen} onClose={() => setExportOpen(false)} />
+      <ExportCalendarDialog
+        tripId={tripId} open={exportOpen} onClose={() => setExportOpen(false)}
+        days={days.map(d => ymdOf(d.date))} activeDay={activeDayYmd}
+      />
 
       {/* ── Day selector — fills the width; scrolls sideways once the days won't fit.
            Phone: one line per day, the month named once where it starts. ── */}

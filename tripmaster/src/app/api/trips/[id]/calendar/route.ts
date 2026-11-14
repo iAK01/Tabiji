@@ -8,7 +8,7 @@ import { buildTripIcs, type CalendarCategory } from '@/lib/calendar/buildTripIcs
 
 const ALL: CalendarCategory[] = ['itinerary', 'transport', 'accommodation', 'venues'];
 
-// GET /api/trips/[id]/calendar?include=itinerary,transport,accommodation,venues&alarms=1
+// GET /api/trips/[id]/calendar?include=itinerary,transport,accommodation,venues&alarms=1[&days=2026-11-16,2026-11-17]
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const session = await getServerSession();
@@ -25,13 +25,16 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     ? (raw.split(',').map(s => s.trim()).filter(s => ALL.includes(s as CalendarCategory)) as CalendarCategory[])
     : ALL;
   const alarms  = url.searchParams.get('alarms') === '1';
+  const rawDays = url.searchParams.get('days');
+  const days    = rawDays?.split(',').map(s => s.trim()).filter(s => /^\d{4}-\d{2}-\d{2}$/.test(s));
+  if (rawDays !== null && !days?.length) return new Response('No valid days', { status: 400 });
 
   const [itinerary, logistics] = await Promise.all([
     TripItinerary.findOne({ tripId: id }).lean(),
     TripLogistics.findOne({ tripId: id }).lean(),
   ]);
 
-  const ics = buildTripIcs(trip.toObject(), itinerary as any, logistics as any, { include, alarms });
+  const ics = buildTripIcs(trip.toObject(), itinerary as any, logistics as any, { include, alarms, days });
 
   const slug = (trip.name || 'trip')
     .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'trip';

@@ -4,6 +4,7 @@ import { useState } from 'react';
 import {
   Dialog, DialogTitle, DialogContent, DialogActions,
   Box, Typography, Button, Checkbox, FormControlLabel, Divider,
+  ButtonBase, ToggleButton, ToggleButtonGroup,
 } from '@mui/material';
 import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
 import FileDownloadIcon  from '@mui/icons-material/FileDownload';
@@ -25,18 +26,47 @@ const CATEGORIES: { key: Cat; label: string; hint: string }[] = [
   { key: 'venues',        label: 'Venues',               hint: 'Concerts, conferences, restaurants' },
 ];
 
-export default function ExportCalendarDialog({ tripId, open, onClose }: {
+// YYYY-MM-DD as a local date (not UTC midnight, which can land on the day before)
+const localDate = (ymd: string) => {
+  const [y, m, d] = ymd.split('-').map(Number);
+  return new Date(y, m - 1, d);
+};
+
+export default function ExportCalendarDialog({ tripId, open, onClose, days, activeDay }: {
   tripId: string; open: boolean; onClose: () => void;
+  days: string[];        // the itinerary's dates, YYYY-MM-DD
+  activeDay?: string;    // the day being viewed — the first pick when choosing days
 }) {
   const [picked, setPicked] = useState<Record<Cat, boolean>>({
     itinerary: true, transport: true, accommodation: true, venues: true,
   });
   const [alarms, setAlarms] = useState(true);
+  const [scope,  setScope]  = useState<'all' | 'some'>('all');
+  const [onDays, setOnDays] = useState<Set<string>>(new Set());
 
-  const chosen = CATEGORIES.filter(c => picked[c.key]).map(c => c.key);
+  const chosen    = CATEGORIES.filter(c => picked[c.key]).map(c => c.key);
+  const dayList   = days.filter(d => onDays.has(d));
+  const canExport = chosen.length > 0 && (scope === 'all' || dayList.length > 0);
+
+  function chooseScope(next: 'all' | 'some' | null) {
+    if (!next) return;
+    if (next === 'some' && onDays.size === 0 && activeDay && days.includes(activeDay)) {
+      setOnDays(new Set([activeDay]));
+    }
+    setScope(next);
+  }
+
+  function toggleDay(d: string) {
+    setOnDays(prev => {
+      const next = new Set(prev);
+      if (next.has(d)) next.delete(d); else next.add(d);
+      return next;
+    });
+  }
 
   function download() {
     const qs = new URLSearchParams({ include: chosen.join(','), alarms: alarms ? '1' : '0' });
+    if (scope === 'some') qs.set('days', dayList.join(','));
     const a = document.createElement('a');
     a.href = `/api/trips/${tripId}/calendar?${qs.toString()}`;
     a.download = '';
@@ -63,6 +93,63 @@ export default function ExportCalendarDialog({ tripId, open, onClose }: {
           Downloads an <strong>.ics</strong> file — open it in Fantastical, Apple Calendar or Google Calendar.
           Re-download any time after you change the trip.
         </Typography>
+
+        <Typography sx={{
+          fontFamily: D.body, fontSize: '0.65rem', fontWeight: 800, letterSpacing: '0.1em',
+          textTransform: 'uppercase', color: 'text.secondary', mb: 0.75,
+        }}>
+          Days
+        </Typography>
+        <ToggleButtonGroup
+          exclusive fullWidth size="small"
+          value={scope}
+          onChange={(_, v) => chooseScope(v)}
+          sx={{ mb: scope === 'some' ? 1.25 : 0.5,
+            '& .MuiToggleButton-root': {
+              minHeight: 44, fontFamily: D.body, fontWeight: 700, fontSize: '0.8rem',
+              textTransform: 'none', color: D.navy,
+              '&.Mui-selected, &.Mui-selected:hover': { backgroundColor: D.navy, color: '#ffffff' },
+            } }}
+        >
+          <ToggleButton value="all">Whole trip</ToggleButton>
+          <ToggleButton value="some">Choose days</ToggleButton>
+        </ToggleButtonGroup>
+
+        {scope === 'some' && (
+          <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(64px, 1fr))', gap: 0.75, mb: 0.5 }}>
+            {days.map(d => {
+              const on   = onDays.has(d);
+              const date = localDate(d);
+              return (
+                <ButtonBase
+                  key={d}
+                  onClick={() => toggleDay(d)}
+                  aria-pressed={on}
+                  aria-label={date.toLocaleDateString('en-IE', { weekday: 'long', day: 'numeric', month: 'long' })}
+                  sx={{
+                    minHeight: 52, borderRadius: 1.5, flexDirection: 'column', gap: 0.25,
+                    border: `1px solid ${on ? D.navy : 'rgba(44,62,80,0.2)'}`,
+                    backgroundColor: on ? D.navy : '#ffffff',
+                    color: on ? '#ffffff' : D.navy,
+                    transition: 'background-color 0.15s',
+                  }}
+                >
+                  <Typography component="span" sx={{
+                    fontFamily: D.body, fontSize: '0.6rem', fontWeight: 800, letterSpacing: '0.1em',
+                    textTransform: 'uppercase', lineHeight: 1, opacity: on ? 0.7 : 0.6,
+                  }}>
+                    {date.toLocaleDateString('en-IE', { weekday: 'short' })}
+                  </Typography>
+                  <Typography component="span" sx={{ fontFamily: D.display, fontSize: '0.85rem', lineHeight: 1.1 }}>
+                    {date.toLocaleDateString('en-IE', { day: 'numeric', month: 'short' })}
+                  </Typography>
+                </ButtonBase>
+              );
+            })}
+          </Box>
+        )}
+
+        <Divider sx={{ my: 1.5 }} />
 
         <Box sx={{ display: 'flex', flexDirection: 'column' }}>
           {CATEGORIES.map(c => (
@@ -114,7 +201,7 @@ export default function ExportCalendarDialog({ tripId, open, onClose }: {
         <Button
           variant="contained"
           onClick={download}
-          disabled={chosen.length === 0}
+          disabled={!canExport}
           startIcon={<FileDownloadIcon />}
           sx={{ fontFamily: D.body, fontWeight: 700, backgroundColor: D.green,
             '&:hover': { backgroundColor: '#5a6b4e' }, '&.Mui-disabled': { backgroundColor: 'rgba(107,124,92,0.3)' } }}
