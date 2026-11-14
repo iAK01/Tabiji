@@ -41,6 +41,7 @@ import { warmTrips } from '@/lib/offline/warm';
 import TripReadinessPanel from '@/components/dashboard/TripReadinessPanel';
 import { isOnTrip, showsNow, nowHref, localYmd, displayStatus } from '@/lib/trips/onTrip';
 import NotificationBell from '@/components/notifications/NotificationBell';
+import CurrencyConverter from '@/components/currency/CurrencyConverter';
 import NavigateButton from '@/components/ui/NavigateButton';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -1016,6 +1017,9 @@ export default function Dashboard() {
       </Box>
 
       <DocumentViewer file={viewerFile} onClose={() => setViewerFile(null)} />
+
+      {/* The trip you're on (or about to be): its currency converter, as on the trip page */}
+      {activeTrip && !activeTrip._pending && <CurrencyConverter tripId={activeTrip._id} />}
     </>
   );
 }

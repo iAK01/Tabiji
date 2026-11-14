@@ -63,6 +63,7 @@ import { isOnTrip, displayStatus, showsNow } from '@/lib/trips/onTrip';
 import NotificationBell    from '@/components/notifications/NotificationBell';
 import { travelDaysLabel, type Presence } from '@/lib/trips/presence';
 import TravelSheet         from '@/components/notifications/TravelSheet';
+import CurrencyConverter   from '@/components/currency/CurrencyConverter';
 import { placeTz }         from '@/lib/push/timezones';
 import { TabActiveContext } from '@/lib/hooks/useTabActive';
 import { onTripWrite }     from '@/lib/trips/tripWrites';
@@ -1148,6 +1149,9 @@ function TripPageInner() {
             </SpeedDial>
           );
         })()}
+
+        {/* ── Currency converter — every tab, when the trip's currency isn't home's ── */}
+        <CurrencyConverter tripId={trip._id} raised hidden={fabOpen} />
 
         {/* ── Booking / arrival sheet — opened by notification links (?sheet=) ── */}
         <TravelSheet trip={trip} />

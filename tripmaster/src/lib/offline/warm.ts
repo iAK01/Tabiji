@@ -18,6 +18,7 @@ const APP_DATA  = [
 const TRIP_DATA = [
   '', '/itinerary', '/logistics', '/files', '/packing', '/expenses',
   '/transport', '/weather', '/intelligence', '/culture', '/guide', '/reminders', '/flights', '/saved', '/routes',
+  '/currency',
 ];
 
 const DAY_MS       = 86_400_000;
