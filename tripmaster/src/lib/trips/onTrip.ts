@@ -38,5 +38,29 @@ export function showsNow(trip: TripDates & { endDate?: string | Date | null }, n
   return yesterday === end && now.getHours() < 6;
 }
 
+type Placed = TripDates & { endDate?: string | Date | null; departsAt?: string | null; _pending?: boolean };
+
+// When you set off: the first leg's departure, else the start of the first day.
+function setOffAt(trip: Placed): number {
+  if (trip.departsAt) return new Date(trip.departsAt).getTime();
+  const [y, m, d] = ymd(trip.startDate!).split('-').map(Number);
+  return new Date(y, m - 1, d).getTime();
+}
+
+// The trip you're on now (its "Now" window), for opening the app straight into it.
+// Two at once — back to back, or one inside another — is the one you set off on
+// last. Null when there's none, or no telling which.
+export function currentTrip<T extends Placed>(trips: T[], now: Date = new Date()): T | null {
+  const on = trips.filter(t =>
+    !t._pending && t.status !== 'idea' && t.status !== 'completed' && showsNow(t, now));
+  if (on.length <= 1) return on[0] ?? null;
+  const left = on
+    .map(t => ({ t, at: setOffAt(t) }))
+    .filter(x => x.at <= now.getTime())
+    .sort((a, b) => b.at - a.at);
+  if (left.length === 0 || (left.length > 1 && left[0].at === left[1].at)) return null;
+  return left[0].t;
+}
+
 /** The itinerary, opened at now — ItineraryTab reads `now` and drops it. */
 export const nowHref = (tripId: string) => `/trips/${tripId}?tab=itinerary&now=${Date.now()}`;

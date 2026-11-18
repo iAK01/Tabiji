@@ -39,7 +39,7 @@ import { saveTripList, getTripList, clearOfflineData } from '@/lib/offline/db';
 import { useFlushQueueOnReconnect } from '@/lib/offline/useFlushQueue';
 import { warmTrips } from '@/lib/offline/warm';
 import TripReadinessPanel from '@/components/dashboard/TripReadinessPanel';
-import { isOnTrip, showsNow, nowHref, localYmd, displayStatus } from '@/lib/trips/onTrip';
+import { isOnTrip, showsNow, nowHref, localYmd, displayStatus, currentTrip } from '@/lib/trips/onTrip';
 import NotificationBell from '@/components/notifications/NotificationBell';
 import CurrencyConverter from '@/components/currency/CurrencyConverter';
 import NavigateButton from '@/components/ui/NavigateButton';
@@ -246,6 +246,17 @@ function deriveRightNow(days: ItineraryDay[]): RightNow | null {
   const untimed = todayDay.stops.find(s => stopStartMinutes(s) === null);
   if (untimed) return { stop: untimed, startM: null, inProgress: false };
   return null;
+}
+
+// Opening the app (the home-screen icon starts here) while on a trip goes straight
+// to its itinerary at now. Once per load, and only when the app opened on this page —
+// not coming back here from a trip, or back/forward and reloads.
+let appOpenClaimed = false;
+function claimAppOpen(): boolean {
+  if (appOpenClaimed) return false;
+  appOpenClaimed = true;
+  const nav = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined;
+  return nav?.type === 'navigate' && new URL(nav.name).pathname.replace(/\/$/, '') === '/dashboard';
 }
 
 // ─── Active trip banner ───────────────────────────────────────────────────────
@@ -485,23 +496,35 @@ export default function Dashboard() {
   const [viewerFile,      setViewerFile]      = useState<ViewableFile | null>(null);
 
   useEffect(() => {
+    const opening = claimAppOpen();
+    let left = false;
+    const openCurrent = (list: Trip[]) => {
+      const t = opening && !left ? currentTrip(list) : null;
+      if (t) { left = true; router.replace(nowHref(t._id)); }
+      return left;
+    };
     async function loadTrips() {
+      // The saved list answers at once — no waiting on a roaming connection.
+      // The fresh load below still runs: it keeps the offline copies current.
+      if (opening) openCurrent((await getTripList().catch(() => null)) ?? []);
+      let list: Trip[];
       try {
         const res  = await fetch('/api/trips');
         const data = await res.json();
         // An error response must not wipe the offline trip list — fall back to it instead.
         if (!res.ok || !Array.isArray(data.trips)) throw new Error(`Trip list load failed (${res.status})`);
-        await saveTripList(data.trips ?? []);
-        setTrips(data.trips ?? []);
-        warmTrips(data.trips ?? []).catch(() => {});
+        list = data.trips;
+        await saveTripList(list);
+        warmTrips(list).catch(() => {});
       } catch {
-        const offlineTrips = await getTripList();
-        setTrips(offlineTrips ?? []);
-      } finally {
-        setLoading(false);
+        list = (await getTripList().catch(() => null)) ?? [];
       }
+      if (openCurrent(list)) return;
+      setTrips(list);
+      setLoading(false);
     }
     loadTrips();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {

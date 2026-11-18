@@ -10,6 +10,7 @@ import { listenForNotificationOpens, syncPushOnOpen } from '@/lib/push/client';
 import OfflineIndicator from '@/components/ui/OfflineIndicator';
 import SaveErrorToast from '@/components/ui/SaveErrorToast';
 import PassMoment from '@/components/passes/PassMoment';
+import { useViewportGap } from '@/lib/hooks/useViewportGap';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import '@/styles/mapbox-popup-overrides.css';
 
@@ -18,6 +19,8 @@ export default function RootLayout({
 }: {
   children: React.ReactNode;
 }) {
+
+  useViewportGap();
 
   useEffect(() => {
     registerServiceWorker();

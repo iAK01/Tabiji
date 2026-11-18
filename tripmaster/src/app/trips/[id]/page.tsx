@@ -9,7 +9,7 @@ import {
   TextField, Select, MenuItem, FormControl, InputLabel,
   List, ListItem, ListItemText, Divider,
   useMediaQuery, useTheme,
-  SpeedDial, SpeedDialIcon, SpeedDialAction, Fab, ButtonBase,
+  SpeedDial, SpeedDialIcon, SpeedDialAction, Fab, ButtonBase, Zoom,
 } from '@mui/material';
 import ArrowBackIcon       from '@mui/icons-material/ArrowBack';
 import ScheduleIcon        from '@mui/icons-material/Schedule';
@@ -66,6 +66,8 @@ import TravelSheet         from '@/components/notifications/TravelSheet';
 import CurrencyConverter   from '@/components/currency/CurrencyConverter';
 import { placeTz }         from '@/lib/push/timezones';
 import { TabActiveContext } from '@/lib/hooks/useTabActive';
+import { useShownOnTap }   from '@/lib/hooks/useShownOnTap';
+import { aboveBottom }     from '@/lib/hooks/useViewportGap';
 import { onTripWrite }     from '@/lib/trips/tripWrites';
 
 const MapTab = dynamic(() => import('@/components/map/MapTab'), { ssr: false });
@@ -291,6 +293,9 @@ function TripPageInner() {
 
   const [fabTrigger, setFabTrigger] = useState<FabTrigger | null>(null);
   const [fabOpen,    setFabOpen]    = useState(false);
+  // On a phone the itinerary is all detail: Now, add and currency wait for a tap
+  const fabsTapped = useShownOnTap(isMobile && activeTab === 2);
+  const fabsShown  = fabsTapped || fabOpen;
 
   const tabContentRef = useRef<HTMLDivElement>(null);
 
@@ -1098,21 +1103,23 @@ function TripPageInner() {
 
         {/* ── Now — the itinerary at the time it is now ── */}
         {nowShown && (
-          <ButtonBase
-            onClick={goToNow}
-            aria-label="Now: the itinerary at the current time"
-            sx={{
-              position: 'fixed', left: { xs: 16, sm: 32 }, bottom: { xs: 28, sm: 36 }, zIndex: 1050,
-              minHeight: 48, px: 2, gap: 0.75, borderRadius: 99,
-              backgroundColor: D.navy, color: 'white',
-              boxShadow: `0 4px 20px ${alpha(D.navy, 0.3)}`,
-              fontFamily: D.body, fontSize: '0.9rem', fontWeight: 800,
-              '& svg': { fontSize: '1.25rem', color: D.terra },
-            }}
-          >
-            <ScheduleIcon />
-            Now
-          </ButtonBase>
+          <Zoom in={fabsShown} appear={false}>
+            <ButtonBase
+              onClick={goToNow}
+              aria-label="Now: the itinerary at the current time"
+              sx={{
+                position: 'fixed', left: { xs: 16, sm: 32 }, bottom: { xs: aboveBottom(28), sm: aboveBottom(36) }, zIndex: 1050,
+                minHeight: 48, px: 2, gap: 0.75, borderRadius: 99,
+                backgroundColor: D.navy, color: 'white',
+                boxShadow: `0 4px 20px ${alpha(D.navy, 0.3)}`,
+                fontFamily: D.body, fontSize: '0.9rem', fontWeight: 800,
+                '& svg': { fontSize: '1.25rem', color: D.terra },
+              }}
+            >
+              <ScheduleIcon />
+              Now
+            </ButtonBase>
+          </Zoom>
         )}
 
         {/* ── Context-aware FAB ── */}
@@ -1120,19 +1127,21 @@ function TripPageInner() {
           const actions = getTripFabActions(trip.tripType)[activeTab];
           if (actions.length === 1) {
             return (
-              <Tooltip title={actions[0].label} placement="left">
-                <Fab
-                  onClick={() => fireFab(actions[0].action)}
-                  sx={{
-                    position: 'fixed', bottom: { xs: 24, sm: 32 }, right: { xs: 16, sm: 32 }, zIndex: 1050,
-                    backgroundColor: D.green, color: 'white',
-                    boxShadow: `0 4px 20px ${alpha(D.navy, 0.3)}`,
-                    '&:hover': { backgroundColor: '#556647' },
-                  }}
-                >
-                  {actions[0].icon}
-                </Fab>
-              </Tooltip>
+              <Zoom in={fabsShown} appear={false}>
+                <Tooltip title={actions[0].label} placement="left">
+                  <Fab
+                    onClick={() => fireFab(actions[0].action)}
+                    sx={{
+                      position: 'fixed', bottom: { xs: aboveBottom(24), sm: aboveBottom(32) }, right: { xs: 16, sm: 32 }, zIndex: 1050,
+                      backgroundColor: D.green, color: 'white',
+                      boxShadow: `0 4px 20px ${alpha(D.navy, 0.3)}`,
+                      '&:hover': { backgroundColor: '#556647' },
+                    }}
+                  >
+                    {actions[0].icon}
+                  </Fab>
+                </Tooltip>
+              </Zoom>
             );
           }
           return (
@@ -1142,8 +1151,9 @@ function TripPageInner() {
               onOpen={() => setFabOpen(true)}
               onClose={() => setFabOpen(false)}
               icon={<SpeedDialIcon />}
+              hidden={!fabsShown}
               sx={{
-                position: 'fixed', bottom: { xs: 24, sm: 32 }, right: { xs: 16, sm: 32 }, zIndex: 1050,
+                position: 'fixed', bottom: { xs: aboveBottom(24), sm: aboveBottom(32) }, right: { xs: 16, sm: 32 }, zIndex: 1050,
                 '& .MuiSpeedDial-fab': {
                   backgroundColor: D.green, color: 'white',
                   boxShadow: `0 4px 20px ${alpha(D.navy, 0.3)}`,
@@ -1166,7 +1176,7 @@ function TripPageInner() {
         })()}
 
         {/* ── Currency converter — every tab, when the trip's currency isn't home's ── */}
-        <CurrencyConverter tripId={trip._id} raised hidden={fabOpen} />
+        <CurrencyConverter tripId={trip._id} raised hidden={fabOpen || !fabsTapped} />
 
         {/* ── Booking / arrival sheet — opened by notification links (?sheet=) ── */}
         <TravelSheet trip={trip} />

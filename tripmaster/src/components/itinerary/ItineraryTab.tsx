@@ -2438,7 +2438,7 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
           endIcon={<CloseIcon />}
           sx={{
             position: 'fixed', left: '50%', transform: 'translateX(-50%)',
-            bottom: 'calc(env(safe-area-inset-bottom, 0px) + 24px)', zIndex: 1100,
+            bottom: 'calc(env(safe-area-inset-bottom, 0px) + 24px + var(--vv-gap, 0px))', zIndex: 1100,
             // Narrower while the trip page's Now pill sits bottom-left
             borderRadius: 99, px: 2.25, minHeight: 48, maxWidth: showsNow(trip ?? {}) ? 'calc(100vw - 260px)' : 'calc(100vw - 120px)',
             backgroundColor: D.navy, color: '#fff', boxShadow: '0 6px 20px rgba(0,0,0,0.25)',

@@ -44,3 +44,6 @@ next-env.d.ts
 # Safari clipper — Xcode build output and per-user state
 /clipper/build/
 xcuserdata/
+
+# pdf.js worker + fonts, copied from node_modules on install (scripts/copy-pdfjs.mjs)
+/public/pdfjs/

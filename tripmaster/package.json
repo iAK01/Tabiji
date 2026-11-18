@@ -6,7 +6,8 @@
     "dev": "next dev --port 3003",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "postinstall": "node scripts/copy-pdfjs.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.78.0",
@@ -29,6 +30,7 @@
     "mongoose": "^9.2.1",
     "next": "16.1.6",
     "next-auth": "^4.24.13",
+    "pdfjs-dist": "^6.5.438",
     "postal-mime": "^4.2.1",
     "react": "19.2.3",
     "react-dom": "19.2.3",

@@ -12,6 +12,7 @@ import ArrowDropDownIcon     from '@mui/icons-material/ArrowDropDown';
 import CloseIcon             from '@mui/icons-material/Close';
 import { localYmd } from '@/lib/trips/onTrip';
 import { RATES_CREDIT } from '@/lib/currency/rates';
+import { aboveBottom } from '@/lib/hooks/useViewportGap';
 import {
   evaluate, hasSum, lookupAmounts, money, MULTI_BUYS, PERCENTS_OFF, press, rateLine, showExpr, type Key,
 } from '@/lib/currency/calc';
@@ -74,7 +75,8 @@ type Mode = 'convert' | 'off' | 'multi';
  * The currency converter: a FAB that opens a calculator sheet converting between
  * home and the trip's currency, with % off (haggling, sales) and multi-buy deals.
  * Shows only when the trip has a currency other than home. `raised` stacks it above
- * the trip page's quick-add FAB; `hidden` tucks it away while that FAB's menu is open.
+ * the trip page's quick-add FAB; `hidden` tucks it away (that FAB's menu is open, or
+ * the phone itinerary is waiting for a tap).
  */
 export default function CurrencyConverter({ tripId, raised = false, hidden = false }: {
   tripId:  string;
@@ -363,7 +365,7 @@ export default function CurrencyConverter({ tripId, raised = false, hidden = fal
             sx={{
               position: 'fixed', zIndex: 1050,
               right:  raised ? { xs: 20, sm: 36 }  : { xs: 16, sm: 32 },
-              bottom: raised ? { xs: 96, sm: 104 } : { xs: 24, sm: 32 },
+              bottom: raised ? { xs: aboveBottom(96), sm: aboveBottom(104) } : { xs: aboveBottom(24), sm: aboveBottom(32) },
               backgroundColor: D.navy, color: 'white',
               boxShadow: `0 4px 20px ${alpha(D.navy, 0.3)}`,
               '&:hover': { backgroundColor: '#1F2D3A' },

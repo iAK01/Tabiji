@@ -4,9 +4,11 @@ import { useEffect, useState, useRef } from 'react';
 import {
   Dialog, DialogContent, IconButton, Box, Typography, Chip,
 } from '@mui/material';
-import CloseIcon   from '@mui/icons-material/Close';
-import WifiOffIcon from '@mui/icons-material/WifiOff';
+import CloseIcon     from '@mui/icons-material/Close';
+import WifiOffIcon   from '@mui/icons-material/WifiOff';
+import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import { getFileUrl } from '@/lib/offline/fileCache';
+import PdfPages from './PdfPages';
 
 export interface ViewableFile {
   _id:      string;
@@ -46,6 +48,9 @@ export default function DocumentViewer({ file, onClose }: Props) {
 
   const isPdf   = file?.mimeType === 'application/pdf';
   const isImage = !!file?.mimeType?.startsWith('image/');
+  // pdf.js reads the bytes, which the storage bucket won't hand to the browser
+  // cross-origin — so online PDFs come through our own route
+  const pdfSrc  = url && (isOffline || !file?.gcsUrl ? url : `/api/files/view?url=${encodeURIComponent(file.gcsUrl)}`);
 
   return (
     <Dialog
@@ -110,6 +115,26 @@ export default function DocumentViewer({ file, onClose }: Props) {
             />
           )}
 
+          {isPdf && url && (
+            <IconButton
+              component="a"
+              href={url}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="Open in new tab"
+              size="small"
+              sx={{
+                color: 'white',
+                p: 0.75,
+                flexShrink: 0,
+                backgroundColor: 'rgba(255,255,255,0.1)',
+                '&:hover': { backgroundColor: 'rgba(255,255,255,0.2)' },
+              }}
+            >
+              <OpenInNewIcon fontSize="small" />
+            </IconButton>
+          )}
+
           <IconButton
             onClick={onClose}
             size="small"
@@ -136,12 +161,7 @@ export default function DocumentViewer({ file, onClose }: Props) {
         }}>
           {url ? (
             isPdf ? (
-              <Box
-                component="iframe"
-                src={url}
-                title={file?.name}
-                sx={{ width: '100%', height: '100%', border: 'none', display: 'block' }}
-              />
+              <PdfPages src={pdfSrc!} openHref={url} />
             ) : isImage ? (
               <Box
                 component="img"
