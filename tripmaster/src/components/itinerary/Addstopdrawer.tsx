@@ -30,11 +30,16 @@ interface Props {
   onClose:        () => void;
   // Each resolves true once saved or queued offline; false means it failed (and has
   // already been undone and reported), so the drawer stays open with the input.
-  onAdd:          (stop: Partial<Stop>) => Promise<boolean>;
-  onUpdate:       (stop: Partial<Stop>) => Promise<boolean>;
+  // `day` is the index of the day picked (in dayOptions).
+  onAdd:          (stop: Partial<Stop>, day: number) => Promise<boolean>;
+  onUpdate:       (stop: Partial<Stop>, day: number) => Promise<boolean>;
   onDelete?:      () => Promise<boolean>;
   defaultTime:    string;
   defaultType:    string;
+  /** The trip's days, labelled ("Fri 20 Nov"), for the Day picker */
+  dayOptions:     string[];
+  /** The day it opened on */
+  defaultDay:     number;
   /** The reminder a stop of this type gets without its own (trip setting, then yours, then by type). */
   inheritedLeadFor?: (type: string) => number | null;
   editStop?:      Stop;
@@ -43,11 +48,11 @@ interface Props {
   isMobile:       boolean;
   knownLocations: KnownLocation[];
   // An early-hours time on a day's page means either that date's morning or,
-  // after midnight, the night running on from it. Labels for the two dates; null
-  // when there's no choice (the trip's last day).
-  nightDates?:    { morning: string; afterMidnight: string } | null;
-  // Which of the two is pre-selected for a start (minutes after midnight)
-  nightDefault?:  (mins: number) => boolean;
+  // after midnight, the night running on from it. Labels for the two dates on a
+  // day; null when there's no choice (the trip's last day).
+  nightDates?:    (day: number) => { morning: string; afterMidnight: string } | null;
+  // Which of the two is pre-selected for a start (minutes after midnight) on a day
+  nightDefault?:  (mins: number, day: number) => boolean;
 }
 
 // Which known location a stop is at. Rooms/stages at one venue all geocode to the
@@ -79,8 +84,8 @@ function referencePlaceholder(name: string): string {
 
 export function AddStopDrawer({
   tripId, areas, open, onClose, onAdd, onUpdate, onDelete,
-  defaultTime, defaultType, inheritedLeadFor, editStop, prefill = null,
-  isMobile, knownLocations, nightDates = null, nightDefault,
+  defaultTime, defaultType, dayOptions, defaultDay, inheritedLeadFor, editStop, prefill = null,
+  isMobile, knownLocations, nightDates, nightDefault,
 }: Props) {
   const isEditing   = !!editStop;
   const isFromLogistics = editStop?.source === 'logistics';
@@ -105,6 +110,7 @@ export function AddStopDrawer({
     // undefined = follow the trip / your default; only sent once picked
     notificationLeadMins:  undefined as number | null | undefined,
     lateNight:             undefined as boolean | undefined,   // picked here; else nightDefault
+    day:                   defaultDay,
   });
   const [saving,       setSaving]       = useState(false);
   const [showExtras,   setShowExtras]   = useState(false);
@@ -133,6 +139,7 @@ export function AddStopDrawer({
         // Its own setting if it has one (Off stays off), else it follows the default
         notificationLeadMins: editStop.notificationLeadMins,
         lateNight:            undefined,
+        day:                  defaultDay,
       });
       setShowExtras(!!(editStop.notes || editStop.address));
     } else {
@@ -151,10 +158,11 @@ export function AddStopDrawer({
         toCoordinates:        prefill?.to?.coordinates ?? null,
         notificationLeadMins: undefined,
         lateNight:            undefined,
+        day:                  defaultDay,
       });
       setShowExtras(!!(prefill?.address || prefill?.coordinates || prefill?.notes));
     }
-  }, [defaultTime, defaultType, editStop, prefill, open, knownLocations]);
+  }, [defaultTime, defaultType, defaultDay, editStop, prefill, open, knownLocations]);
 
   const handleAddressChange = (result: ResolvedAddress) => {
     setForm(f => ({
@@ -180,14 +188,17 @@ export function AddStopDrawer({
   // Before 06:00: this date's early hours, or after midnight at the end of its night
   const startMins  = clockMinutes({ scheduledStart: form.scheduledStart });
   const earlyHours = startMins !== null && startMins < NIGHT_ENDS_MIN;
-  const offerNight = earlyHours && !!nightDates && !isFromLogistics;
-  const lateNight  = offerNight && (form.lateNight ?? nightDefault?.(startMins) ?? false);
+  const nightOf    = nightDates?.(form.day) ?? null;
+  const offerNight = earlyHours && !!nightOf && !isFromLogistics;
+  const lateNight  = offerNight && (form.lateNight ?? nightDefault?.(startMins, form.day) ?? false);
+  // A booking's stop is on its booking's date — that's changed in Logistics
+  const pickDay    = !isFromLogistics && dayOptions.length > 1;
 
   const submit = async () => {
     if (saving) return;
     setSaving(true);
     try {
-      const { toName, toAddress, toCoordinates, ...fields } = form;
+      const { toName, toAddress, toCoordinates, day, ...fields } = form;
       const hasTo = goesSomewhere && !!(toAddress.trim() || toCoordinates);
       const stop: Partial<Stop> = {
         ...fields,
@@ -198,8 +209,8 @@ export function AddStopDrawer({
           : (goesSomewhere || editStop?.to) ? { to: null } : {}),
       };
       const saved = isEditing
-        ? await onUpdate({ ...editStop, ...stop })
-        : await onAdd(stop);
+        ? await onUpdate({ ...editStop, ...stop }, day)
+        : await onAdd(stop, day);
       if (saved) onClose();
     } finally {
       setSaving(false);
@@ -379,6 +390,24 @@ export function AddStopDrawer({
           </Box>
         )}
 
+        {/* ── Day ── */}
+        {pickDay && (
+          <TextField
+            select
+            label="Day"
+            value={form.day}
+            // Another day's night may run differently — its default applies again
+            onChange={e => setForm(f => ({ ...f, day: Number(e.target.value), lateNight: undefined }))}
+            SelectProps={{ native: true }}
+            InputLabelProps={{ shrink: true }}
+            fullWidth
+            sx={{ mb: 2 }}
+            InputProps={{ sx: { fontFamily: D.body, fontSize: '1rem' } }}
+          >
+            {dayOptions.map((label, i) => <option key={i} value={i}>{label}</option>)}
+          </TextField>
+        )}
+
         {/* ── Time + Duration row ── */}
         <Box sx={{ display: 'flex', gap: 1.5, mb: 2.5, alignItems: 'flex-end' }}>
 
@@ -444,11 +473,11 @@ export function AddStopDrawer({
         </Box>
 
         {/* ── Which date an early-hours time is on ── */}
-        {offerNight && nightDates && (
+        {offerNight && nightOf && (
           <Box sx={{ display: 'flex', gap: 0.75, flexWrap: 'wrap', mt: -1.25, mb: 2.5 }}>
             {[
-              { late: false, label: `Early hours · ${nightDates.morning}` },
-              { late: true,  label: `After midnight · ${nightDates.afterMidnight}` },
+              { late: false, label: `Early hours · ${nightOf.morning}` },
+              { late: true,  label: `After midnight · ${nightOf.afterMidnight}` },
             ].map(opt => {
               const isActive = lateNight === opt.late;
               return (

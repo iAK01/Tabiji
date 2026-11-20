@@ -140,6 +140,9 @@ export async function processInboundEmail(docId: string): Promise<void> {
     doc.files = files;
 
     const byRef = new Map(trips.map(t => [t.ref, t.bundle]));
+    // The lists the reading saw. Filing renumbers a trip's list (each stop added
+    // shifts the ones after it), so the reading's ids are looked up in these.
+    const seen = new Map(trips.map(t => [t.ref, t.bundle.index]));
     const items: InboundItem[] = [];
     for (const [n, r] of result.items.entries()) {
       const item: InboundItem = {
@@ -159,8 +162,8 @@ export async function processInboundEmail(docId: string): Promise<void> {
       if (date && !fitsTrip(date, bundle.trip)) { item.note = `${date} is outside ${bundle.trip.name}`; continue; }
 
       try {
-        await placeItem(item, bundle, r.existingId, {
-          emailId: String(doc._id), files, userId: String(user._id), addNew: false,
+        await placeItem(item, bundle, { id: r.existingId, name: r.existingName, seen: seen.get(r.trip!) }, {
+          emailId: String(doc._id), files, userId: String(user._id), addNew: false, replaces: result.replaces,
         });
         // What it just added counts as saved for the next part of the same email.
         Object.assign(bundle, await loadBundle(bundle.trip));

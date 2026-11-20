@@ -190,7 +190,8 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
     editStop?:  Stop;
     lateNight?: boolean;   // early hours: after midnight (true) or the date's own morning
     prefill?:   Partial<Stop> | null;   // a place picked on the map, a way to a transfer
-  }>({ open: false, time: '09:00', type: 'activity' });
+    page:       number;    // the day it opened on — the drawer's Day picker starts here
+  }>({ open: false, time: '09:00', type: 'activity', page: 0 });
   const [suggestionSlot, setSuggestionSlot] = useState<{ start: number; mins: number } | null>(null);
   const [exportOpen,     setExportOpen]     = useState(false);
 
@@ -688,8 +689,17 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
   }, [tripId]);
 
   // ── FAB trigger ──────────────────────────────────────────────────────────────
-  const openDrawer = (time: string, type = 'activity', editStop?: Stop, lateNight?: boolean, prefill?: Partial<Stop>) =>
-    setDrawer({ open: true, time, type, editStop, lateNight: lateNight ?? (editStop?.afterMidnight || undefined), prefill: prefill ?? null });
+  // A stop opens on the page it's shown on — this one, else wherever it is
+  const openDrawer = (time: string, type = 'activity', editStop?: Stop, lateNight?: boolean, prefill?: Partial<Stop>) => {
+    const shownOn = editStop?._id && !pages[activeDayIdx]?.stops.some(s => s._id === editStop._id)
+      ? pages.findIndex(p => p.stops.some(s => s._id === editStop._id))
+      : -1;
+    setDrawer({
+      open: true, time, type, editStop, prefill: prefill ?? null,
+      lateNight: lateNight ?? (editStop?.afterMidnight || undefined),
+      page: shownOn !== -1 ? shownOn : activeDayIdx,
+    });
+  };
 
   const handleStopClick = (stop: Stop) => {
     // View mode: read first — the detail sheet, with what else is on at the same time
@@ -715,12 +725,17 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
     else openDrawer('09:00', 'activity');
   }, [fabTrigger]);
 
-  // ── Where a time on this page is stored ──────────────────────────────────────
-  // A start on the viewed page — minutes from its midnight, past 24:00 after it —
-  // as it's saved: on the date it really falls, and for early hours which night.
-  const placeMinutes = (mins: number) => {
-    const late   = mins >= DAY_MINS && nextIdx !== -1;
-    const dayIdx = late ? nextIdx : activeDayIdx;
+  // ── Where a time on a page is stored ─────────────────────────────────────────
+  // The day after a page, when the trip has it (its night runs on into that date)
+  const nextOf = (page: number) =>
+    days[page] && days[page + 1] && daysBetween(days[page].date, days[page + 1].date) === 1 ? page + 1 : -1;
+
+  // A start on a page (the viewed one unless said) — minutes from its midnight, past
+  // 24:00 after it — as it's saved: on the date it really falls, and for early hours which night.
+  const placeMinutes = (mins: number, page = activeDayIdx) => {
+    const next   = nextOf(page);
+    const late   = mins >= DAY_MINS && next !== -1;
+    const dayIdx = late ? next : page;
     const clock  = mins % DAY_MINS;
     return {
       dayIdx,
@@ -729,15 +744,27 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
     };
   };
 
-  // A drawer time ("HH:MM") on the viewed page. Early hours are after midnight when
-  // picked so — or, unpicked, when they'd carry on this page's evening.
-  const placeTime = (time: string, lateNight?: boolean | null) => {
+  // A drawer time ("HH:MM") on a page. Early hours are after midnight when
+  // picked so — or, unpicked, when they'd carry on that page's evening.
+  const placeTime = (time: string, lateNight?: boolean | null, page = activeDayIdx) => {
     const m = clockMinutes({ scheduledStart: time });
     if (m === null) {
-      return { dayIdx: activeDayIdx, scheduledStart: `${ymdOf(days[activeDayIdx].date)}T${time}:00`, lateNight: null };
+      return { dayIdx: page, scheduledStart: `${ymdOf(days[page].date)}T${time}:00`, lateNight: null };
     }
-    const late = m < NIGHT_ENDS_MIN && nextIdx !== -1 && (lateNight ?? carriesOnPage(activeStops, m));
-    return placeMinutes(late ? m + DAY_MINS : m);
+    const late = m < NIGHT_ENDS_MIN && nextOf(page) !== -1 && (lateNight ?? carriesOnPage(pages[page]?.stops ?? [], m));
+    return placeMinutes(late ? m + DAY_MINS : m, page);
+  };
+
+  // After a save onto another day: go to that day, with the stop picked out
+  const showOnPage = (page: number, stopId?: string) => {
+    if (page === activeDayIdx) return;
+    selectDay(page);
+    if (!stopId) return;
+    setHighlightStop(stopId);
+    setTimeout(() => {
+      document.querySelector(`[data-stop-id="${stopId}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 250);
+    setTimeout(() => setHighlightStop(cur => (cur === stopId ? null : cur)), 4000);
   };
 
   // One stop changed, and moved to the day its new time falls on — as the server does
@@ -782,10 +809,11 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
     }
   };
 
-  const addStop = async (input: Partial<Stop>): Promise<boolean> => {
+  // `page`: the day picked in the drawer — the viewed one unless said
+  const addStop = async (input: Partial<Stop>, page = activeDayIdx): Promise<boolean> => {
     const { afterMidnight: _view, ...form } = input;
     // After midnight → stored on the next date (still shown on this page)
-    const placed      = placeTime(form.scheduledStart ?? '', form.lateNight);
+    const placed      = placeTime(form.scheduledStart ?? '', form.lateNight, page);
     const stop        = { ...form, lateNight: placed.lateNight };   // time stays HH:MM: queue replay joins it to dayDate
     const day         = days[placed.dayIdx];
     const prevDays    = days;
@@ -818,6 +846,7 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
         savedDays(updatedDays),
       );
       if (res) setDays(await daysFrom(res));
+      showOnPage(page);
       return true;
     } catch (err) {
       await undoDays(prevDays);
@@ -826,12 +855,12 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
     }
   };
 
-  const updateStop = async (input: Partial<Stop>): Promise<boolean> => {
+  const updateStop = async (input: Partial<Stop>, page = activeDayIdx): Promise<boolean> => {
     const { afterMidnight: _view, ...stop } = input;   // view-only, never stored
     const stopId = stop._id;
     if (!stopId) { reportSaveFailure(`your changes to ${quoted(stop)}`); return false; }
     const prevDays = days;
-    const { scheduledStart, lateNight } = placeTime(stop.scheduledStart ?? '', stop.lateNight);
+    const { scheduledStart, lateNight } = placeTime(stop.scheduledStart ?? '', stop.lateNight, page);
     const change   = { ...stop, scheduledStart, lateNight };
 
     const updatedDays = changeStop(days, stopId, s => ({ ...s, ...change }));
@@ -849,6 +878,7 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
         savedDays(updatedDays),
       );
       if (res) setDays(await daysFrom(res));
+      showOnPage(page, stopId);
       return true;
     } catch (err) {
       await undoDays(prevDays);
@@ -1348,18 +1378,25 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
   const todayYmd = here().ymd;   // marks today in the day strip
 
   // The early-hours choice in the drawer: what's pre-selected for a time
-  const nightDates = activeDay && nextDay
-    ? {
-        morning:       dayLabel(activeDay.date, { weekday: 'short', day: 'numeric' }),
-        afterMidnight: dayLabel(nextDay.date,   { weekday: 'short', day: 'numeric' }),
-      }
-    : null;
-  const nightDefault = (mins: number) =>
-    drawer.lateNight ??
+  // for the day picked in the drawer
+  const nightDates = (page: number) => {
+    const next = nextOf(page);
+    return days[page] && next !== -1
+      ? {
+          morning:       dayLabel(days[page].date, { weekday: 'short', day: 'numeric' }),
+          afterMidnight: dayLabel(days[next].date, { weekday: 'short', day: 'numeric' }),
+        }
+      : null;
+  };
+  const nightDefault = (mins: number, page: number) =>
+    // What was tapped (an after-midnight slot) only speaks for the day it was tapped on
+    (page === drawer.page ? drawer.lateNight : undefined) ??
     // Moving a morning stop earlier means earlier that morning, not tonight
     (drawer.editStop && !drawer.editStop.afterMidnight && (stopStartMinutes(drawer.editStop) ?? 0) < 12 * 60
       ? false
-      : carriesOnPage(activeStops, mins));
+      : carriesOnPage(pages[page]?.stops ?? [], mins));
+  // The days the drawer can put a stop on
+  const dayOptions = days.map(d => dayLabel(d.date, { weekday: 'short', day: 'numeric', month: 'short' }));
 
   // From this date's page to the night before, where its early hours are shown
   const showLastNight = () => {
@@ -2477,6 +2514,8 @@ export default function ItineraryTab({ tripId, trip, homeZone, homeCountry, fabT
         }
         defaultTime={drawer.time}
         defaultType={drawer.type}
+        dayOptions={dayOptions}
+        defaultDay={drawer.page}
         inheritedLeadFor={inheritedFor}
         editStop={drawer.editStop}
         prefill={drawer.prefill}

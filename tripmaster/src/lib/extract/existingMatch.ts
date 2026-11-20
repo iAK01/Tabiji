@@ -16,7 +16,8 @@ export interface DuplicateOf {
 export type Kind = 'transport' | 'accommodation' | 'venue' | 'stop';
 
 export interface Existing {
-  id:        string;          // short ref the AI sees: t0, a0, v0, s0
+  id:        string;          // short ref the AI sees: t0, a0, v0, s0 — a position, so only good for the list it was shown in
+  key:       string;          // the entry itself, wherever it sits now: a stop's _id, a booking's id
   kind:      Kind;
   label:     string;
   date?:     string;
@@ -95,6 +96,37 @@ function sameName(a: Set<string>, b: Set<string>, strict = false): boolean {
   return strict ? dice >= 0.8 : dice >= 0.6 || shared === Math.min(a.size, b.size);
 }
 
+/** Words in at least three saved names — "showcase", "workshop", a venue everything is at. */
+function commonWords(index: ExistingIndex): Set<string> {
+  const df = new Map<string, number>();
+  for (const e of index) for (const w of e.tokens) df.set(w, (df.get(w) ?? 0) + 1);
+  return new Set([...df].filter(([, n]) => n >= 3).map(([w]) => w));
+}
+
+/**
+ * The same session or place, named twice: every word of the shorter name is in
+ * the longer, and the shorter one isn't only words everything shares. Two acts
+ * on one stage ("Live Showcase: KIKO — Mohammed V Theatre" and "Live Showcase:
+ * Radjha Ally — Mohammed V Theatre") each have a word the other lacks, so they
+ * never match, however much of the rest they share.
+ */
+function sameThing(a: Set<string>, b: Set<string>, common: Set<string>): boolean {
+  if (!a.size || !b.size) return false;
+  const [small, big] = a.size <= b.size ? [a, b] : [b, a];
+  for (const w of small) if (!big.has(w)) return false;
+  const telling = (s: Set<string>) => [...s].some(w => !common.has(w));
+  return telling(small) || !telling(big);
+}
+
+/** One saved name copied back: the same words, give or take accents, case and punctuation. */
+export function sameLabel(a: string, b: string): boolean {
+  const x = tokens(a), y = tokens(b);
+  if (!x.size || !y.size) return false;
+  let shared = 0;
+  for (const w of x) if (y.has(w)) shared++;
+  return (2 * shared) / (x.size + y.size) >= 0.9;
+}
+
 function sameDay(a?: string, b?: string): boolean {
   return !a || !b || a === b;
 }
@@ -119,7 +151,7 @@ export function buildExistingIndex(logistics: any, itinerary: any): ExistingInde
     const flight = flightNo(t.details?.flightNumber ?? t.flightNumber);
     const route  = [t.departureLocation, t.arrivalLocation].filter(Boolean).join(' → ');
     items.push({
-      id: `t${i}`, kind: 'transport',
+      id: `t${i}`, key: t.id ? `t:${t.id}` : `t${i}`, kind: 'transport',
       label: [flight ?? t.details?.operator ?? t.details?.airline ?? t.type, route].filter(Boolean).join(' · '),
       date: ymd(t.departureTime), time: hm(t.departureTime),
       tokens: tokens(route), flight, ref: ref(t.confirmationNumber), mode: t.type,
@@ -129,7 +161,7 @@ export function buildExistingIndex(logistics: any, itinerary: any): ExistingInde
   (logistics?.accommodation ?? []).forEach((a: any, i: number) => {
     if (!a?.name) return;
     items.push({
-      id: `a${i}`, kind: 'accommodation', label: a.name,
+      id: `a${i}`, key: a.id ? `a:${a.id}` : `a${i}`, kind: 'accommodation', label: a.name,
       date: ymd(a.checkIn), end: ymd(a.checkOut),
       tokens: tokens(a.name), ref: ref(a.confirmationNumber),
     });
@@ -138,7 +170,7 @@ export function buildExistingIndex(logistics: any, itinerary: any): ExistingInde
   (logistics?.venues ?? []).forEach((v: any, i: number) => {
     if (!v?.name) return;
     items.push({
-      id: `v${i}`, kind: 'venue', label: v.name,
+      id: `v${i}`, key: v.id ? `v:${v.id}` : `v${i}`, kind: 'venue', label: v.name,
       date: ymd(v.date), time: hm(v.time), tokens: tokens(v.name),
     });
   });
@@ -148,8 +180,9 @@ export function buildExistingIndex(logistics: any, itinerary: any): ExistingInde
     const date = ymd(day?.date);
     for (const s of day?.stops ?? []) {
       if (!s?.name) continue;
+      const id = `s${n++}`;
       items.push({
-        id: `s${n++}`, kind: 'stop', label: s.name,
+        id, key: s._id ? `s:${s._id}` : id, kind: 'stop', label: s.name,
         date, time: hm(s.scheduledStart) ?? hm(s.time), tokens: tokens(s.name),
         mirrored: s.source === 'logistics',
       });
@@ -252,19 +285,41 @@ function ruleMatch(kind: Kind, item: any, index: ExistingIndex): Existing | unde
     case 'venue': {
       const t = tokens(item.name);
       const date = ymd(item.date);
-      return index.find(e => e.kind === 'venue' && sameName(t, e.tokens) && sameDay(date, e.date));
+      const common = commonWords(index);
+      return index.find(e => e.kind === 'venue' && sameThing(t, e.tokens, common) && sameDay(date, e.date));
     }
     case 'stop': {
       const t    = tokens(item.name);
       const date = ymd(item.date) ?? ymd(item.scheduledStart);
       const time = hm(item.scheduledStart);
-      return index.find(e => e.kind === 'stop' && e.date === date && (
-        time && e.time
-          ? Math.abs(minutes(time)! - minutes(e.time)!) <= 30 && sameName(t, e.tokens)
-          : sameName(t, e.tokens, true)
+      const common = commonWords(index);
+      return index.find(e => e.kind === 'stop' && e.date === date && sameThing(t, e.tokens, common) && (
+        !time || !e.time || Math.abs(minutes(time)! - minutes(e.time)!) <= 30
       ));
     }
   }
+}
+
+/** What the AI picked from the list it was shown. */
+export interface AiPick {
+  id:    string | null | undefined;
+  name?: string;          // that line's name as the AI copied it — has to agree with the line
+  seen?: ExistingIndex;   // the list it was shown, when the trip has changed since
+}
+
+/**
+ * The entry the AI picked, as it is now. Ids are positions in the list the AI
+ * read, and anything filed since renumbers them — so the id is looked up in that
+ * list and followed to the same entry by key, never by position. When the name
+ * the AI copied isn't that line's, the pick doesn't count.
+ */
+function followPick(pick: AiPick | undefined, own: ExistingIndex): Existing | undefined {
+  const id = pick?.id?.trim();
+  if (!id) return undefined;
+  const shown = (pick!.seen ?? own).find(e => e.id === id);
+  if (!shown) return undefined;
+  if (pick!.name !== undefined && !sameLabel(pick!.name, shown.label)) return undefined;
+  return own.find(e => e.key === shown.key);
 }
 
 /**
@@ -273,9 +328,9 @@ function ruleMatch(kind: Kind, item: any, index: ExistingIndex): Existing | unde
  * real item (an email saying "your booking has changed" can move it a long way).
  * Itinerary copies of bookings are never returned: their booking is the item.
  */
-export function matchExisting(kind: Kind, item: any, index: ExistingIndex, aiId: string | null | undefined, trustAi = false): Existing | undefined {
+export function matchExisting(kind: Kind, item: any, index: ExistingIndex, pick?: AiPick | null, trustAi = false): Existing | undefined {
   const own = index.filter(e => !e.mirrored);
-  const ai  = aiId ? own.find(e => e.id === aiId.trim()) : undefined;
+  const ai  = followPick(pick ?? undefined, own);
   if (ai && (trustAi || confirmsAi(kind, item, ai))) return ai;
   return ruleMatch(kind, item, own);
 }

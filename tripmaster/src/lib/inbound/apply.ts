@@ -2,7 +2,7 @@ import mongoose from 'mongoose';
 import TripLogistics from '@/lib/mongodb/models/TripLogistics';
 import TripItinerary from '@/lib/mongodb/models/TripItinerary';
 import TripFile from '@/lib/mongodb/models/TripFile';
-import { buildExistingIndex, matchExisting, resolveExisting, type ExistingIndex, type Kind } from '@/lib/extract/existingMatch';
+import { buildExistingIndex, matchExisting, resolveExisting, type AiPick, type ExistingIndex, type Kind } from '@/lib/extract/existingMatch';
 import { locateExtracted } from '@/lib/extract/locate';
 import { haversineKm } from '@/lib/geo/geocode';
 import { syncLogisticsToItinerary } from '@/lib/itinerary/syncLogistics';
@@ -420,10 +420,17 @@ function outcome(item: InboundItem, att: { files: StoredFile[]; links: number },
   if (!item.target) {
     return attached.length ? `Saved to Resources: ${attached.join(', ')}.` : 'Already in Resources — nothing new.';
   }
-  const labels = [...new Set(item.filled.map(c => c.label))];
-  const fields = labels.filter(l => !(l === 'Map pin' && labels.includes('Address'))).map(l => l.toLowerCase());
-  const all = [...fields, ...attached];
-  return all.length ? `Added: ${all.join(', ')}.` : 'Already up to date — nothing new in this email.';
+  const named = (list: FieldChange[]) => {
+    const labels = [...new Set(list.map(c => c.label))];
+    return labels.filter(l => !(l === 'Map pin' && labels.includes('Address'))).map(l => l.toLowerCase());
+  };
+  const updated = named(item.accepted);
+  const added   = [...named(item.filled), ...attached];
+  const parts = [
+    updated.length && `Updated: ${updated.join(', ')}.`,
+    added.length && `Added: ${added.join(', ')}.`,
+  ].filter(Boolean);
+  return parts.length ? parts.join(' ') : 'Already up to date — nothing new in this email.';
 }
 
 // ─── Placing an item in a trip ────────────────────────────────────────────────
@@ -443,12 +450,14 @@ const MATCH_KIND: Record<EntryKind, Kind> = { stop: 'stop', venue: 'venue', acco
 
 /**
  * Files an item into its trip: finds what it's about, fills blanks, attaches
- * its files, adds it when it's new and confirmed. `aiExistingId` is what the
- * reading said it matched. Leaves it pending, with a note, when it needs you.
+ * its files, adds it when it's new and confirmed. `pick` is what the reading
+ * said it matched. With `replaces` (their note said this email is final), its
+ * differing values are written too, each kept for Undo; otherwise they wait to
+ * be OK'd. Leaves it pending, with a note, when it needs you.
  */
 export async function placeItem(
-  item: InboundItem, bundle: TripBundle, aiExistingId: string | null,
-  ctx: { emailId: string; files: StoredFile[]; userId: string; addNew: boolean },
+  item: InboundItem, bundle: TripBundle, pick: AiPick | null,
+  ctx: { emailId: string; files: StoredFile[]; userId: string; addNew: boolean; replaces?: boolean },
 ): Promise<void> {
   const tripId = String(bundle.trip._id);
   item.tripId  = tripId;
@@ -457,6 +466,7 @@ export async function placeItem(
   item.created = false;
   item.filled  = [];
   item.changes = [];
+  item.accepted = [];
 
   if (item.kind === 'document' || item.action === 'reference') {
     const att = await attachFiles(item, ctx.emailId, ctx.files, tripId, ctx.userId);
@@ -469,7 +479,7 @@ export async function placeItem(
   await locateItem(item, bundle);
 
   const trustAi = item.action === 'change' || item.action === 'cancel';
-  const hit = matchExisting(MATCH_KIND[kind], item.details ?? {}, bundle.index, aiExistingId, trustAi);
+  const hit = matchExisting(MATCH_KIND[kind], item.details ?? {}, bundle.index, pick, trustAi);
   const found = hit ? await targetFor(hit.id, bundle) : null;
 
   if (found) {
@@ -487,13 +497,21 @@ export async function placeItem(
       if (res.ok) item.filled = filled;
     }
     item.changes = changes;
+    if (ctx.replaces && changes.length) {
+      // Their note said this email is final: its values go in now, each kept for Undo.
+      // Ones that can't be written (a date outside the trip's days) stay offered.
+      const res = await writeFields(tripId, found.target, changes);
+      if (res.ok) { item.accepted = changes; item.changes = []; }
+    }
     const att = await attachFiles(item, ctx.emailId, ctx.files, tripId, ctx.userId);
     item.why   = outcome(item, att, bundle.trip.name);
     item.state = 'applied';
     return;
   }
 
-  if (item.action === 'cancel' || item.action === 'change' || item.action === 'enrich') {
+  // A final version that has something the trip doesn't: it goes in. A move or
+  // cancellation of something that can't be found waits — nothing else is touched.
+  if (item.action === 'cancel' || item.action === 'change' || (item.action === 'enrich' && !ctx.replaces)) {
     item.state = 'pending';
     item.note  = 'Couldn’t find this in the trip';
     return;
@@ -512,7 +530,7 @@ export async function placeItem(
   }
   item.target  = made.target;
   item.created = true;
-  if (item.action === 'optional') item.action = 'create';
+  if (item.action === 'optional' || item.action === 'enrich') item.action = 'create';
   const att = await attachFiles(item, ctx.emailId, ctx.files, tripId, ctx.userId);
   item.why   = outcome(item, att, bundle.trip.name);
   item.state = 'applied';

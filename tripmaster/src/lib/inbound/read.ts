@@ -24,6 +24,7 @@ export interface ReadItem {
   kind:         ItemKind;
   trip:         string | null;
   existingId:   string | null;
+  existingName: string;   // that saved line's name, as the reading copied it
   title:        string;
   why:          string;
   attachments:  number[];
@@ -33,8 +34,9 @@ export interface ReadItem {
 }
 
 export interface ReadResult {
-  summary: string;
-  items:   ReadItem[];
+  summary:  string;
+  replaces: boolean;   // their note says this email is final — its values win over what's saved
+  items:    ReadItem[];
 }
 
 const DETAIL_FIELDS = [
@@ -49,20 +51,22 @@ const KINDS: ItemKind[]     = ['stop', 'venue', 'accommodation', 'transport', 'd
 const SCHEMA = {
   type: 'object',
   additionalProperties: false,
-  required: ['summary', 'items'],
+  required: ['summary', 'replaces', 'items'],
   properties: {
-    summary: { type: 'string' },
+    summary:  { type: 'string' },
+    replaces: { type: 'boolean' },
     items: {
       type: 'array',
       items: {
         type: 'object',
         additionalProperties: false,
-        required: ['action', 'kind', 'trip', 'existingId', 'title', 'why', 'attachments', 'links', 'documentType', 'details'],
+        required: ['action', 'kind', 'trip', 'existingId', 'existingName', 'title', 'why', 'attachments', 'links', 'documentType', 'details'],
         properties: {
           action:       { type: 'string', enum: ACTIONS },
           kind:         { type: 'string', enum: KINDS },
           trip:         { anyOf: [{ type: 'string' }, { type: 'null' }] },
           existingId:   { anyOf: [{ type: 'string' }, { type: 'null' }] },
+          existingName: { type: 'string' },
           title:        { type: 'string' },
           why:          { type: 'string' },
           attachments:  { type: 'array', items: { type: 'integer' } },
@@ -122,7 +126,8 @@ For each item:
   - "ignore": nothing for any trip (newsletter, promotion, app download).
 - kind: "stop" (anything happening at a time: an event, registration, meeting, session, meal, tour), "venue" (a place they'll be at, with no time of its own), "accommodation", "transport" (flights, trains, buses, ferries, transfers, car hire, airport parking), "document" (for reference and ignore).
 - trip: the trip ref ("T1") whose dates and places fit, or null when none fits or there are none.
-- existingId: the saved line it is about, from that trip's list (e.g. "s3"), else null. The same thing means the same booking, or the same event on the same day at about the same time — never just a shared venue, day or time slot.
+- existingId: the saved line it is about, from that trip's list (e.g. "s3"), else null. The same thing means the same booking, or the same event — never just a shared venue, day or time slot. When the email moves something, it's the line for that same thing at its old time.
+- existingName: that line's name, copied exactly as it's listed; "" when existingId is null.
 - title: a few words, e.g. "Opening reception" or "Flight to Lisbon".
 - why: one short sentence saying what it is, e.g. "Optional dinner after the conference — booking needed." or "Your 10:40 flight is cancelled."
 - attachments: the numbers of the attachments that go with it (the ticket, the confirmation PDF, the pass, the invoice). Leave out logos, icons, banners, signatures and app-store or social badges.
@@ -141,6 +146,8 @@ Details:
 - notes: only what they'd need on the day that fits nowhere else — entry code, seat, gate, meeting point, dress code, what to bring — written as a short note they'd write themselves, e.g. "Show the QR code at check-in." Never what the email is, how a time was worked out, or anything already in another field. "" when there's nothing.
 - type: stops — flight, meeting, meal, breakfast, activity, sightseeing, transport, transfer, work, gig, other; venues — concert, conference, restaurant, sports, attraction, business, other; transport — flight, train, bus, ferry, car, car_hire, taxi, private_transfer, parking; stays — hotel, apartment, hostel, guesthouse, other.
 - No check-in or check-out stops for a stay — just the stay.
+
+replaces: true when the traveller's note says this email or what's attached is final, or replaces, supersedes or overrides what's saved; otherwise false. When true, its times, dates and places are the ones that count: every saved line it gives a different time, date or place for is a "change".
 
 summary: one plain sentence for the traveller about the whole email.
 
@@ -188,7 +195,8 @@ export async function readEmail(prepared: PreparedEmail, ctx: { today: string; r
 
   const str = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
   return {
-    summary: str(parsed.summary).slice(0, 400),
+    summary:  str(parsed.summary).slice(0, 400),
+    replaces: parsed.replaces === true,
     items: parsed.items
       .filter((i: any) => i && ACTIONS.includes(i.action) && KINDS.includes(i.kind))
       .map((i: any): ReadItem => ({
@@ -196,6 +204,7 @@ export async function readEmail(prepared: PreparedEmail, ctx: { today: string; r
         kind:         i.kind,
         trip:         str(i.trip) || null,
         existingId:   str(i.existingId) || null,
+        existingName: str(i.existingName),
         title:        str(i.title).slice(0, 120) || 'Untitled',
         why:          str(i.why).slice(0, 300),
         attachments:  Array.isArray(i.attachments) ? i.attachments.filter((n: any) => Number.isInteger(n)) : [],

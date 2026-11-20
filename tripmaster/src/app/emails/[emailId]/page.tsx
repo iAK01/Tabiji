@@ -238,11 +238,29 @@ export default function EmailPage({ params }: { params: Promise<{ emailId: strin
                       <Typography sx={{ fontSize: '0.85rem', fontFamily: D.body, color: D.terra, mt: 0.75, fontWeight: 600 }}>{item.note}</Typography>
                     )}
 
+                    {item.state === 'applied' && !item.created && item.target && item.accepted.some(c => c.field !== 'coordinates') && (
+                      <Box sx={{ mt: 1.5, p: 1.5, borderRadius: 1.5, border: `1px solid ${D.rule}` }}>
+                        <Typography sx={{ fontSize: '0.8rem', fontWeight: 800, fontFamily: D.body, color: D.navy }}>
+                          Updated “{item.target.label}”
+                        </Typography>
+                        {item.accepted.filter(c => c.field !== 'coordinates').map(c => (
+                          <Typography key={c.field} sx={{ fontSize: '0.85rem', fontFamily: D.body, mt: 0.5 }}>
+                            {c.label}: {shown(c.from)} → {shown(c.to)}
+                          </Typography>
+                        ))}
+                      </Box>
+                    )}
+
                     {item.state === 'applied' && item.changes.length > 0 && (
                       <Box sx={{ mt: 1.5, p: 1.5, borderRadius: 1.5, border: `1px solid ${D.terra}` }}>
-                        <Typography sx={{ fontSize: '0.8rem', fontWeight: 800, fontFamily: D.body, color: D.terra, mb: 1 }}>
+                        <Typography sx={{ fontSize: '0.8rem', fontWeight: 800, fontFamily: D.body, color: D.terra }}>
                           Different from what’s saved
                         </Typography>
+                        {item.target && (
+                          <Typography sx={{ fontSize: '0.85rem', fontFamily: D.body, color: D.navy, mt: 0.25, mb: 1 }}>
+                            Saved as “{item.target.label}”
+                          </Typography>
+                        )}
                         {item.changes.filter(c => c.field !== 'coordinates').map(c => (
                           <Box key={c.field} sx={{ display: 'flex', alignItems: 'center', gap: 1, py: 0.5, flexWrap: 'wrap' }}>
                             <Box sx={{ flex: 1, minWidth: 180 }}>
